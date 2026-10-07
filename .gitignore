@@ -1,0 +1,11 @@
+run/
+out/
+data/*
+!data/calibration.json
+mods/pack/
+mods/vanilla/*/
+bpgen.json
+bpgen/bpgen_fast.pyd
+bpgen_fast/target/
+__pycache__/
+*.pyc

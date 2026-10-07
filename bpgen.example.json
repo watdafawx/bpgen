@@ -1,0 +1,5 @@
+{
+  "_comment": "Optional: copy to bpgen.json only if bpgen can't find these by itself (it looks in the usual Steam libraries and the game's own config). Remove any line you don't need.",
+  "factorio_exe": "C:/Program Files (x86)/Steam/steamapps/common/Factorio/bin/x64/factorio.exe",
+  "user_mods": "C:/Users/YOU/AppData/Roaming/Factorio/mods"
+}

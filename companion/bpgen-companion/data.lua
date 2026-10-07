@@ -1,0 +1,40 @@
+data:extend({
+  { type = "custom-input", name = "bpgen-request", key_sequence = "CONTROL + SHIFT + B", consuming = "game-only" },
+  -- drag over part of the base: writes it to script-output/bpgen/snapshot.json for bpgen to build next to
+  {
+    type = "selection-tool",
+    name = "bpgen-snapshot",
+    icon = "__base__/graphics/icons/blueprint.png",
+    icon_size = 64,
+    flags = { "only-in-cursor", "not-stackable", "spawnable" },
+    hidden = true,
+    stack_size = 1,
+    select = { border_color = { 0.3, 0.8, 1 }, cursor_box_type = "copy", mode = { "any-entity" } },
+    alt_select = { border_color = { 0.3, 0.8, 1 }, cursor_box_type = "copy", mode = { "any-entity" } },
+  },
+  { type = "custom-input", name = "bpgen-snapshot", key_sequence = "CONTROL + SHIFT + N", action = "spawn-item",
+    item_to_spawn = "bpgen-snapshot", consuming = "game-only" },
+  {
+    type = "shortcut",
+    name = "bpgen-snapshot",
+    action = "spawn-item",
+    item_to_spawn = "bpgen-snapshot",
+    associated_control_input = "bpgen-snapshot",
+    icon = "__base__/graphics/icons/blueprint.png",
+    icon_size = 64,
+    small_icon = "__base__/graphics/icons/blueprint.png",
+    small_icon_size = 64,
+  },
+  -- the bpgen window (planning in game needs the fnative loader)
+  { type = "custom-input", name = "bpgen-window", key_sequence = "CONTROL + ALT + B", consuming = "game-only" },
+  {
+    type = "shortcut",
+    name = "bpgen-window",
+    action = "lua",
+    associated_control_input = "bpgen-window",
+    icon = "__base__/graphics/icons/blueprint.png",
+    icon_size = 64,
+    small_icon = "__base__/graphics/icons/blueprint.png",
+    small_icon_size = 64,
+  },
+})

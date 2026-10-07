@@ -1,0 +1,18 @@
+[package]
+name = "bpgen_fast"
+version = "0.1.0"
+edition = "2021"
+description = "bpgen's hot loops in Rust (a Python extension module): the belt router's A* search"
+
+[lib]
+name = "bpgen_fast"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+
+[profile.release]
+opt-level = 3
+
+# (its own project: pyo3 extension-module must not be unified with the embedding Python plugin)
+[workspace]

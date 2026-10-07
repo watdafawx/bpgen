@@ -1,0 +1,12 @@
+{
+  "name": "bpgen-companion",
+  "version": "0.5.0",
+  "title": "bpgen companion (local)",
+  "author": "mtopfox",
+  "factorio_version": "2.0",
+  "description": "The bpgen window (shortcut bar, Ctrl+Alt+B; with the fnative loader): pick a recipe, plan it in game, see the blueprint drawn by the game, put it in your hand. Hover an assembler and press Ctrl+Shift+B to plan a line for it. The snapshot tool (shortcut bar, Ctrl+Shift+N) sends an area of your base so bpgen can build next to it. Research and production per minute are written for bpgen on join, after research and every 5 minutes. Files go to script-output/bpgen/.",
+  "dependencies": [
+    "base",
+    "? fnative-std"
+  ]
+}
