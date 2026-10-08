@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def main():
-    crate = next((p for p in (ROOT / "bpgen_fast", ROOT / "native" / "py-ext" / "bpgen_fast") if p.exists()), None)
+    crate = next((p for p in (ROOT / "bpgen_fast", ROOT.parent / "fnative" / "py-ext" / "bpgen_fast") if p.exists()), None)
     if crate is None:
         raise SystemExit("bpgen_fast not found")
     env = dict(os.environ, PYO3_PYTHON=sys.executable)  # (built for the Python running this)
