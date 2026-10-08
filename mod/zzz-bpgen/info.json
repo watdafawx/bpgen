@@ -1,0 +1,12 @@
+{
+  "name": "zzz-bpgen",
+  "version": "0.6.0",
+  "title": "bpgen",
+  "author": "mtopfox",
+  "factorio_version": "2.0",
+  "description": "Blueprints planned in game (with the fnative loader): the bpgen window (shortcut bar, Ctrl+Alt+B) plans production lines, malls and starter bases, shows them drawn by the game and puts them in your hand or next to your base, beside your main bus. Hover an assembler and press Ctrl+Shift+B to plan a line for it. When your mods change it hands their prototypes to bpgen as the game loads (named to load last, after every mod's final fixes). Files go to script-output/bpgen/.",
+  "dependencies": [
+    "base",
+    "? fnative-std"
+  ]
+}

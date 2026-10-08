@@ -19,8 +19,14 @@ Windows only. Single player.
   productivity and your research bonuses are counted. Inserters are picked from throughput measured in the game,
   not from formulas. Optionally its ingredients too (the recipe tree), fed by belts or by robots.
 - **Malls**: several products on a shared belt bus, each with its machine and chest.
-- **Starter bases**: science per minute up to labs, with a mall.
-- **Extensions**: select part of your base with the snapshot tool and bpgen builds next to it.
+- **Starter bases**: science per minute up to labs, with a mall. Laid out compact (blocks in columns, belts routed
+  between them) or as a **main bus**: one column of blocks beside a bus of belts, each block taking what it needs and
+  putting back what it makes, the mall taking from the same bus.
+- **Extensions**: select part of your base with the snapshot tool and bpgen builds next to it. When the area has a
+  main bus (3+ long straight belts side by side, flowing the same way) it builds beside the bus instead: splitters
+  branch off its lanes, the lanes in between dive underground under each branch, and an output the bus doesn't carry
+  yet gets a new lane of its own beside it. Auto by default; "Build from my main bus" in the window turns it off.
+  Any line or mall goes the same way: plan it, stand by your base and press **Next to my base**.
 
 In game, after each plan you see whether your save can build it (missing research, buildings you don't have), what
 modules would change, and what your factory is short of. **Test run** runs the preview for real (powered, fed and
@@ -53,14 +59,12 @@ In fnative's `dist\fnative.env`, add the bpgen folder to `FNATIVE_PYPATH` (`;`-s
 FNATIVE_PYPATH=C:\path\to\fnative\py;C:\path\to\bpgen
 ```
 
-### 4. Install the two mods
+### 4. Install the mod
 
-Copy (or symlink) `companion\bpgen-companion` and `companion\zzz-bpgen-data` into your mods folder
-(`%APPDATA%\Factorio\mods`) and enable them.
-
-- `bpgen-companion` is the window and the in-game tools.
-- `zzz-bpgen-data` hands your mods' prototypes to bpgen while the game loads, only when your mods changed. The
-  first start after installing (or changing mods) takes a few seconds longer.
+Copy (or symlink) `mod\zzz-bpgen` into your mods folder (`%APPDATA%\Factorio\mods`) and enable it ("bpgen" in the
+mod list). It is the window and the in-game tools, and it hands your mods' prototypes to bpgen while the game loads,
+only when your mods changed: the first start after installing (or changing mods) takes a few seconds longer. Its
+name makes it load last, after every other mod's final fixes, so bpgen sees your mods' data as the game uses it.
 
 ### 5. Plan
 
@@ -71,7 +75,7 @@ your hand.
 The first time a plan needs an inserter setup bpgen hasn't measured yet (a new belt, a research level), the game
 measures it itself on a hidden surface (about 30 s) and plans again.
 
-Without fnative the companion mod still loads and doesn't crash: the window opens but can't plan, and Ctrl+Shift+B
+Without fnative the mod still loads and doesn't crash: the window opens but can't plan, and Ctrl+Shift+B
 writes a request for the web app instead.
 
 ## Getting started: web app
@@ -92,7 +96,7 @@ Factorio in the usual Steam libraries and your mods folder from the game's own c
 and again whenever your mod list, a mod version or a startup setting changes, it reads your mods' prototypes with a
 headless game (a couple of minutes for a big pack) and measures inserters in the background.
 
-- Install `bpgen-companion` and press **Ctrl+Shift+B** over an assembler in game: the request appears in the page
+- Install the mod and press **Ctrl+Shift+B** over an assembler in game: the request appears in the page
   and is planned with your researched belts and inserters, the machine's modules and quality, and your research
   bonuses.
 - The preview: drag to pan, wheel to zoom, F to fit. Click an entity to swap it, R to rotate, Del to delete.
@@ -127,6 +131,19 @@ python -m bpgen.pack        # re-read your mods now
    fed through a lead-in at real belt speed, the output is drained and items per second are measured after
    warm-up. In game, Test run does the same live.
 
+## Starter base: the main bus layout
+
+`bpgen/bus.py` and the `bus` mode of `compose_base.compose`. Blocks stand in one column, every producer above its
+consumers. West of them runs the bus: a belt column flowing south for every raw input (they start at the top, where
+you bring them in) and for every block that feeds another (it starts at the block's row, fed by a belt from the
+block's output). A consumer's feed leaves its column by a splitter (the last one by a turn) and runs east along a row
+of its own; every column east of that dives underground for that one row, so the number of belts crossed doesn't
+matter. Taps sit at least 3 rows apart and clear of the head of any column they cross. A tap goes before the rest of
+its column unless a more important consumer is below it (packs, then intermediates, then the mall), so the bus fills
+from the top. If the bus can't be laid out (or won't take the mall) the compact layout is used and the plan says so.
+Starting up is slow: the long columns fill before the last consumers are served (about 40 minutes of game time for
+the red and green packs, an hour with the mall).
+
 ## Mall mode
 
 A two-belt bus (4 lanes) with a row of machines on each side and chests outside. Raw materials enter the bus from
@@ -136,8 +153,9 @@ one machine per product.
 
 ## Tests
 
-`companion\test\run.py` and `extend_test.py` (headless game with the companion), `harness\botmall_test.py` (a
-robot-fed mall built and run). They use the same `run\` folder as the web app.
+`mod\test\run.py`, `extend_test.py` (headless game with the mod; `bus` as its fourth argument: a main bus),
+`bus_extend_test.py` (placement beside a bus, no game) and `harness\botmall_test.py` (a robot-fed mall built and
+run). They use the same `run\` folder as the web app.
 
 ## License
 

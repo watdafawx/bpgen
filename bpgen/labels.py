@@ -34,7 +34,7 @@ def add_labels(data, entities, sources, sinks, output, output_rate):
     approach = set()
     for s in sources:
         x, y = math.floor(s["position"]["x"]), math.floor(s["position"]["y"])
-        approach.add((x - 1, y) if s["kind"] == "belt" else (x, y))
+        approach.add((x, y - 1) if s.get("from") == "north" else (x - 1, y) if s["kind"] == "belt" else (x, y))
     for k in sinks:
         approach.add((math.floor(k["position"]["x"]) + 1, math.floor(k["position"]["y"])))
 

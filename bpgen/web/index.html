@@ -187,7 +187,7 @@ aside { overflow-x: hidden; }
     </div>
     <fieldset id="saveBox" hidden>
       <legend>My base</legend>
-      <div id="saveStatus" class="muted" style="font-size:12px">Waiting for the companion mod's files (load your save with bpgen-companion enabled).</div>
+      <div id="saveStatus" class="muted" style="font-size:12px">Waiting for the bpgen mod's files (load your save with the zzz-bpgen mod enabled).</div>
       <label style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="saveAuto" checked style="width:auto"> Fill the tech pickers from my save</label>
       <button type="button" id="btnSaveTech" style="margin-top:4px">Use my save's tech now</button>
       <div style="margin-top:10px;font-weight:600">Short of (per minute, last 10 min)</div>
@@ -202,6 +202,8 @@ aside { overflow-x: hidden; }
       <button type="button" id="btnExtend" style="margin-top:4px">Plan it next to my base</button>
       <div style="display:flex;gap:6px;margin-top:8px"><button type="button" id="btnSnapShow">Show snapshot</button><button type="button" id="btnPlace">Place my last plan</button></div>
       <label style="display:flex;gap:6px;align-items:center;margin-top:4px"><input type="checkbox" id="avoidOre" checked style="width:auto"> Keep off ore patches</label>
+      <label style="margin-top:4px">Main bus <select id="extBus" title="Auto: when the snapshot has a main bus (3+ long straight belts side by side, flowing the same way), build beside it: splitters branch off its lanes with the lanes between diving under the branch, and an output the bus doesn't carry yet gets a new lane beside it. Off: free ground nearest the belts, taps from any belt.">
+        <option value="auto">Auto (extend from it when there is one)</option><option value="on">Extend from it (say when there's none)</option><option value="off">Ignore it</option></select></label>
       <div id="placeNote" class="muted" style="font-size:12px;margin-top:4px"></div>
     </fieldset>
     <fieldset id="baseBox" hidden>
@@ -218,6 +220,8 @@ aside { overflow-x: hidden; }
         <div id="base_addons"></div>
         <label><input type="checkbox" id="base_mall" checked> Mall of early buildings</label>
       </div>
+      <label>Layout <select id="base_layout" title="Compact: the blocks in columns by recipe depth, belts routed between them (the mall a print of its own). Main bus: one column of blocks beside a bus of belts, each block taking from it and putting back onto it, the mall too.">
+        <option value="compact">Compact (blocks in columns)</option><option value="bus">Main bus (the mall takes from it too)</option></select></label>
       <label>Belt <select id="base_belt"></select></label>
       <div class="row">
         <label>Assembler <select id="base_assembler"></select></label>
@@ -580,7 +584,7 @@ async function openBook(anchor, picker, current) {
   pop.innerHTML = `<div class="book-top">
       <input class="book-q" placeholder="search ${all.length} recipes" autocomplete="off">
       <select class="book-mod"><option value="">all mods</option>${modNames.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)} (${mods[m]})</option>`).join("")}</select>
-      <label class="book-rec book-unl" title="only recipes your save has unlocked (bpgen-companion's last state)"${B.unlocked ? "" : " hidden"}><input type="checkbox"> unlocked</label>
+      <label class="book-rec book-unl" title="only recipes your save has unlocked (the bpgen mod's last state)"${B.unlocked ? "" : " hidden"}><input type="checkbox"> unlocked</label>
       <label class="book-rec" title="recipes that turn an item back into its ingredients"><input type="checkbox"> recycling</label>
     </div><div class="book-tabs"></div><div class="book-body"></div><div class="book-tip" hidden></div>`;
   const q = pop.querySelector(".book-q"), modSel = pop.querySelector(".book-mod"), rec = pop.querySelector(".book-rec:not(.book-unl) input");
@@ -810,7 +814,7 @@ function renderSave() {
   const i = saveInfo;
   $("saveStatus").innerHTML = i.picks
     ? `Save at ${fmtTick(i.tick)} played · ${iconImg(i.picks.belt || "")}${escapeHtml(i.picks.belt || "")}, ${iconImg(i.picks.assembler || "")}${escapeHtml(i.picks.assembler || "")}, inserter +${i.picks.bonuses.inserter_stack_size_bonus}, bulk +${i.picks.bonuses.bulk_inserter_capacity_bonus}`
-    : "Waiting for the companion mod's files (load your save with bpgen-companion enabled).";
+    : "Waiting for the bpgen mod's files (load your save with the zzz-bpgen mod enabled).";
   const rows = i.production || [];
   const shorts = rows.filter((r) => r.short > 0.5 && r.used > 1);
   $("shortList").innerHTML = shorts.length ? shorts.slice(0, 30).map((r) => `<div class="shortrow">${iconImg(r.name)}<span class="nm" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>
@@ -874,7 +878,7 @@ async function extendBase() {
   $("placeNote").textContent = "";
   try {
     const p = saveInfo.picks || {};
-    const params = { mode: "extend", item, rate_per_min: rate, avoid_ore: $("avoidOre").checked,
+    const params = { mode: "extend", item, rate_per_min: rate, avoid_ore: $("avoidOre").checked, bus: $("extBus").value,
       belt: p.belt || $("base_belt").value || "transport-belt", assembler: p.assembler || $("base_assembler").value,
       furnace: p.furnace || $("base_furnace").value, inserters: chosenInserters("base_inserter").inserters || p.inserters,
       bonuses: p.bonuses,
@@ -894,7 +898,7 @@ function extendNote(r) {
   if (r.needs) out.push(`Takes from your belts: ${Object.entries(r.needs).map(([k, v]) => iconImg(k) + escapeHtml(`${k} ${v}/min`)).join(", ")}`);
   if (r.made_here?.length) out.push(`Made in it (your base can't spare enough): ${r.made_here.map((k) => iconImg(k) + escapeHtml(k)).join(", ")}`);
   out.push(...r.taps.map((t) => `• ${t.items.includes(" + ") ? "" : iconImg(t.items)}${escapeHtml(t.items)}: taken from your line at ${Math.floor(t.from.x)}, ${Math.floor(t.from.y)}`));
-  out.push(...(r.deliveries || []).map((d) => `• ${iconImg(d.item)}${escapeHtml(d.item)}: output joins your belt at ${Math.floor(d.to.x)}, ${Math.floor(d.to.y)} (${d.belts} belts)`));
+  out.push(...(r.deliveries || []).map((d) => `• ${iconImg(d.item)}${escapeHtml(d.item)}: ${d.new_lane ? "output starts a new bus lane" : "output joins your belt"} at ${Math.floor(d.to.x)}, ${Math.floor(d.to.y)} (${d.belts} belts)`));
   out.push(...r.notes.map((n) => "• " + escapeHtml(n)));
   if (r.outputs?.length && !r.deliveries?.length) out.push(`Output: ${r.outputs.map((o) => iconImg(o.item) + `at ${Math.floor(o.position.x)}, ${Math.floor(o.position.y)}`).join(", ")} (take it to your labs or where it's needed)`);
   out.push(`Click the map to move it. Paste the string with <b>Ctrl+Shift</b> in game: it snaps to this spot and the splitters replace the belts they tap.`);
@@ -909,7 +913,7 @@ async function placePlan(seed) {
   try {
     const prev = placed && placed.mode === "extend" ? placed : null;
     placed = await api("/api/extend", { entities: lastPlan.entities, sources: lastPlan.sources, sinks: lastPlan.sinks || [], seed,
-      belt: lastPlan.params?.belt || lastPlan.summary?.belt || $("belt").value, avoid_ore: $("avoidOre").checked,
+      belt: lastPlan.params?.belt || lastPlan.summary?.belt || $("belt").value, avoid_ore: $("avoidOre").checked, bus: $("extBus").value,
       label: lastPlan.summary?.recipe ? `bpgen: ${lastPlan.summary.recipe}` : "bpgen extension" });
     if (prev) Object.assign(placed, { mode: "extend", item: prev.item, rate: prev.rate, steps: prev.steps, needs: prev.needs,
       made_here: prev.made_here, outputs: null });
@@ -976,6 +980,7 @@ $("btnImport").onclick = async () => {
 function baseParams() {
   return { ...(state.base || {}), mode: "base", spm: +$("spm").value || 30,
     addons: [...$("base_addons").querySelectorAll("input:checked")].map((c) => c.value), mall: $("base_mall").checked,
+    layout: $("base_layout").value,
     recipes: { ...baseRecipes },
     ...(imported ? {
       targets: Object.fromEntries([...document.querySelectorAll(".imp-rate")].map((i) => [i.dataset.pack, +i.value || 0])),
@@ -1256,8 +1261,10 @@ function summary() {
     let detail = "";
     if (sec && sec.kind === "routed") {
       const s = sec.result.summary;
-      detail = `<div>Every section but the mall in one print, belts routed between them.</div>
-        <div class="muted" style="margin-top:4px">Feed it at the west edge: ${s.inputs.map((l) => l.filter(Boolean).map((x) => iconImg(x) + escapeHtml(x)).join(" | ")).join("; ")}</div>`;
+      const bus = s.layout === "bus";
+      detail = `<div>${bus ? `Every section${s.mall ? ", the mall too," : ""} in one print: a main bus down the west side, each block taking from it and putting back onto it.`
+        : "Every section but the mall in one print, belts routed between them."}</div>
+        <div class="muted" style="margin-top:4px">Feed it at the ${bus ? "marked inputs (belts come in at the top of the bus)" : "west edge"}: ${s.inputs.map((l) => l.filter(Boolean).map((x) => iconImg(x) + escapeHtml(x)).join(" | ")).join("; ")}</div>`;
     } else if (sec && sec.kind === "labs") {
       const s = sec.result.summary;
       detail = `<dl class="kv"><dt>Labs</dt><dd>${s.labs} × ${escapeHtml(s.lab)}</dd><dt>Inserters</dt><dd>${escapeHtml(s.inserter || "")}${s.long_inserter && s.packs.length > 2 ? ", " + escapeHtml(s.long_inserter) : ""}</dd></dl>`;
@@ -1328,7 +1335,7 @@ function setEdited(on) {
   state.edited = on;
   $("editedTag").innerHTML = on ? '<span class="edited">· edited</span>' : "";
 }
-// ---------- save check: can the save (companion state) build what's in the blueprint box? ----------
+// ---------- save check: can the save (the mod's state) build what's in the blueprint box? ----------
 let saveCheckTimer = null;
 function setBp(v) {
   $("bp").value = v;
@@ -1343,8 +1350,8 @@ async function saveCheck() {
   try { r = await api("/api/save_check", { blueprint: bp }); } catch { box.innerHTML = ""; return; }
   if (bp !== $("bp").value.trim()) return;  // changed meanwhile: a newer check is on its way
   if (!r.state) {
-    box.innerHTML = `<div class="muted sc-head">${r.old ? "Update bpgen-companion (0.2.6) and load your save to check it against your research."
-      : "Load your save with bpgen-companion to check what you can build."}</div>`;
+    box.innerHTML = `<div class="muted sc-head">${r.old ? "Update the zzz-bpgen mod and load your save to check it against your research."
+      : "Load your save with the zzz-bpgen mod to check what you can build."}</div>`;
     return;
   }
   const age = r.age < 90 ? "just now" : r.age < 5400 ? `${Math.round(r.age / 60)} min ago` : `${Math.round(r.age / 3600)} h ago`;
@@ -1728,7 +1735,7 @@ async function poll() {
     }
   } catch { $("reqline").textContent = "bpgen server not reachable"; }
   poll.n = (poll.n || 0) + 1;
-  if (poll.n % 5 === 1) refreshSave(false);  // the companion's state / snapshot files
+  if (poll.n % 5 === 1) refreshSave(false);  // the mod's state / snapshot files
   setTimeout(poll, 1000);
 }
 for (const id of ["recipe", "machine", "machine_quality", "belt", "beacon", "beacon_quality", "near", "far", "out"]) enhance(id);

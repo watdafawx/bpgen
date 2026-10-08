@@ -1,3 +1,4 @@
+-- (The data-stage half of the mod: why it is named zzz-bpgen.)
 -- Hands data.raw to bpgen (bpgen.ingame, through the fnative loader's py plugin) when bpgen's copy of the mods' data
 -- is stale: one quick question otherwise. Loads last (its name), so it sees every mod's final fixes. Does nothing
 -- without the loader, and nothing it meets (an old loader, a missing plugin, a Python error) can stop the game

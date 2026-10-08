@@ -3,7 +3,7 @@
 python -m bpgen serve [--vanilla] [--port 8765]
     web UI: follows Ctrl+Shift+B requests, preview, fine-tune, edit, verify, copy
 python -m bpgen watch [--belt NAME] [--beacon-modules speed-module-3:2] [--verify]
-    wait for Ctrl+Shift+B requests from the companion mod; the hovered machine's modules are used as-is
+    wait for Ctrl+Shift+B requests from the bpgen mod (zzz-bpgen); the hovered machine's modules are used as-is
 python -m bpgen plan RECIPE --machine M --belt B [--modules M:4] [--beacon-modules M:2] [--bonus none|max] [--verify]
     (vanilla data)
 modules: "name:count", comma-separated, optional "@quality", e.g. "speed-module-3@rare:2,productivity-module-3:2"
@@ -142,7 +142,7 @@ def main():
     sv.add_argument("--belt", help="default belt for in-game requests (default: fastest researched)")
     add_beacon_args(sv)
     sv.set_defaults(func=cmd_serve)
-    w = sub.add_parser("watch", help="plan whatever the companion mod requests (your pack)")
+    w = sub.add_parser("watch", help="plan whatever the bpgen mod requests (your pack)")
     w.add_argument("--belt", help="belt to plan for (default: fastest researched)")
     w.add_argument("--verify", action="store_true", help="also build and measure it in your pack (slow)")
     add_beacon_args(w)

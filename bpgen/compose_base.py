@@ -12,12 +12,16 @@ on each block's west edge and its output on the east edge. Belts between them ar
   raw items      routed from the west edge, where the player brings ore (and coal) in.
 
 Power: every block's pole network joined by pole lines over free tiles.
+
+With bus=True the blocks stand in one column instead, beside a main bus of belt columns (bus.py): a producer's output
+goes to the head of its column, each consumer's feed is a tap off it, and the router only lays the short legs from the
+taps to the feeds, the returns to the column heads and the pipes.
 """
 import math
 import time
 from collections import Counter
 
-from bpgen import planner, router
+from bpgen import bus as bus_layout, planner, router
 from bpgen.chain import _d2, _pole_line, _sizer, _tiles, related_belts, related_splitter
 from bpgen.planner import EAST, NORTH, SOUTH
 
@@ -27,9 +31,10 @@ class ComposeError(planner.PlanError):
 
 
 class Block:
-    def __init__(self, name, item, ents, sources, sinks, depth, capacity=0.0):
+    def __init__(self, name, item, ents, sources, sinks, depth, capacity=0.0, last=False):
         self.name, self.item, self.ents, self.sources, self.sinks = name, item, ents, sources, sinks
         self.depth, self.capacity = depth, capacity
+        self.last = last  # takes what the rest leave (the mall)
         self.x0 = self.y0 = 0
         self.width = math.ceil(max(e["position"]["x"] for e in ents)) + 1
         self.height = math.ceil(max(e["position"]["y"] for e in ents)) + 1
@@ -42,13 +47,21 @@ class Block:
         return dict(e, position={"x": e["position"]["x"] + self.x0, "y": e["position"]["y"] + self.y0})
 
 
+def _rank(block, feeds):
+    """how much a consumer matters when taps compete: the packs (nobody takes from them) before the intermediates,
+    the mall last"""
+    return 0 if block.last else 1 if feeds.get(id(block)) else 2
+
+
 # a layout that hasn't come together in this many seconds gives up like one that can't (the base falls back to its
 # separate prints): with extreme machines (e.g. crafting speed 240) a connected layout could take many minutes
 COMPOSE_SECONDS = 20
 
 
-def compose(data, blocks, belt, raw, slack=4, row_gap=3, max_col_h=None):
-    """blocks: [Block]; raw: items brought in from outside. -> (entities, sources, sinks)"""
+def compose(data, blocks, belt, raw, slack=4, row_gap=3, max_col_h=None, bus=False, notes=None):
+    """blocks: [Block]; raw: items brought in from outside. -> (entities, sources, sinks)
+    bus: one column of blocks beside a main bus (see bus_layout) instead of columns by recipe depth; notes (a list)
+    gets a line about it"""
     deadline = time.monotonic() + COMPOSE_SECONDS
 
     def in_time():
@@ -130,43 +143,96 @@ def compose(data, blocks, belt, raw, slack=4, row_gap=3, max_col_h=None):
             g.setdefault("copies", {})[item] = used
 
     # ---- placement: blocks in depth order, filling columns ------------------------------------------------------
-    # max_col_h None: one column per depth. Otherwise a column takes blocks until it is that tall.
-    order = sorted(blocks, key=lambda b: (b.depth, b.name))
-    cols, cur, h = [], [], 0
-    for b in order:
-        if cur and ((b.depth != cur[-1].depth) if max_col_h is None else (h + b.height > max_col_h)):
-            cols.append(cur)
-            cur, h = [], 0
-        cur.append(b)
-        h += b.height + row_gap
-    cols.append(cur)
-    # each channel: the column's output splitters (2 tiles each), the next column's input stations, some slack
-    # a block goes near the blocks that feed it: each column is ordered by the mean height of its producers
-    makers_of = {}
-    by_id = {id(b): b for b in blocks}
-    for pid, legs in feeds.items():
-        for g, _ in legs:
-            makers_of.setdefault(id(g["block"]), set()).add(pid)
-    for b in blocks:
-        for s_ in b.sources:
-            if s_["kind"] == "fluid":
-                for m, _ in fluid_producers.get(s_["fluid"], []):
-                    makers_of.setdefault(id(b), set()).add(id(m))
-    placed = set()
-    x = 0
-    for i, col in enumerate(cols):
-        def mean_y(b, k):
-            ys = [by_id[m].y0 + by_id[m].height / 2 for m in makers_of.get(id(b), ()) if m in placed]
-            return (0, sum(ys) / len(ys), k) if ys else (1, 0, k)
-        order = {id(b): k for k, b in enumerate(col)}
-        col.sort(key=lambda b: mean_y(b, order[id(b)]))
+    if not bus:
+        # max_col_h None: one column per depth. Otherwise a column takes blocks until it is that tall.
+        order = sorted(blocks, key=lambda b: (b.depth, b.name))
+        cols, cur, h = [], [], 0
+        for b in order:
+            if cur and ((b.depth != cur[-1].depth) if max_col_h is None else (h + b.height > max_col_h)):
+                cols.append(cur)
+                cur, h = [], 0
+            cur.append(b)
+            h += b.height + row_gap
+        cols.append(cur)
+        # each channel: the column's output splitters (2 tiles each), the next column's input stations, some slack
+        # a block goes near the blocks that feed it: each column is ordered by the mean height of its producers
+        makers_of = {}
+        by_id = {id(b): b for b in blocks}
+        for pid, legs in feeds.items():
+            for g, _ in legs:
+                makers_of.setdefault(id(g["block"]), set()).add(pid)
+        for b in blocks:
+            for s_ in b.sources:
+                if s_["kind"] == "fluid":
+                    for m, _ in fluid_producers.get(s_["fluid"], []):
+                        makers_of.setdefault(id(b), set()).add(id(m))
+        placed = set()
+        x = 0
+        for i, col in enumerate(cols):
+            def mean_y(b, k):
+                ys = [by_id[m].y0 + by_id[m].height / 2 for m in makers_of.get(id(b), ()) if m in placed]
+                return (0, sum(ys) / len(ys), k) if ys else (1, 0, k)
+            order = {id(b): k for k, b in enumerate(col)}
+            col.sort(key=lambda b: mean_y(b, order[id(b)]))
+            y = 0
+            for b in col:
+                placed.add(id(b))
+                b.x0, b.y0 = x, y
+                y += b.height + row_gap
+            k = max(len(feeds.get(id(b), [])) for b in col)
+            x += max(b.width for b in col) + max(2 * k + 3, 11) + slack
+    else:
+        # one column of blocks, every producer above its consumers, the bus on their west:
+        # a column per raw input belt (they start at the top) and one per block that feeds others (from its row down)
+        cap_b = data.raw["transport-belt"][belt]["speed"] * 480 * 0.95
+        raw_bundles, by_lanes = [], {}
+        for g in sorted(groups, key=lambda g: (g["block"].depth, g["block"].name)):
+            if g.get("raw_only"):
+                need = [(None, tuple(g["lanes"]), dict(g["rates"]))]
+            elif g.get("merge"):
+                need = [(it, (it, it), {it: g["rates"].get(it, 0)}) for it in dict.fromkeys(g["lanes"])
+                        if it and it not in producers]
+            else:
+                need = []
+            for it, lanes, rates in need:
+                item_cap = {i: cap_b * (1 if lanes[0] == lanes[1] else 0.5) for i in lanes if i}
+                bd = by_lanes.get(lanes)
+                if bd is None or any(bd["rates"].get(i, 0) + r > item_cap.get(i, cap_b) for i, r in rates.items()):
+                    bd = by_lanes[lanes] = {"lanes": lanes, "rates": {}, "members": []}
+                    raw_bundles.append(bd)
+                for i, r in rates.items():
+                    bd["rates"][i] = bd["rates"].get(i, 0) + r
+                bd["members"].append((g, it))
+        # top to bottom: every block below the ones that feed it. Of the blocks that could go next the ones nobody
+        # takes from (the packs) go first, so they take what they need before the intermediates above them fill the
+        # long columns below; then the shallower and smaller ones; the mall last
+        needs = {id(b): set() for b in blocks}
+        for pid, legs_ in feeds.items():
+            for g, _ in legs_:
+                needs[id(g["block"])].add(pid)
+        order, left = [], list(blocks)
+        while left:
+            ready = [b for b in left if not needs[id(b)] - {id(p) for p in order}]
+            if not ready:
+                raise ComposeError("the blocks feed each other in a loop")
+            nxt = min(ready, key=lambda b: (b.last, bool(feeds.get(id(b))), b.depth, b.capacity, b.name))
+            order.append(nxt)
+            left.remove(nxt)
+        made = [b for b in order if feeds.get(id(b))]
+        bus_w = 2 * (len(raw_bundles) + len(made))
         y = 0
-        for b in col:
-            placed.add(id(b))
-            b.x0, b.y0 = x, y
+        for b in order:
+            b.x0, b.y0 = bus_w + 8 + 2 * slack, y
             y += b.height + row_gap
-        k = max(len(feeds.get(id(b), [])) for b in col)
-        x += max(b.width for b in col) + max(2 * k + 3, 11) + slack
+        cols_bus, raw_col, made_col = [], {}, {}
+        for bd in raw_bundles:
+            raw_col[id(bd)] = bus_layout.Column(len(cols_bus), "raw", -3, 2 * len(cols_bus), "|".join(
+                i for i in dict.fromkeys(bd["lanes"]) if i))
+            cols_bus.append(raw_col[id(bd)])
+        for b in made:
+            made_col[id(b)] = bus_layout.Column(len(cols_bus), "made", b.y0 + b.height + 2, 2 * len(cols_bus), b.name)
+            cols_bus.append(made_col[id(b)])
+        sources = []
     kmax = max((len(v) for v in feeds.values()), default=1)
     blocked, spans, solid = set(), set(), set()  # solid: real entity tiles (blocked adds a margin)
     for b in blocks:
@@ -193,6 +259,10 @@ def compose(data, blocks, belt, raw, slack=4, row_gap=3, max_col_h=None):
     west = min(xs) - (2 * k_raw + 5 + slack)
     inner = (min(xs) - 2, min(ys) - 2, max(xs) + 2, max(ys) + 2)  # the blocks' outline: pipes pay to leave it
     bounds = (west, min(ys) - 6 - slack, max(xs) + 2 * kmax + 6 + slack, max(ys) + 6 + slack)
+    if bus:
+        west = -3
+        bounds = (west, min(ys) - 8 - slack, max(xs) + 8 + slack, max(ys) + 6 + slack)
+        inner = (west + 1, inner[1], inner[2], inner[3])  # (pipes go through the strip beside the bus too)
     # nothing west of the raw inputs (column west + 1): that is where the player's belts come in. The router
     # treats the bounds as inclusive, so close the edge column itself
     for yy in range(bounds[1], bounds[3] + 1):
@@ -206,7 +276,8 @@ def compose(data, blocks, belt, raw, slack=4, row_gap=3, max_col_h=None):
     extra = Placed()  # splitters, merge belts, staircase links
 
     def free(t):
-        return t not in blocked and bounds[0] < t[0] < bounds[2] and bounds[1] < t[1] < bounds[3]
+        return (t not in blocked and bounds[0] < t[0] < bounds[2] and bounds[1] < t[1] < bounds[3]
+                and not (bus and t[0] <= bus_w))  # (stations stay out of the bus; belts may cross it)
 
     def find_spot(around, cells, xs_back=range(3, 40), ys_off=(0, 2, -2, 4, -4, 6, -6, 8, -8, 10, -10, 12, -12)):
         """a free place for a station: cells are offsets that must all be free"""
@@ -249,42 +320,43 @@ def compose(data, blocks, belt, raw, slack=4, row_gap=3, max_col_h=None):
         return r
 
     # ---- 0) producer side first: a splitter staircase after each output, one leg per consumer feed -------------
-    leg_starts = {}
-    leg_splitters = {}  # block -> its staircase splitters, top first (priorities set once the legs are known)
-    for b in blocks:
-        k = len(feeds.get(id(b), []))
-        if not k:
-            continue
-        end = b.at(b.sinks[0]["position"])
-        sx, sy = end[0] + 1, end[1]
-        starts = []
-        if k == 1:
-            starts = [(sx, sy)]
-        else:
-            for i in range(k - 1):  # splitter i: tiles (sx+2i, sy+i), (sx+2i, sy+i+1)
-                px, py = sx + 2 * i, sy + i
-                if i:
-                    blocked.add((px - 1, py))  # belt from the previous splitter's lower output
-                    extra.append({"name": belt, "position": {"x": px - 0.5, "y": py + 0.5}, "direction": EAST})
-                for t in ((px, py), (px, py + 1)):
-                    if t in solid:
-                        raise ComposeError(f"no room for {b.name}'s output splitters")
-                    blocked.add(t)
-                    solid.add(t)
-                spl = {"name": splitter, "position": {"x": px + 0.5, "y": py + 1.0}, "direction": EAST}
-                extra.append(spl)
-                leg_splitters.setdefault(id(b), []).append(spl)
-                starts.append((px + 1, py))
-            starts.append((sx + 2 * (k - 2) + 1, sy + k - 1))
-        for t in starts:
-            blocked.add(t)
-        leg_starts[id(b)] = starts
-    # keep a strip east of every staircase clear for its legs to leave by
-    keep = {}  # start -> the tiles in front of it, held until its own leg is routed
-    for st in leg_starts.values():
-        for (x, y) in st:
-            keep[(x, y)] = {(x + dx, y) for dx in range(1, 4) if free((x + dx, y))}
-            blocked |= keep[(x, y)]
+    if not bus:
+        leg_starts = {}
+        leg_splitters = {}  # block -> its staircase splitters, top first (priorities set once the legs are known)
+        for b in blocks:
+            k = len(feeds.get(id(b), []))
+            if not k:
+                continue
+            end = b.at(b.sinks[0]["position"])
+            sx, sy = end[0] + 1, end[1]
+            starts = []
+            if k == 1:
+                starts = [(sx, sy)]
+            else:
+                for i in range(k - 1):  # splitter i: tiles (sx+2i, sy+i), (sx+2i, sy+i+1)
+                    px, py = sx + 2 * i, sy + i
+                    if i:
+                        blocked.add((px - 1, py))  # belt from the previous splitter's lower output
+                        extra.append({"name": belt, "position": {"x": px - 0.5, "y": py + 0.5}, "direction": EAST})
+                    for t in ((px, py), (px, py + 1)):
+                        if t in solid:
+                            raise ComposeError(f"no room for {b.name}'s output splitters")
+                        blocked.add(t)
+                        solid.add(t)
+                    spl = {"name": splitter, "position": {"x": px + 0.5, "y": py + 1.0}, "direction": EAST}
+                    extra.append(spl)
+                    leg_splitters.setdefault(id(b), []).append(spl)
+                    starts.append((px + 1, py))
+                starts.append((sx + 2 * (k - 2) + 1, sy + k - 1))
+            for t in starts:
+                blocked.add(t)
+            leg_starts[id(b)] = starts
+        # keep a strip east of every staircase clear for its legs to leave by
+        keep = {}  # start -> the tiles in front of it, held until its own leg is routed
+        for st in leg_starts.values():
+            for (x, y) in st:
+                keep[(x, y)] = {(x + dx, y) for dx in range(1, 4) if free((x + dx, y))}
+                blocked |= keep[(x, y)]
 
     # ---- 1) consumer side: splitter stations to the rows, merge stations ---------------------------------------
     for g in groups:
@@ -344,110 +416,159 @@ def compose(data, blocks, belt, raw, slack=4, row_gap=3, max_col_h=None):
         merged.append((it, out_goal, out_dir, g, ids[0]))
     targets = merged
 
+    if bus:
+        # ---- the bus: columns, taps and the legs to the consumers' feeds ---------------------------------------
+        raw_of = {(id(g), it): bd for bd in raw_bundles for g, it in bd["members"]}
+        legs = []
+        for it, goal, d, g, _ in targets:
+            if it is None or it not in producers:
+                legs.append({"col": raw_col[id(raw_of[(id(g), it)])], "want": goal[1], "goal": goal, "d": d, "g": g,
+                             "rank": _rank(g["block"], feeds)})
+        for b in made:
+            mine = sorted(((t[1], t[2], t[3]) for t in targets
+                           if t[3] in [g for g, _ in feeds[id(b)]] and t[0] == b.item and t[4] in (None, id(b))),
+                          key=lambda x: x[0][1])
+            if len(mine) != len(feeds[id(b)]):
+                raise ComposeError(f"{b.name}: {len(feeds[id(b)])} consumers but {len(mine)} feeds")
+            for goal, d, g in mine:
+                if g["block"].y0 <= b.y0:
+                    raise ComposeError(f"{g['block'].name} sits above {b.name}, which feeds it")
+                legs.append({"col": made_col[id(b)], "want": goal[1], "goal": goal, "d": d, "g": g,
+                             "rank": _rank(g["block"], feeds)})
+        bus_layout.alloc_rows(legs, cols_bus)
+        if notes is not None:
+            notes.append("MAIN BUS: " + str(len(cols_bus)) + " belts side by side on the west, flowing south: " +
+                         ", ".join(c.name + (" (brought in from the north)" if c.kind == "raw" else "") for c in cols_bus) +
+                         ". Each block takes what it needs from them (a splitter on the belt, a feed to its west edge)"
+                         " and puts what it makes onto its own belt.")
+        bus_ents, bus_spans = bus_layout.build(cols_bus, belt, ug_name, splitter, bus_w)
+        for e in bus_ents:
+            extra.append(e)
+            blocked.update(_tiles(e, size_of))
+        spans |= bus_spans
+        for bd in raw_bundles:
+            c = raw_col[id(bd)]
+            sources.append({"kind": "belt", "position": {"x": c.x + 0.5, "y": c.head + 0.5}, "lanes": list(bd["lanes"]),
+                            "rates": bd["rates"], "from": "north"})
+        holds = {}  # the way out of each leg's corridor, kept clear until its own route is laid
+        for leg in legs:
+            holds[id(leg)] = {(bus_w + dx, leg["row"]) for dx in range(4)} - blocked
+            blocked.update(holds[id(leg)])
+        for b in made:  # each block's output to the head of its column (from the east, down in the gap below it)
+            c = made_col[id(b)]
+            end = b.at(b.sinks[0]["position"])
+            route([((end[0] + 1, end[1]), None)], (c.x, c.head), 12)
+        for leg in sorted(legs, key=lambda l: l["row"]):
+            blocked.difference_update(holds[id(leg)])
+            route([((bus_w, leg["row"]), None)], leg["goal"], leg["d"])
+
     # ---- 2) producer side: route each staircase leg to its consumer ------------------------------------------
-    for b in blocks:
-        legs = [(g, it) for g, it in feeds.get(id(b), [])]
-        if not legs:
-            continue
-        k = len(legs)
-        starts = leg_starts[id(b)]
-        # the topmost leg to the topmost consumer keeps routes from crossing at the start
-        goals = sorted(((t[1], t[2], t[3]) for t in targets
-                        if t[3] in [g for g, _ in legs] and t[0] == b.item and t[4] in (None, id(b))),
-                       key=lambda x: x[0][1])
-        mine = [(goal, d, g) for goal, d, g in goals]
-        if len(mine) != k:
-            raise ComposeError(f"{b.name}: {k} consumers but {len(mine)} feeds")
-        order = sorted(range(k), key=lambda i: starts[i][1])
-        import os
-        if os.environ.get("BPGEN_DEBUG"):
-            print("LEGS", b.name, [(starts[i], g["block"].name, goal) for i, (goal, d, g) in zip(order, mine)])
-        for start, (goal, d, g) in zip([starts[i] for i in order], mine):
-            blocked.difference_update(keep.pop(start, ()))
-            route([(start, None)], goal, d)
-        # the deepest consumer (nearest the final product) gets served first: an intermediate block running ahead
-        # of what's needed (machine counts round up) would otherwise take an ingredient both need and starve it
-        # until its own output belt is full. Splitter i's upper output is leg i, its lower output the rest.
-        spls = leg_splitters.get(id(b), [])
-        if spls:
-            legs_in_order = [mine[order.index(i)] for i in range(k)]
-            j = max(range(k), key=lambda i: (legs_in_order[i][2]["block"].depth, i))
-            for i, spl in enumerate(spls):
-                if i < j:
-                    spl["output_priority"] = "right"  # (facing east: right = the lower output, on down the chain)
-                elif i == j:
-                    spl["output_priority"] = "left"   # its own leg
+    if not bus:
+        for b in blocks:
+            legs = [(g, it) for g, it in feeds.get(id(b), [])]
+            if not legs:
+                continue
+            k = len(legs)
+            starts = leg_starts[id(b)]
+            # the topmost leg to the topmost consumer keeps routes from crossing at the start
+            goals = sorted(((t[1], t[2], t[3]) for t in targets
+                            if t[3] in [g for g, _ in legs] and t[0] == b.item and t[4] in (None, id(b))),
+                           key=lambda x: x[0][1])
+            mine = [(goal, d, g) for goal, d, g in goals]
+            if len(mine) != k:
+                raise ComposeError(f"{b.name}: {k} consumers but {len(mine)} feeds")
+            order = sorted(range(k), key=lambda i: starts[i][1])
+            import os
+            if os.environ.get("BPGEN_DEBUG"):
+                print("LEGS", b.name, [(starts[i], g["block"].name, goal) for i, (goal, d, g) in zip(order, mine)])
+            for start, (goal, d, g) in zip([starts[i] for i in order], mine):
+                blocked.difference_update(keep.pop(start, ()))
+                route([(start, None)], goal, d)
+            # the deepest consumer (nearest the final product) gets served first: an intermediate block running ahead
+            # of what's needed (machine counts round up) would otherwise take an ingredient both need and starve it
+            # until its own output belt is full. Splitter i's upper output is leg i, its lower output the rest.
+            spls = leg_splitters.get(id(b), [])
+            if spls:
+                legs_in_order = [mine[order.index(i)] for i in range(k)]
+                j = max(range(k), key=lambda i: (legs_in_order[i][2]["block"].depth, i))
+                for i, spl in enumerate(spls):
+                    if i < j:
+                        spl["output_priority"] = "right"  # (facing east: right = the lower output, on down the chain)
+                    elif i == j:
+                        spl["output_priority"] = "left"   # its own leg
 
     # ---- 3) raw items from the west edge -----------------------------------------------------------------------
-    # feeds carrying the same thing share one input belt (as many as one belt carries), split at the west edge
-    sources = []
-    cap = data.raw["transport-belt"][belt]["speed"] * 480 * 0.95
-    raw_feeds = {}
-    for it, goal, d, g, _ in targets:
-        if it is not None and it in producers:
-            continue
-        lanes = tuple(g["lanes"]) if it is None else (it, it)
-        rates = dict(g["rates"]) if it is None else {it: g["rates"].get(it, 0)}
-        raw_feeds.setdefault(lanes, []).append((goal, d, rates))
-    W = bounds[0] + 1
-    for lanes, fl in raw_feeds.items():
-        fl.sort(key=lambda f: f[0][1])
-        # one shared input carries what its lanes carry: an item on one lane gets half the belt
-        item_cap = {it: cap * (1 if lanes[0] == lanes[1] else 0.5) for it in lanes if it}
-        bundles, cur, load = [], [], {}
-        for f in fl:
-            if cur and any(load.get(it, 0) + r > item_cap.get(it, cap) for it, r in f[2].items()):
-                bundles.append(cur)
-                cur, load = [], {}
-            cur.append(f)
-            for it, r in f[2].items():
-                load[it] = load.get(it, 0) + r
-        bundles.append(cur)
-        for bundle in bundles:
-            rates = {}
-            for _, _, r in bundle:
-                for k2, v in r.items():
-                    rates[k2] = rates.get(k2, 0) + v
-            k = len(bundle)
-            if k == 1:
-                goal, d, _ = bundle[0]
-                starts = [((W, yy), [EAST]) for yy in range(bounds[1] + 1, bounds[3]) if free((W, yy))]
-                starts.sort(key=lambda s: abs(s[0][1] - goal[1]))
-                r = route(starts[:40], goal, d)
-                src = r[0][0]
-            else:
-                # input belt at (W, y0), then a splitter staircase like a producer's
-                mid = bundle[k // 2][0][1]
-                cells = [(1 + 2 * i, i) for i in range(k - 1)] + [(1 + 2 * i, i + 1) for i in range(k - 1)] + \
-                        [(2 * i, i) for i in range(1, k - 1)] + [(2 + 2 * i, i) for i in range(k - 1)] + [(0, 0)]
-                y0 = next((y for off in range(0, 60) for y in (mid - off, mid + off)
-                           if all(free((W + cx, y + cy)) for cx, cy in cells + [(2 * (k - 2) + 2, k - 1)])), None)
-                if y0 is None:
-                    raise ComposeError(f"no room at the west edge to split the {'|'.join(l for l in lanes if l)} input")
-                ents_in = {"name": belt, "position": {"x": W + 0.5, "y": y0 + 0.5}, "direction": EAST}
-                extra.append(ents_in)
-                blocked.add((W, y0))
-                starts = []
-                for i in range(k - 1):
-                    px, py = W + 1 + 2 * i, y0 + i
-                    if i:
-                        blocked.add((px - 1, py))
-                        extra.append({"name": belt, "position": {"x": px - 0.5, "y": py + 0.5}, "direction": EAST})
-                    blocked.update({(px, py), (px, py + 1)})
-                    extra.append({"name": splitter, "position": {"x": px + 0.5, "y": py + 1.0}, "direction": EAST})
-                    starts.append((px + 1, py))
-                starts.append((W + 1 + 2 * (k - 2) + 1, y0 + k - 1))
-                held = {}
-                for (x, y) in starts:
-                    blocked.add((x, y))
-                    held[(x, y)] = {(x + dx, y) for dx in range(1, 3) if free((x + dx, y))}
-                    blocked |= held[(x, y)]
-                for (goal, d, _), start in zip(bundle, sorted(starts, key=lambda t: t[1])):
-                    blocked.difference_update(held.pop(start))
-                    route([(start, None)], goal, d)
-                src = (W, y0)
-            sources.append({"kind": "belt", "position": {"x": src[0] + 0.5, "y": src[1] + 0.5},
-                            "lanes": list(lanes), "rates": rates})
+    if not bus:
+        # feeds carrying the same thing share one input belt (as many as one belt carries), split at the west edge
+        sources = []
+        cap = data.raw["transport-belt"][belt]["speed"] * 480 * 0.95
+        raw_feeds = {}
+        for it, goal, d, g, _ in targets:
+            if it is not None and it in producers:
+                continue
+            lanes = tuple(g["lanes"]) if it is None else (it, it)
+            rates = dict(g["rates"]) if it is None else {it: g["rates"].get(it, 0)}
+            raw_feeds.setdefault(lanes, []).append((goal, d, rates))
+        W = bounds[0] + 1
+        for lanes, fl in raw_feeds.items():
+            fl.sort(key=lambda f: f[0][1])
+            # one shared input carries what its lanes carry: an item on one lane gets half the belt
+            item_cap = {it: cap * (1 if lanes[0] == lanes[1] else 0.5) for it in lanes if it}
+            bundles, cur, load = [], [], {}
+            for f in fl:
+                if cur and any(load.get(it, 0) + r > item_cap.get(it, cap) for it, r in f[2].items()):
+                    bundles.append(cur)
+                    cur, load = [], {}
+                cur.append(f)
+                for it, r in f[2].items():
+                    load[it] = load.get(it, 0) + r
+            bundles.append(cur)
+            for bundle in bundles:
+                rates = {}
+                for _, _, r in bundle:
+                    for k2, v in r.items():
+                        rates[k2] = rates.get(k2, 0) + v
+                k = len(bundle)
+                if k == 1:
+                    goal, d, _ = bundle[0]
+                    starts = [((W, yy), [EAST]) for yy in range(bounds[1] + 1, bounds[3]) if free((W, yy))]
+                    starts.sort(key=lambda s: abs(s[0][1] - goal[1]))
+                    r = route(starts[:40], goal, d)
+                    src = r[0][0]
+                else:
+                    # input belt at (W, y0), then a splitter staircase like a producer's
+                    mid = bundle[k // 2][0][1]
+                    cells = [(1 + 2 * i, i) for i in range(k - 1)] + [(1 + 2 * i, i + 1) for i in range(k - 1)] + \
+                            [(2 * i, i) for i in range(1, k - 1)] + [(2 + 2 * i, i) for i in range(k - 1)] + [(0, 0)]
+                    y0 = next((y for off in range(0, 60) for y in (mid - off, mid + off)
+                               if all(free((W + cx, y + cy)) for cx, cy in cells + [(2 * (k - 2) + 2, k - 1)])), None)
+                    if y0 is None:
+                        raise ComposeError(f"no room at the west edge to split the {'|'.join(l for l in lanes if l)} input")
+                    ents_in = {"name": belt, "position": {"x": W + 0.5, "y": y0 + 0.5}, "direction": EAST}
+                    extra.append(ents_in)
+                    blocked.add((W, y0))
+                    starts = []
+                    for i in range(k - 1):
+                        px, py = W + 1 + 2 * i, y0 + i
+                        if i:
+                            blocked.add((px - 1, py))
+                            extra.append({"name": belt, "position": {"x": px - 0.5, "y": py + 0.5}, "direction": EAST})
+                        blocked.update({(px, py), (px, py + 1)})
+                        extra.append({"name": splitter, "position": {"x": px + 0.5, "y": py + 1.0}, "direction": EAST})
+                        starts.append((px + 1, py))
+                    starts.append((W + 1 + 2 * (k - 2) + 1, y0 + k - 1))
+                    held = {}
+                    for (x, y) in starts:
+                        blocked.add((x, y))
+                        held[(x, y)] = {(x + dx, y) for dx in range(1, 3) if free((x + dx, y))}
+                        blocked |= held[(x, y)]
+                    for (goal, d, _), start in zip(bundle, sorted(starts, key=lambda t: t[1])):
+                        blocked.difference_update(held.pop(start))
+                        route([(start, None)], goal, d)
+                    src = (W, y0)
+                sources.append({"kind": "belt", "position": {"x": src[0] + 0.5, "y": src[1] + 0.5},
+                                "lanes": list(lanes), "rates": rates})
+    no_under = set(solid) if bus else None  # (beside a bus pipes go around the blocks: under them a route can cross its own line)
     # ---- 4) fluids made here: pipes from the producer's output to every block that takes it -----------------------
     pipes = []  # (tile, "pipe" | "ptg", direction)
     fluid_inputs = [(b, s, b.at(s["position"])) for b in blocks for s in b.sources if s["kind"] == "fluid"]
@@ -473,7 +594,7 @@ def compose(data, blocks, belt, raw, slack=4, row_gap=3, max_col_h=None):
             foreign[oend] = foreign[goal] = fluid
             blocked.discard(goal)
             # the other block's output pipe is west of the goal
-            path = _route_pipe(network, goal, fluid, blocked, foreign, bounds, pspans, inner=inner, into=12)
+            path = _route_pipe(network, goal, fluid, blocked, foreign, bounds, pspans, inner=inner, into=12, no_under=no_under)
             pipe_checks[-1][2].append(goal)
             for t, kind, d in path:
                 if kind == "pipe":
@@ -486,7 +607,7 @@ def compose(data, blocks, belt, raw, slack=4, row_gap=3, max_col_h=None):
         for b, s, goal in sorted(fluid_inputs, key=lambda x: abs(x[2][0] - end[0]) + abs(x[2][1] - end[1])):
             if s["fluid"] != fluid:
                 continue
-            path = _route_pipe(network, goal, fluid, blocked, foreign, bounds, pspans, inner=inner)
+            path = _route_pipe(network, goal, fluid, blocked, foreign, bounds, pspans, inner=inner, no_under=no_under)
             pipe_checks[-1][2].append(goal)
             for t, kind, d in path:
                 if kind == "pipe":
@@ -529,7 +650,7 @@ def compose(data, blocks, belt, raw, slack=4, row_gap=3, max_col_h=None):
                 pipe_checks.append((fluid, [(entry[0] + dx, entry[1] + dy) for dx, dy in STEP.values()], []))
                 rate = 0.0
                 for b, s, goal in sorted(ins, key=lambda x: abs(x[2][0] - entry[0]) + abs(x[2][1] - entry[1])):
-                    path = _route_pipe(network, goal, fluid, blocked, foreign, bounds, pspans, inner=inner)
+                    path = _route_pipe(network, goal, fluid, blocked, foreign, bounds, pspans, inner=inner, no_under=no_under)
                     pipe_checks[-1][2].append(goal)
                     for t, kind, d in path:
                         if kind == "pipe":
@@ -600,6 +721,8 @@ def compose(data, blocks, belt, raw, slack=4, row_gap=3, max_col_h=None):
     for src in sources:  # the player brings each input belt in from the west: that tile must be free
         if src["kind"] == "belt":
             t = (math.floor(src["position"]["x"]) - 1, math.floor(src["position"]["y"]))
+            if src.get("from") == "north":
+                t = (t[0] + 1, t[1] - 1)
             if t in taken or t in solid:
                 raise ComposeError(f"the way into the input at {t} is blocked")
     check_pipes(ents, pipe_checks)
@@ -712,7 +835,8 @@ def _joins(a, b):
     return (ka == "pipe" or da == d) and (kb == "pipe" or db == (d + 8) % 16)
 
 
-def _route_pipe(network, goal, fluid, blocked, foreign, bounds, pspans, max_ug=None, inner=None, into=EAST):
+def _route_pipe(network, goal, fluid, blocked, foreign, bounds, pspans, max_ug=None, inner=None, into=EAST,
+                no_under=None):
     """A* for a pipe from any tile of `network` to `goal`. A pipe tile may not touch another fluid's pipe or fluid
     input; pipe-to-ground pairs (entrance facing back, exit facing on) jump up to max_ug tiles over anything.
     into: which way from the goal the block's pipe is (a pipe-to-ground ending there must open that way).
@@ -796,6 +920,8 @@ def _route_pipe(network, goal, fluid, blocked, foreign, bounds, pspans, max_ug=N
                     continue
                 cells = {(nd % 8, n[1] if nd % 8 else n[0], (n[0] if nd % 8 else n[1]) + i * (dx or dy)) for i in range(k + 1)}
                 if cells & pspans:
+                    continue
+                if no_under and any((n[0] + dx * i, n[1] + dy * i) in no_under for i in range(1, k)):
                     continue
                 ns = (ex, "exit", nd)
                 cost = g + 3 + 0.2 * k + outside(ex) * k

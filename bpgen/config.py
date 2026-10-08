@@ -63,7 +63,7 @@ def load():
     write = Path(cfg.get("write_data") or _write_data(root))
     return {"factorio_exe": exe, "game_data": data, "write_data": write,
             "user_mods": Path(cfg.get("user_mods") or write / "mods"),
-            # BPGEN_SCRIPT_OUTPUT: tests point the web UI at a test run's companion files
+            # BPGEN_SCRIPT_OUTPUT: tests point the web UI at a test run's mod files
             "script_output": Path(os.environ.get("BPGEN_SCRIPT_OUTPUT") or cfg.get("script_output") or write / "script-output")}
 
 

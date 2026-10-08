@@ -1,5 +1,5 @@
 """bpgen inside the game, through the fnative "py" plugin (native/README.md): no web app, no files, no second
-process. The companion mod sends the same request it writes to request.json:
+process. The zzz-bpgen mod sends the same request it writes to request.json:
 
     local id = native.start("py", "bpgen.ingame:plan", helpers.table_to_json(request))
     ... on_tick: local status, out = native.poll(id)   -- "done", '{"blueprint": "0eNr...", ...}'
@@ -16,10 +16,12 @@ import traceback
 _service = None
 _lock = threading.Lock()  # (plans share one Service: one at a time)
 _taking = None  # the thread writing data the game sent (planning waits for it)
+_last = None  # the last plan that isn't placed yet (entities, sources, sinks...): what place() puts next to the base
+_sections = {}  # a starter base's prints by name (place() can put one of them next to the base)
 
 
 def data_wanted(active: str = "") -> str:
-    """the data stage asks (mod zzz-bpgen-data): "" if bpgen's copy of the mods' data is current (or the game runs
+    """the data stage asks (data-final-fixes of the zzz-bpgen mod): "" if bpgen's copy of the mods' data is current (or the game runs
     other mods than the user's), else "type,type,...|skip,skip,..." for native.to_json"""
     from bpgen import pack
     try:
@@ -49,7 +51,7 @@ def take_data(text: str) -> str:
     return f"taking {len(text) / 1e6:.1f} MB"
 
 
-def stale(has_data_mod: str = "") -> str:
+def stale(_: str = "") -> str:
     """at game load: bpgen's copy is stale although the data stage didn't send it (the game loaded its data stage
     cache): the game's data-cache.dat is removed so the next start runs the data stage and sends it"""
     from bpgen import pack
@@ -58,7 +60,7 @@ def stale(has_data_mod: str = "") -> str:
         return json.dumps({"stale": False})
     cache = PATHS["write_data"] / "data-cache.dat"
     removed = False
-    if has_data_mod and cache.exists():  # (without the mod a new data stage wouldn't help)
+    if cache.exists():
         try:
             cache.unlink()
             removed = True
@@ -80,7 +82,7 @@ def _svc():
 
 
 def warm(_: str = "") -> str:
-    """load bpgen's data ahead of the first plan (the companion calls this when the game loads)"""
+    """load bpgen's data ahead of the first plan (the mod calls this when the game loads)"""
     t = time.perf_counter()
     with _lock:
         _svc()
@@ -142,9 +144,147 @@ def measured(results: str) -> str:
     return json.dumps({"stored": len(cases)})
 
 
+def _line_needs(data, sm):
+    """{ingredient: items/s} a line takes at its expected output (its summary), or None (a mall, no one recipe)"""
+    r = data.raw["recipe"].get(sm.get("recipe") or "")
+    if not r or not sm.get("expected"):
+        return None
+    made = sum(p.get("amount", (p.get("amount_min", 0) + p.get("amount_max", 0)) / 2) * p.get("probability", 1)
+               for p in r.get("results") or [] if p.get("name") == sm.get("output"))
+    if not made:
+        return None
+    runs = sm["expected"] / made / (1 + (sm.get("productivity") or 0))
+    return {i["name"]: runs * i["amount"] for i in r.get("ingredients") or [] if i.get("type") != "fluid"}
+
+
+def _section_needs(data, sec, base_summary):
+    """{item: items/s} a starter base's print takes from outside: a line's through its recipe, the whole base's what
+    it brings in; else None"""
+    if sec.get("kind") == "line":
+        return _line_needs(data, (sec.get("result") or {}).get("summary") or {})
+    if sec.get("kind") == "routed":
+        return {k: v / 60 for k, v in (base_summary.get("bring_in") or {}).items() if isinstance(v, (int, float))} or None
+    return None
+
+
+def _absolute(placed):
+    """what the window needs of a plan placed next to the base: its box, what it ties into, the bus's axis (its
+    arrows move it along the bus) and the bus lanes it overdraws (its upgrade buttons)"""
+    dl = placed.get("deliveries") or []
+    return {"box": placed["box"], "taps": len(placed.get("taps") or []),
+            "deliveries": len([d for d in dl if not d.get("new_lane")]),
+            "new_lanes": len([d for d in dl if d.get("new_lane")]), "axis": (placed.get("bus") or {}).get("axis"),
+            "upgrades": placed.get("upgrades") or []}
+
+
+def place(request: str) -> str:
+    """the last plan next to the player's base: {"bus": "auto"|"on"|"off", "seed": {x, y}, "snapshot": the area
+    around the player, as the snapshot tool takes it} -> as plan(), an absolute blueprint with taps on the base's
+    belts, or {error}"""
+    t = time.perf_counter()
+    try:
+        global _last
+        req = json.loads(request or "{}")
+        sec = _sections.get(req.get("section") or "")
+        if sec and _last:  # (a print of the starter base: that one next to the base, and the arrows move it)
+            res = sec.get("result") or {}
+            _last = {"entities": res.get("entities") or [], "sources": res.get("sources") or [],
+                     "sinks": [dict(k, item=k.get("item") or sec.get("item")) for k in res.get("sinks") or []],
+                     "belt": (res.get("summary") or {}).get("belt") or _last.get("belt"), "mode": "base",
+                     "label": f"bpgen: {sec['name']} next to the base", "needs": _section_needs(_svc().data, sec, {})}
+        if not _last or not _last.get("entities"):
+            return json.dumps({"error": "plan something first"})
+        with _lock:
+            placed = _svc().extend(dict(_last, bus=req.get("bus") or "auto", seed=req.get("seed"),
+                                        snapshot=req.get("snapshot")))
+        return json.dumps({
+            "blueprint": placed["blueprint"], "label": _last["label"], "mode": _last["mode"],
+            "absolute": _absolute(placed),
+            "notes": placed.get("notes") or [], "summary": {}, "seconds": round(time.perf_counter() - t, 3)})
+    except Exception as e:  # noqa: BLE001 - shown in game
+        return json.dumps({"error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-2000:]})
+
+
+def bus_report(request: str) -> str:
+    """the player's main bus, looked at: {"snapshot": measured area around the player, "belts": unlocked belts} ->
+    {"result": {"bus": what it is, "items": [{item, lanes, cap, used, dry, belt, made, short}], "short": [{item,
+    short, recipe}]: what the base lacks and the bus doesn't carry}} (the window's "Check my bus")"""
+    from bpgen import extend
+    from bpgen.service import SAVE_STATE
+    try:
+        req = json.loads(request or "{}")
+        with _lock:
+            s = _svc()
+            snap = s.snapshot_view(req.get("snapshot"))
+            main = extend.find_bus(extend.Ground(snap)) if snap else None
+            if not main:
+                return json.dumps({"result": {"bus": None}})
+            try:
+                st = json.loads(SAVE_STATE.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                st = {}
+            prod = {r["name"]: r for r in s.production(st)} if st else {}
+            mined = set()  # (ores, coal, stone: mined, never made by the bus)
+            for res in s.data.raw.get("resource", {}).values():
+                m = res.get("minable") or {}
+                mined |= {m["result"]} if m.get("result") else {x.get("name") for x in m.get("results") or []}
+            belts = sorted(req.get("belts") or [], key=lambda b: s.data.raw["transport-belt"].get(b, {}).get("speed", 0))
+            items = []
+            for k, o in sorted(extend.bus_items(s.data, main).items()):
+                p = prod.get(k) or {}
+                faster = [b for b in belts if s.data.raw["transport-belt"][b]["speed"] >
+                          s.data.raw["transport-belt"].get(o["belt"], {}).get("speed", 0)]
+                items.append(dict(o, item=k, short=p.get("short"), makeable=p.get("makeable") and k not in mined,
+                                  recipe=p.get("recipe"), upgrade=faster[-1] if faster else None))
+            on_bus = {i for ln in main["lanes"] for i in ln["items"]}
+            short = [{"item": r["name"], "short": r["short"], "recipe": r["recipe"]} for r in prod.values()
+                     if r["short"] > 0 and r["makeable"] and not r["fluid"] and r["name"] not in on_bus | mined]
+            short.sort(key=lambda r: -r["short"])
+            pipes = [ln.get("pipe") for ln in main["lanes"] if ln.get("pipe")]
+        return json.dumps({"result": {
+            "bus": {"lanes": len(main["lanes"]) - len(pipes), "pipes": pipes, "dir": main["dir"],
+                    "length": main["hi"] - main["lo"] + 1, "measured": any("used" in ln for ln in main["lanes"])},
+            "items": items, "short": short[:6]}})
+    except Exception as e:  # noqa: BLE001 - shown in game
+        return json.dumps({"error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-2000:]})
+
+
+def add_lane(request: str) -> str:
+    """a new lane of an item along the player's bus: {"snapshot", "item"} -> as plan(), an absolute blueprint (the
+    window previews it, Place it puts the ghosts down), its head (where the item is to be fed in) in absolute"""
+    from bpgen import extend
+    t = time.perf_counter()
+    try:
+        req = json.loads(request or "{}")
+        item = req.get("item")
+        with _lock:
+            s = _svc()
+            snap = s.snapshot_view(req.get("snapshot"))
+            ground = extend.Ground(snap) if snap else None
+            main = extend.find_bus(ground) if ground else None
+            if not main:
+                return json.dumps({"error": "no main bus around you (3+ long straight belts side by side)"})
+            got = extend.new_bus_lane(s.data, ground, main, item)
+            if not got:
+                return json.dumps({"error": "no room beside the bus for another lane"})
+            ents, head, length = got
+            bp, box = extend.absolute_blueprint([dict(s.decorate(e), new=True) for e in ents],
+                                                f"bpgen: a new {item} lane", description="Feed it at its head.")
+        return json.dumps({
+            "blueprint": bp, "label": f"a new {item} lane", "mode": "lane",
+            "absolute": {"box": box, "taps": 0, "deliveries": 0, "new_lanes": 1, "axis": main["axis"],
+                         "upgrades": [], "head": {"x": head[0] + 0.5, "y": head[1] + 0.5}, "item": item},
+            "notes": [f"a new {item} lane along the bus, {length} tiles: feed {item} in at its head (marked when "
+                      f"placed)"],
+            "summary": {}, "seconds": round(time.perf_counter() - t, 3)})
+    except Exception as e:  # noqa: BLE001 - shown in game
+        return json.dumps({"error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-2000:]})
+
+
 def plan(request: str) -> str:
-    """a companion request (recipe, machine, unlocked belts and inserters, bonuses...) -> {blueprint, label, text}
+    """a request from the mod (recipe, machine, unlocked belts and inserters, bonuses...) -> {blueprint, label, text}
     or {error}"""
+    global _last, _sections
     from bpgen import calibrate, pack, planner
     t = time.perf_counter()
     try:
@@ -187,16 +327,21 @@ def plan(request: str) -> str:
                         if i == len(tries[:4]) - 1 or not tries:
                             raise
                 if params.get("mode") == "extend":
-                    # (next to the base: the chain placed into the snapshot, taps on its belts, power: an absolute
-                    # blueprint that lands where it belongs)
-                    placed = s.extend({"entities": out["entities"], "sources": out.get("sources") or [],
-                                       "sinks": out.get("sinks") or [], "belt": params.get("belt"),
-                                       "label": f"bpgen: {params.get('item')} next to the base"})
-                    summary = dict(out.get("summary") or {})
-                    summary["notes"] = list(summary.get("notes") or []) + list(placed.get("notes") or [])
-                    out = {"blueprint": placed["blueprint"], "summary": summary,
-                           "absolute": {"box": placed["box"], "taps": len(placed.get("taps") or []),
-                                        "deliveries": len(placed.get("deliveries") or [])}}
+                    # (next to the base: plan_extension already placed the chain into the snapshot, taps on its
+                    # belts, power: an absolute blueprint that lands where it belongs)
+                    _last = dict(out["plan"], belt=params.get("belt"), mode="extend",
+                                 label=f"bpgen: {params.get('item')} next to the base")
+                    out = {"blueprint": out["blueprint"], "summary": {"notes": out.get("notes") or []},
+                           "absolute": _absolute(out)}
+                elif out.get("entities"):  # (for place(): this plan, put next to the base on request)
+                    sm = out.get("summary") or {}
+                    _sections = {x["name"]: x for x in out.get("sections") or []}
+                    _last = {"entities": out["entities"], "sources": out.get("sources") or [],
+                             "needs": _line_needs(s.data, sm) if not _sections else _section_needs(
+                                 s.data, (out.get("sections") or [{}])[0], sm),
+                             "sinks": [dict(k, item=k.get("item") or sm.get("output")) for k in out.get("sinks") or []],
+                             "belt": sm.get("belt") or params.get("belt"), "mode": params.get("mode") or "line",
+                             "label": f"bpgen: {sm.get('recipe') or params.get('recipe') or params.get('mode')} next to the base"}
             finally:
                 calibrate.NO_MEASURE.reset(token)
         summary = out.get("summary") or {}

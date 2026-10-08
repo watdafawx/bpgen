@@ -19,7 +19,7 @@ USER_MODS = PATHS["user_mods"]
 PACK = ROOT / "mods" / "pack"
 DUMP = ROOT / "data" / "pack-dump.json"
 STAMP = ROOT / "data" / "pack-dump.stamp"
-OWN = {"bpgen-test", "bpgen-companion", "zzz-bpgen-data"}
+OWN = {"bpgen-test", "zzz-bpgen"}
 
 
 def _stamp():
@@ -141,7 +141,7 @@ def user_enabled():
 
 
 def game_wants(active):
-    """from the game's data stage (mod zzz-bpgen-data, fnative loader): bpgen's copy is stale and the game runs the
+    """from the game's data stage (the zzz-bpgen mod, fnative loader): bpgen's copy is stale and the game runs the
     user's own mods (not a test's mod folder) -> what to send: (types, keys to leave out), else None"""
     if up_to_date():
         return None

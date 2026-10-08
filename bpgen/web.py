@@ -1,6 +1,6 @@
 """Local web UI: python -m bpgen serve  ->  http://localhost:8765
 
-Watches the companion mod's requests (like `watch`), plans them, previews the layout, lets you fine-tune the
+Watches the bpgen mod's requests (like `watch`), plans them, previews the layout, lets you fine-tune the
 parameters, edit entities, verify in headless Factorio and copy the blueprint string.
 """
 import itertools

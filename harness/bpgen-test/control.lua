@@ -300,12 +300,12 @@ script.on_init(function()
   storage.surface = make_surface()
   storage.cases = {}
   for i, case in ipairs(spec.cases) do storage.cases[i] = build_case(storage.surface, case, i) end
-  if spec.companion_request and remote.interfaces["bpgen-companion"] then
+  if spec.companion_request and remote.interfaces["bpgen"] then
     for _, st in ipairs(storage.cases) do
       for _, ent in ipairs(st.watch or {}) do
         if ent.type == "assembling-machine" then
-          local err = remote.call("bpgen-companion", "write_request", ent)
-          if err then table.insert(st.errors, "companion: " .. err) end
+          local err = remote.call("bpgen", "write_request", ent)
+          if err then table.insert(st.errors, "bpgen mod: " .. err) end
           break
         end
       end

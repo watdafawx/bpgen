@@ -21,8 +21,8 @@ from bpgen.effects import MACHINE_MODULES, Modules, quality_level
 ROOT = Path(__file__).resolve().parent.parent
 from bpgen.config import PATHS
 REQUEST = PATHS["script_output"] / "bpgen" / "request.json"
-SAVE_STATE = PATHS["script_output"] / "bpgen" / "state.json"  # companion: research and production of the save
-SNAPSHOT = PATHS["script_output"] / "bpgen" / "snapshot.json"  # companion: an area of the base
+SAVE_STATE = PATHS["script_output"] / "bpgen" / "state.json"  # the mod: research and production of the save
+SNAPSHOT = PATHS["script_output"] / "bpgen" / "snapshot.json"  # the mod: an area of the base
 VANILLA_MODS = ("base", "core", "space-age", "quality", "elevated-rails")
 ENTITY_TYPES = ["assembling-machine", "furnace", "beacon", "constant-combinator", "underground-belt", "splitter", "container", "inserter", "transport-belt", "electric-pole", "pipe", "pipe-to-ground", "logistic-container", "roboport", "lab"]
 
@@ -38,6 +38,13 @@ def _cell_for(entities):
     xs = [e["position"]["x"] for e in entities]
     ys = [e["position"]["y"] for e in entities]
     return {"w": int(max(xs) - min(xs)) + 60, "h": int(max(ys) - min(ys)) + 60, "cols": 1}
+
+
+def short_notes(needs, spare):
+    """notes for what a build takes from the base ({item: per minute}) beyond what the base can spare"""
+    return [f"{it}: this needs {need:.0f}/min and your base has {max(spare[it], 0):.0f}/min spare; the rest comes "
+            f"out of what your base already uses" for it, need in sorted(needs.items())
+            if it in spare and spare[it] < need * 0.95]
 
 
 class Service:
@@ -1039,7 +1046,7 @@ class Service:
             names = [n for n in names if calibrate.reach(self.data, n) == reach]
         return sorted(names)
 
-    # ---- the player's save (companion mod files) ----
+    # ---- the player's save (the mod's files) ----
 
     def save_info(self):
         """research, best unlocked tech, production shortfalls and the snapshot's outline, or {} without a state"""
@@ -1088,14 +1095,14 @@ class Service:
         }
 
     def save_check(self, params):
-        """can the save build this blueprint? params: entities. Against the companion's state: recipes not unlocked,
+        """can the save build this blueprint? params: entities. Against the mod's state: recipes not unlocked,
         buildings and modules it can't craft yet (and has none of), and what the logistic network and inventory
         hold of each (bots build ghosts only from what's there).
         -> {state, age, recipes: [locked], buildings: [{item, need, have, craftable}], ok}"""
         if not SAVE_STATE.exists():
             return {"state": False}
         st = json.loads(SAVE_STATE.read_text(encoding="utf-8"))
-        if st.get("recipes") is None:  # an older companion: no recipe list
+        if st.get("recipes") is None:  # an older mod: no recipe list
             return {"state": False, "old": True}
         d = self.data.raw
         enabled = set(st["recipes"])
@@ -1124,7 +1131,7 @@ class Service:
     def module_ideas(self, params):
         """what modules would do for this line: none, productivity, speed, efficiency, productivity + speed beacons,
         each with the machines it takes for the rate (a full belt if none set), power and input per output.
-        Modules: the save's unlocked ones when the companion says, else every visible one; the best of each kind.
+        Modules: the save's unlocked ones when the mod says, else every visible one; the best of each kind.
         -> {target, ideas: [{name, modules, beacon_modules, machines, power_kw, input, beacons}]}"""
         from bpgen.effects import EffectError, Modules, machine_effects, module_effect
         d = self.data.raw
@@ -1229,7 +1236,7 @@ class Service:
         return items
 
     def unlocked_recipes(self):
-        """the save's enabled recipes (companion 0.2.6+), or None"""
+        """the save's enabled recipes (the mod, 0.2.6+), or None"""
         if not SAVE_STATE.exists():
             return None
         return json.loads(SAVE_STATE.read_text(encoding="utf-8")).get("recipes")
@@ -1299,7 +1306,7 @@ class Service:
         """a whole production chain for params["item"] at params["rate_per_min"], fed only by what the snapshot's
         belts carry, placed next to the base with taps (see extend.py)"""
         from bpgen import base, extend
-        snap = self.snapshot_view()
+        snap = self.snapshot_view(params.get("snapshot"))
         if not snap:
             raise planner.PlanError("no snapshot yet: in game, use the bpgen snapshot tool (shortcut bar) on your base")
         item, rate = params["item"], float(params.get("rate_per_min") or 30)
@@ -1307,11 +1314,7 @@ class Service:
         if item not in d.raw["recipe"] and not any(
                 len(r.get("results") or []) == 1 and r["results"][0]["name"] == item for r in d.raw["recipe"].values()):
             raise planner.PlanError(f"nothing makes {item}")
-        st = json.loads(SAVE_STATE.read_text(encoding="utf-8")) if SAVE_STATE.exists() else {}
-        prod = st.get("production") or {}
-        made = {**(prod.get("items_made") or {}), **(prod.get("fluids_made") or {})}
-        used = {**(prod.get("items_used") or {}), **(prod.get("fluids_used") or {})}
-        spare = {k: made.get(k, 0) - used.get(k, 0) for k in set(made) | set(used)}
+        spare = self.spare()
         on_belts = {i for e in snap["entities"] if e["type"] in extend.BELT_TYPES for i in (e.get("lanes") or []) if i}
         assembler = params.get("assembler") or "assembling-machine-2"
         furnace = params.get("furnace") or "stone-furnace"
@@ -1356,28 +1359,37 @@ class Service:
         sinks = [dict(k, item=k.get("item") or item) for k in res.get("sinks") or []]
         placed = extend.place(d, ground, res["entities"], res.get("sources") or [],
                               seed=(seed["x"], seed["y"]) if seed else None, avoid_ore=params.get("avoid_ore", True),
-                              belt=params.get("belt") or "transport-belt", sinks=sinks)
+                              belt=params.get("belt") or "transport-belt", sinks=sinks, bus=params.get("bus") or "auto",
+                              needs={k: v.rate for k, v in r["steps"].items() if not v.recipe})
         needs = {k: v.rate * 60 for k, v in r["steps"].items() if not v.recipe}  # what it takes from the base
-        notes = list(placed["notes"])
-        for it, need in sorted(needs.items()):
-            if it in spare and spare[it] < need * 0.95:
-                notes.append(f"{it}: this needs {need:.0f}/min and your base has {max(spare[it], 0):.0f}/min spare; "
-                             f"the rest comes out of what your base already uses")
+        notes = list(placed["notes"]) + short_notes(needs, spare)
         if r["not_automated"]:
             notes.append("not automated here (bring in): " + ", ".join(n["item"] for n in r["not_automated"]))
         ents = [dict(self.decorate(e), new=True) for e in placed["entities"]]
         bp, box = extend.absolute_blueprint(ents, f"bpgen: {item} {rate:g}/min",
                                             description="Paste it with Ctrl+Shift so splitters replace the belts they tap.")
-        ox, oy = placed["offset"]
-        outputs = [{"item": k.get("item") or item, "position": {"x": k["position"]["x"] + ox, "y": k["position"]["y"] + oy}}
-                   for k in res.get("sinks") or []]
+        outputs = [dict(o, item=o.get("item") or item) for o in placed["outputs"]]  # (the plan may be turned)
         return {"mode": "extend", "item": item, "rate": rate, "entities": ents, "blueprint": bp, "box": box,
                 "outputs": outputs,
                 "offset": placed["offset"], "taps": placed["taps"], "deliveries": placed["deliveries"], "notes": notes,
+                "bus": placed.get("bus"), "upgrades": placed.get("upgrades") or [],
                 "needs": {k: round(v, 1) for k, v in needs.items()}, "made_here": made_here,
                 "steps": [{"item": k, "rate": round(v.rate * 60, 1), "recipe": v.recipe} for k, v in r["steps"].items()
                           if v.recipe],
-                "plan": {"entities": res["entities"], "sources": res.get("sources") or [], "sinks": sinks}}
+                "plan": {"entities": res["entities"], "sources": res.get("sources") or [], "sinks": sinks,
+                         "needs": {k: v.rate for k, v in r["steps"].items() if not v.recipe}}}
+
+    def spare(self):
+        """{item or fluid: per minute the base makes less what it uses} over the last 10 minutes, from the
+        mod's state ({} without one)"""
+        try:
+            st = json.loads(SAVE_STATE.read_text(encoding="utf-8")) if SAVE_STATE.exists() else {}
+        except (OSError, ValueError):
+            return {}
+        prod = st.get("production") or {}
+        made = {**(prod.get("items_made") or {}), **(prod.get("fluids_made") or {})}
+        used = {**(prod.get("items_used") or {}), **(prod.get("fluids_used") or {})}
+        return {k: made.get(k, 0) - used.get(k, 0) for k in set(made) | set(used)}
 
     def production(self, st):
         """items and fluids the factory uses faster than it makes (per minute, last 10 minutes), worst first"""
@@ -1399,18 +1411,19 @@ class Service:
         rows.sort(key=lambda r: -r["short"])
         return rows
 
-    def snapshot_view(self):
-        """the snapshot with entities sized for drawing"""
-        if not SNAPSHOT.exists():
-            return None
-        snap = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
+    def snapshot_view(self, snap=None):
+        """the snapshot (given, else the mod's file) with entities sized for drawing"""
+        if snap is None:
+            if not SNAPSHOT.exists():
+                return None
+            snap = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
         snap["entities"] = [self.decorate(e) for e in snap["entities"]]
         return snap
 
     def extend(self, params):
         """place a plan (entities + sources) into the snapshot: free ground, belt taps, power, absolute blueprint"""
         from bpgen import extend
-        snap = self.snapshot_view()
+        snap = self.snapshot_view(params.get("snapshot"))
         if not snap:
             raise planner.PlanError("no snapshot yet: in game, use the bpgen snapshot tool (shortcut bar) on your base")
         ground = extend.Ground(snap)
@@ -1418,12 +1431,17 @@ class Service:
         placed = extend.place(self.data, ground, params["entities"], params.get("sources") or [],
                               seed=(seed["x"], seed["y"]) if seed else None,
                               avoid_ore=params.get("avoid_ore", True), belt=params.get("belt") or "transport-belt",
-                              connect=params.get("connect", True), sinks=params.get("sinks") or [])
+                              connect=params.get("connect", True), sinks=params.get("sinks") or [],
+                              bus=params.get("bus") or "auto", needs=params.get("needs"),
+                              extend_bus=params.get("extend_bus", True))
+        if params.get("needs"):  # (per minute, what the plan takes from the base)
+            placed["notes"] = list(placed["notes"]) + short_notes(
+                {k: v * 60 for k, v in params["needs"].items()}, self.spare())
         ents = [dict(self.decorate(e), new=True) for e in placed["entities"]]
         bp, box = extend.absolute_blueprint(ents, params.get("label") or "bpgen extension",
                                             description="Paste it with Ctrl+Shift so splitters replace the belts they tap.")
         return {"entities": ents, "offset": placed["offset"], "taps": placed["taps"], "deliveries": placed["deliveries"],
-                "notes": placed["notes"],
+                "notes": placed["notes"], "bus": placed.get("bus"), "upgrades": placed.get("upgrades") or [],
                 "blueprint": bp, "box": box}
 
     def last_request(self):

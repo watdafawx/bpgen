@@ -584,23 +584,41 @@ def plan_base(service, params, progress=None, cancel=None):
         except Exception as e:  # noqa: BLE001
             not_automated.append({"item": "mall", "why": str(e)})
 
-    # everything but the mall as one blueprint, belts routed between the sections
+    # everything as one blueprint, belts routed between the sections: in the compact layout all but the mall (a print
+    # of its own), in the main-bus layout the mall takes its items from the bus too
     route_note = None
     if params.get("routed", True) and any(s["kind"] == "line" for s in sections):
         if progress:
             progress("routing belts between the sections")
-        try:
-            lp = labs_params if params.get("labs", True) and lab in data.raw.get("lab", {}) and 0 < len(packs) <= 4 else None
-            ents, srcs, sinks, desc = routed(service, sections, steps, packs, rate, belt, labs=bool(lp), labs_params=lp,
-                                             raw=raw)
+        lp = labs_params if params.get("labs", True) and lab in data.raw.get("lab", {}) and 0 < len(packs) <= 4 else None
+        want = params.get("layout") or "compact"
+        err = None
+        has_mall = any(s["kind"] == "mall" for s in sections)
+        # (a bus that won't route with the mall: the bus without it, then the compact layout)
+        for layout, with_mall in dict.fromkeys([(want, True)] + ([(want, False)] if want == "bus" and has_mall else [])
+                                               + [("compact", True)]):
+            info = {}
+            try:
+                ents, srcs, sinks, desc = routed(service, sections, steps, packs, rate, belt, labs=bool(lp),
+                                                 labs_params=lp, raw=raw, layout=layout, info=info, with_mall=with_mall)
+            except planner.PlanError as e:
+                err = err or e
+                continue
             bp = planner.blueprint_string(ents, "starter base (connected)", description=desc)
             sections.insert(0, {"name": "whole base (connected)", "kind": "routed", "item": None, "copies": 1,
                                 "result": {"mode": "routed", "entities": [service.decorate(e) for e in ents],
                                            "sources": srcs, "sinks": sinks, "blueprint": bp, "description": desc,
                                            "summary": {"mode": "routed", "packs": packs, "rate": rate,
+                                                       "layout": layout, "mall": info.get("mall", False),
                                                        "inputs": [x.get("lanes") or [x.get("fluid") + " (pipe)"] for x in srcs]}}})
-        except planner.PlanError as e:
-            route_note = f"couldn't connect the sections automatically ({e}); build them from the separate prints"
+            if layout != want:
+                route_note = f"couldn't lay it out as a main bus ({err}); the compact layout instead"
+            elif has_mall and want == "bus" and not with_mall:
+                route_note = f"couldn't fit the mall onto the main bus ({err}); it is a print of its own"
+            err = None
+            break
+        if err:
+            route_note = f"couldn't connect the sections automatically ({err}); build them from the separate prints"
 
     # what comes in from outside: the raw sources of every section (x copies), and what isn't automated
     bring_in = {}
@@ -690,9 +708,10 @@ def special_section(service, params):
 ROUTED_SECONDS = 45
 
 
-def routed(service, sections, steps, packs, rate, belt, labs=True, labs_params=None, raw=None):
+def routed(service, sections, steps, packs, rate, belt, labs=True, labs_params=None, raw=None, layout="compact", info=None, with_mall=True):
     """compose the line sections (and the labs) into one blueprint with routed belts.
     labs=False leaves the science outputs as sinks (that is what verification measures).
+    layout "bus": one column of blocks beside a main bus, the mall included. info (a dict) gets what was built.
     -> (entities, sources, sinks, description)"""
     from bpgen import compose_base, labels
 
@@ -732,10 +751,22 @@ def routed(service, sections, steps, packs, rate, belt, labs=True, labs_params=N
         for x in srcs:
             x["rates"] = {pk: rate for pk in x["lanes"] if pk}
         blocks.append(compose_base.Block("labs", None, ents, srcs, [], max(b.depth for b in blocks) + 1))
+    if layout == "bus" and with_mall:  # (in the compact layout the mall is a print of its own)
+        for s in sections:
+            if s["kind"] == "mall":
+                m = s["result"]
+                ents = [{k: v for k, v in e.items() if k not in ("type", "w", "h")} for e in m["entities"]
+                        if e["name"] != labels.COMBINATOR]
+                blocks.append(compose_base.Block("mall", None, ents, [dict(x) for x in m["sources"]], [],
+                                                 max(b.depth for b in blocks) + 1, last=True))
+                if info is not None:
+                    info["mall"] = True
     # try tight to loose layouts (column height, routing slack) and keep the smallest one that routes
     area = sum(b.width * b.height for b in blocks)
     side = math.sqrt(area * 3)  # blocks fill about a third of the ground once the channels are in
     heights = [None] + [round(side * f) for f in (0.6, 0.8, 1.0, 1.2, 1.5)]
+    if layout == "bus":
+        heights = [None]  # (one column beside the bus: nothing to tune but the slack)
     raw = raw if raw is not None else raw_items(data) - MADE_HERE
     best, err = None, None
     # (all the layouts tried, together, within a budget: past it the best so far is kept, or the base falls back to
@@ -750,7 +781,9 @@ def routed(service, sections, steps, packs, rate, belt, labs=True, labs_params=N
                 err = err or planner.PlanError(f"no connected layout within {ROUTED_SECONDS} s")
                 break
             try:
-                out = compose_base.compose(data, blocks, belt, raw, slack=slack, row_gap=3, max_col_h=max_h)
+                nt = []
+                out = compose_base.compose(data, blocks, belt, raw, slack=slack, row_gap=5 if layout == "bus" else 3,
+                                           max_col_h=max_h, bus=layout == "bus", notes=nt)
             except planner.PlanError as e:
                 err = e
                 continue
@@ -758,11 +791,11 @@ def routed(service, sections, steps, packs, rate, belt, labs=True, labs_params=N
             ys = [e["position"]["y"] for e in out[0]]
             size = (max(xs) - min(xs) + 1) * (max(ys) - min(ys) + 1)
             if best is None or size < best[0]:
-                best = (size, out)
+                best = (size, out, nt)
         if best:
             break  # looser slack only if nothing tight routed
     if best is None:
         raise err
     ents, sources, sinks = best[1]
     ents, sources, sinks, desc = labels.add_labels(data, ents, sources, sinks, "", 0)
-    return ents, sources, sinks, desc
+    return ents, sources, sinks, "\n".join(best[2] + [desc]) if best[2] else desc

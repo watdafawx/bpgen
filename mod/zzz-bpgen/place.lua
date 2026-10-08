@@ -33,7 +33,17 @@ function M.find_spot(player, w, h)
   end
 end
 
---- places the blueprint string centred at `c`: -> the ghosts, the built area's top-left
+--- what in `area` is marked for deconstruction now: {unit_number = entity}
+local function marked(surface, area)
+  local out = {}
+  for _, e in pairs(surface.find_entities_filtered({ area = area, to_be_deconstructed = true })) do
+    if e.unit_number then out[e.unit_number] = e end
+  end
+  return out
+end
+
+--- places the blueprint string centred at `c`: -> the ghosts, the built area's top-left, its area, and what the
+--- paste marked for deconstruction (the belts under its splitters, trees: Undo unmarks them)
 function M.place(player, bp, c, box)
   local inv = game.create_inventory(1)
   local stack = inv[1]
@@ -45,18 +55,25 @@ function M.place(player, bp, c, box)
   end
   -- (an absolute blueprint, next to the base: at its box, superforced so its splitters replace the belts they tap)
   if box then c = { x = box[1] + box[3] / 2, y = box[2] + box[4] / 2 } end
+  local reach = box and { { box[1] - 1, box[2] - 1 }, { box[1] + box[3] + 1, box[2] + box[4] + 1 } }
+    or { { c.x - 200, c.y - 200 }, { c.x + 200, c.y + 200 } }
+  local before = marked(player.surface, reach)
   local ghosts = stack.build_blueprint({ surface = player.surface, force = player.force, position = c,
     build_mode = box and defines.build_mode.superforced or defines.build_mode.forced, skip_fog_of_war = false,
     raise_built = true, player = player })
   inv.destroy()
+  local now = {}
+  for id, e in pairs(marked(player.surface, reach)) do
+    if not before[id] then now[#now + 1] = e end
+  end
   local x1, y1, x2, y2
   for _, g in pairs(ghosts) do
     local b = g.bounding_box
     x1, y1 = math.min(x1 or b.left_top.x, b.left_top.x), math.min(y1 or b.left_top.y, b.left_top.y)
     x2, y2 = math.max(x2 or b.right_bottom.x, b.right_bottom.x), math.max(y2 or b.right_bottom.y, b.right_bottom.y)
   end
-  if not x1 then return ghosts end
-  return ghosts, { x = math.floor(x1 + 0.5), y = math.floor(y1 + 0.5) }, { { x1, y1 }, { x2, y2 } }
+  if not x1 then return ghosts, nil, nil, now end
+  return ghosts, { x = math.floor(x1 + 0.5), y = math.floor(y1 + 0.5) }, { { x1, y1 }, { x2, y2 } }, now
 end
 
 --- the nearest belt of the player's carrying `item`, within 80 tiles of `pos` and outside `skip`

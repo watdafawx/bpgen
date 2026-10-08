@@ -1,9 +1,0 @@
-{
-  "name": "zzz-bpgen-data",
-  "version": "0.1.0",
-  "title": "bpgen data (local)",
-  "author": "mtopfox",
-  "factorio_version": "2.0",
-  "description": "With the fnative loader: when your mods change, hands their prototypes to bpgen as the game loads them (no separate headless dump). Named to load last, after every mod's final fixes. Does nothing without the loader.",
-  "dependencies": ["base"]
-}
