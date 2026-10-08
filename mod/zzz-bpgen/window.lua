@@ -1514,4 +1514,28 @@ M.handlers = {
   end,
 }
 
+--- for other mods (AI Crew's goals): Extend's request for a line of `item` at `rate` a minute next to the base
+function M.extend_request(player, item, rate)
+  local u = unlocked(player)
+  local belt = u.belts[#u.belts]
+  return { tick = game.tick, surface = player.surface.name, bonuses = ctx.bonuses(player.force), inserters = u.inserters,
+    belts = u.belts, poles = u.poles, belt = belt,
+    params = { mode = "extend", item = item, rate_per_min = rate, belt = belt, bus = "auto",
+      assembler = best_of_type(player, "assembling-machine", "crafting"), furnace = best_of_type(player, "furnace", "smelting") } }
+end
+
+--- the inserter setups a plan asked to measure, measured (bench.on_done then hands them to ctx.measured)
+function M.calibrate(player, measure)
+  preview_surface()
+  bench.calibrate(player.index, measure)
+end
+
+--- a plan's ghosts placed now: at its box next to the base when it has one, else around the player; -> how many
+function M.place_plan(player, res)
+  local box = res.absolute and res.absolute.box
+  local ghosts = place.place(player, res.blueprint, not box and player.position or nil, box)
+  placed[player.index] = ghosts
+  return #ghosts, box
+end
+
 return M

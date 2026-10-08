@@ -174,7 +174,9 @@ def _absolute(placed):
     return {"box": placed["box"], "taps": len(placed.get("taps") or []),
             "deliveries": len([d for d in dl if not d.get("new_lane")]),
             "new_lanes": len([d for d in dl if d.get("new_lane")]), "axis": (placed.get("bus") or {}).get("axis"),
-            "upgrades": placed.get("upgrades") or []}
+            "upgrades": placed.get("upgrades") or [],
+            # (what has to be brought by hand, and where the product comes out: AI Crew feeds and empties these)
+            "inputs": placed.get("inputs") or [], "outputs": placed.get("outputs") or []}
 
 
 def place(request: str) -> str:

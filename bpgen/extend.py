@@ -796,6 +796,7 @@ def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt=
     blocked |= ends
     spans = set(ground.spans)
     taps = []
+    inputs = []  # belt inputs nothing could be routed to: {items, position} (fed by hand)
     ug, ug_max = chain.related_belts(data, belt)
     names = (belt, ug, chain.related_splitter(data, belt), ug_max)
     foreign = pspans = None
@@ -892,6 +893,8 @@ def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt=
                 taps.append({"items": items, "from": belt_e["position"], "belts": len(ents)})
             if problem:
                 notes.append(problem + "; bring it to the input by hand")
+                inputs.append({"items": sorted(s.get("rates") or [l for l in lanes[:2] if l]),
+                               "position": {"x": goal[0] + 0.5, "y": goal[1] + 0.5}})
     upgrades = []  # overdrawn bus lanes: where they run, what they need (the window offers to upgrade them)
     for ln in main["lanes"] if main else []:
         took, used = main["load"].get(ln["at"], 0), ln.get("used", 0)
@@ -980,6 +983,6 @@ def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt=
     outputs = [{"item": s.get("item"), "position": {"x": s["position"]["x"] + dx, "y": s["position"]["y"] + dy}}
                for s in sinks or []]
     return {"offset": [dx, dy], "turn": turn, "entities": new + poles, "taps": taps, "deliveries": deliveries,
-            "outputs": outputs, "notes": notes, "upgrades": upgrades,
+            "outputs": outputs, "inputs": inputs, "notes": notes, "upgrades": upgrades,
             "bus": {k: v for k, v in main.items() if k != "tiles"} | {"lanes": len(main["lanes"])} if main else None}
 

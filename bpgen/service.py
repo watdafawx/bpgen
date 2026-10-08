@@ -1370,7 +1370,7 @@ class Service:
                                             description="Paste it with Ctrl+Shift so splitters replace the belts they tap.")
         outputs = [dict(o, item=o.get("item") or item) for o in placed["outputs"]]  # (the plan may be turned)
         return {"mode": "extend", "item": item, "rate": rate, "entities": ents, "blueprint": bp, "box": box,
-                "outputs": outputs,
+                "outputs": outputs, "inputs": placed.get("inputs") or [],
                 "offset": placed["offset"], "taps": placed["taps"], "deliveries": placed["deliveries"], "notes": notes,
                 "bus": placed.get("bus"), "upgrades": placed.get("upgrades") or [],
                 "needs": {k: round(v, 1) for k, v in needs.items()}, "made_here": made_here,
@@ -1442,6 +1442,7 @@ class Service:
                                             description="Paste it with Ctrl+Shift so splitters replace the belts they tap.")
         return {"entities": ents, "offset": placed["offset"], "taps": placed["taps"], "deliveries": placed["deliveries"],
                 "notes": placed["notes"], "bus": placed.get("bus"), "upgrades": placed.get("upgrades") or [],
+                "outputs": placed.get("outputs") or [], "inputs": placed.get("inputs") or [],
                 "blueprint": bp, "box": box}
 
     def last_request(self):

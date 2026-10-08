@@ -221,10 +221,39 @@ on_event("bpgen-request", function(e)
   player.print({ "", "[bpgen] request sent: [recipe=" .. request.recipe .. "] in [entity=" .. request.machine .. "]" })
 end)
 
+-- lines other mods ask for (remote plan_line, AI Crew's goals): planned like Extend, placed as ghosts straight away,
+-- then remote.call(<asker>, "line_placed", player_index, item, ghosts, error, {box, inputs, outputs})
+local auto = {} -- player index -> {item, rate, reply}
+
+local function line_done(player, ghosts, err, abs)
+  local a = auto[player.index]
+  auto[player.index] = nil
+  if a and remote.interfaces[a.reply] and remote.interfaces[a.reply].line_placed then
+    remote.call(a.reply, "line_placed", player.index, a.item, ghosts, err, abs)
+  end
+end
+
+local function plan_line(player, item, rate, reply)
+  auto[player.index] = { item = item, rate = rate, reply = reply or "ai-crew" }
+  if not in_game() then return line_done(player, nil, "bpgen plans only with the fnative loader") end
+  local req = window.extend_request(player, item, rate)
+  measure(player, around(player.position), function(snap)
+    req.params.snapshot = snap
+    local id, err = native.start("py", "bpgen.ingame:plan", helpers.table_to_json(req))
+    if id then jobs[id] = { player = player.index, auto = true } else line_done(player, nil, err) end
+  end)
+end
+
 local function finish(job, out)
   local player = game.get_player(job.player)
   if not (player and player.valid) then return end
   local res = out and helpers.json_to_table(out) or { error = "no answer" }
+  if job.auto then
+    if res.measure then return window.calibrate(player, res.measure) end -- then planned again (job.measured)
+    if not res.blueprint then return line_done(player, nil, tostring(res.error)) end
+    local n = window.place_plan(player, res)
+    return line_done(player, n, nil, res.absolute or {})
+  end
   if job.window and window.on_result(player, res) then return end
   if not res.blueprint then
     player.print("[bpgen] can't plan [recipe=" .. job.recipe .. "]: " .. tostring(res.error))
@@ -273,7 +302,10 @@ on_nth(6, function()
       elseif job.measured then
         local player = game.get_player(job.player)
         if status ~= "done" then safe.log("bpgen.ingame:measured failed: " .. tostring(out)) end
-        if player then window.plan(player) end
+        if player then
+          local a = auto[player.index]
+          if a then plan_line(player, a.item, a.rate, a.reply) else window.plan(player) end
+        end
       elseif job.stale then
         local r = status == "done" and helpers.json_to_table(out) or {}
         if r.stale then
@@ -680,6 +712,10 @@ on_event(defines.events.on_player_alt_selected_area, on_selected)
 
 -- for automated tests (no player to press the hotkey in a headless run)
 remote.add_interface("bpgen", {
+  -- a production line of `item` at `rate` a minute next to the player's base (Extend), placed as ghosts; the answer
+  -- comes back as remote.call(reply or "ai-crew", "line_placed", player_index, item, ghosts, error, absolute) where
+  -- absolute = {box = {x, y, w, h}, inputs = {{items, position}} to feed by hand, outputs = {{item, position}}}
+  plan_line = function(player_index, item, rate, reply) plan_line(game.get_player(player_index), item, rate, reply) end,
   -- the bpgen window (the fnative hub has a button for it); for tests also: fill it in and plan
   open_window = function(player_index, prefill) window.open(game.get_player(player_index), prefill) end,
   plan_window = function(player_index) window.plan(game.get_player(player_index)) end,
