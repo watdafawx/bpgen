@@ -24,7 +24,10 @@ REQUEST = PATHS["script_output"] / "bpgen" / "request.json"
 SAVE_STATE = PATHS["script_output"] / "bpgen" / "state.json"  # the mod: research and production of the save
 SNAPSHOT = PATHS["script_output"] / "bpgen" / "snapshot.json"  # the mod: an area of the base
 VANILLA_MODS = ("base", "core", "space-age", "quality", "elevated-rails")
-ENTITY_TYPES = ["assembling-machine", "furnace", "beacon", "constant-combinator", "underground-belt", "splitter", "container", "inserter", "transport-belt", "electric-pole", "pipe", "pipe-to-ground", "logistic-container", "roboport", "lab"]
+ENTITY_TYPES = ["assembling-machine", "furnace", "beacon", "constant-combinator", "underground-belt", "splitter", "container", "inserter", "transport-belt", "electric-pole", "pipe", "pipe-to-ground", "logistic-container", "roboport", "lab", "mining-drill"]
+# (sizes of what the bus design places when bpgen's copy of the mods' data has no mining drills yet)
+KNOWN_SIZES = {"electric-mining-drill": ("mining-drill", 3), "pumpjack": ("mining-drill", 3),
+               "burner-mining-drill": ("mining-drill", 2)}
 
 
 def _size_of(entities):
@@ -659,6 +662,9 @@ class Service:
         """add type and footprint so the preview can draw it"""
         t, proto = self.proto(e["name"])
         w = h = 1
+        if proto is None and e["name"] in KNOWN_SIZES:
+            t, w = KNOWN_SIZES[e["name"]]
+            h = w
         if proto and proto.get("collision_box"):
             (x1, y1), (x2, y2) = proto["collision_box"]
             w, h = max(1, math.ceil(x2 - x1)), max(1, math.ceil(y2 - y1))

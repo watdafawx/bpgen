@@ -411,7 +411,8 @@ def plan(request: str) -> str:
                            "absolute": _absolute(out)}
                 elif params.get("mode") == "busdesign":  # (absolute, like extend: it lands on the patches)
                     from bpgen import busdesign
-                    busdesign.save_last(out, params)
+                    if not params.get("add_to_bus"):  # (more lanes on a bus: the bus design it fits stays)
+                        busdesign.save_last(out, params)
                     _last = None
                     out = {"blueprint": out["blueprint"], "summary": {"notes": out.get("notes") or []},
                            "absolute": _absolute(out)}

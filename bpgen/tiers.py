@@ -59,7 +59,7 @@ def _snap_of(bp_string, corner):
 FLOW = {"north": 0, "east": 4, "south": 8, "west": 12}
 
 
-def fit_to_bus(svc, ents, sources, bus, belt, beside=False):
+def fit_to_bus(svc, ents, sources, bus, belt, beside=False, makes=None):
     """a bus-layout base (flowing south, its inputs on row 0) fitted to the end of a bus's lanes: turned to the bus's
     direction, belts from each lane to the base's input of that item (in order, crossing underground). The lanes it
     doesn't need run on past its east side (its frame) and end there, side by side, for the next tier (`exits`).
@@ -161,7 +161,7 @@ def fit_to_bus(svc, ents, sources, bus, belt, beside=False):
             world += run
     clean = [{key: v for key, v in e.items() if key not in ("type", "w", "h", "fluid", "new")} for e in world]
     rel = extend.shifted(clean, -cw[0], -cw[1])  # (the blueprint's coordinates: the C's corner at 0, 0)
-    desc = fitted_description(cw, direction, out_lanes)
+    desc = fitted_description(cw, direction, out_lanes, makes)
     bp = marked(planner.blueprint_string(rel, "starter base (on your bus)", description=desc), (0, 0),
                 (cw[0] % GRID, cw[1] % GRID))
     occ = extend.plan_tiles([svc.decorate(e) for e in world])
@@ -190,9 +190,25 @@ def ground_taken(svc, snapshot, buildings=True):
     return g.blocked(avoid_ore=False) if buildings else g.obstacles | g.water
 
 
-def fitted_description(corner, direction, exits):
+MAKES = "Science a minute:"  # (a base's description: what it was planned to make, read back by add_tier)
+
+
+def makes_line(science):
+    return MAKES + " " + ", ".join(f"{k} {v:g}" for k, v in sorted(science.items()))
+
+
+def read_makes(description):
+    """makes_line back -> {pack: per minute}, or None"""
+    import re
+    for line in (description or "").splitlines():
+        if line.startswith(MAKES):
+            return {k: float(v) for k, v in re.findall(r"([\w-]+) (\d+(?:\.\d+)?)", line[len(MAKES):])}
+    return None
+
+
+def fitted_description(corner, direction, exits, makes=None):
     """what a later tier needs of a fitted base, in its blueprint's description (it survives the game's export)"""
-    lines = [FITTED, f"C at {corner[0]},{corner[1]}; bus flowing {direction}"]
+    lines = [FITTED, f"C at {corner[0]},{corner[1]}; bus flowing {direction}"] + ([makes] if makes else [])
     if exits:
         lines.append("lanes passed on: " + "; ".join(f"{e['item']} at {e['end'][0]},{e['end'][1]}" for e in exits))
     return "\n".join(lines)
@@ -244,7 +260,10 @@ def add_tier(svc, params, progress=None, cancel=None):
     if fitted and not fitted["lanes"]:
         raise planner.PlanError("the held base passes no spare bus lanes on: for the next tier plan a bigger base "
                                 "instead (it fits to the same bus end; paste it over the old one, C on C)")
-    have = svc.analyze_blueprint(print_).get("science") or {}  # (that print only: a book's sections repeat it)
+    # what it makes: what it was planned for (its description), else what its machines make flat out (that print
+    # only: a book's sections repeat it)
+    have = read_makes((base._decode(print_).get("blueprint") or {}).get("description")) \
+        or svc.analyze_blueprint(print_).get("science") or {}
     data = svc.data
     lab = params.get("lab") or "lab"
     spm = float(params.get("spm") or 30)
@@ -253,7 +272,8 @@ def add_tier(svc, params, progress=None, cancel=None):
     if not targets:
         raise planner.PlanError(f"the held base already makes {spm:g}/min of every pack: ask for more")
     p = {k: v for k, v in params.items() if k not in ("add_to", "spm", "import")}
-    p.update(targets=targets, layout="bus", fit_bus=False)
+    total = {k: round(have.get(k, 0) + targets.get(k, 0), 2) for k in set(have) | set(targets)}
+    p.update(targets=targets, layout="bus", fit_bus=False, makes_total=total)
     recipes = data.raw["recipe"]
     if not any((recipes.get(e.get("recipe") or "") or {}).get("category") == "smelting" or svc.decorate(e)["type"] == "furnace"
                for e in old):
@@ -275,7 +295,7 @@ def add_tier(svc, params, progress=None, cancel=None):
         fit = fit_to_bus(svc, ents, srcs, {"direction": fitted["direction"], "lanes": fitted["lanes"],
                                            "tiles": sorted(taken),
                                            "end_pole": extend.nearest(old_poles, tuple(fitted["lanes"][0]["end"]))},
-                         p.get("belt") or "transport-belt", beside=True)
+                         p.get("belt") or "transport-belt", beside=True, makes=makes_line(total))
         if not fit:
             raise planner.PlanError("none of the lanes the held base passes on carry what this tier needs")
         sm = dict(out["summary"])
@@ -295,7 +315,8 @@ def add_tier(svc, params, progress=None, cancel=None):
     moved = [{k: v for k, v in e.items() if k not in ("type", "w", "h", "fluid")}
              for e in extend.shifted(ents, dx, dy)]
     label = f"bpgen: add {', '.join(f'{k} {v:g}/min' for k, v in targets.items())}"
-    bp = marked(planner.blueprint_string(moved, label, description=first["result"].get("description")), corner,
+    desc = base._decode(first["result"]["blueprint"])["blueprint"].get("description")  # (with what both make)
+    bp = marked(planner.blueprint_string(moved, label, description=desc), corner,
                 _snap_of(print_, corner))  # (snapped as the held base: its C on the old C, wherever that is)
     sm = dict(out["summary"])
     sm["notes"] = [f"the held base makes {', '.join(f'{k} {v:g}' for k, v in have.items()) or 'no science'}/min: "

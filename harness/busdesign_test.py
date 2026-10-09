@@ -52,6 +52,7 @@ script.on_event(defines.events.on_tick, function(e)
     for _, en in ipairs(spec.entities) do
       local made = s.create_entity({ name = en.name, position = en.position, direction = en.direction, force = force,
         type = en.ug_type, recipe = en.recipe })
+      if made and en.output_priority then made.splitter_output_priority = en.output_priority end
       if not made then helpers.write_file("bpgen/busdesign.txt", "not built: " .. en.name .. " at " .. en.position.x .. "," .. en.position.y .. "\n", true) end
     end
     local powered = {}
@@ -71,7 +72,20 @@ script.on_event(defines.events.on_tick, function(e)
       ends[i] = s.find_entity("transport-belt", { ln["end"][1] + 0.5, ln["end"][2] + 0.5 })
       counts[i] = 0
     end
-  elseif e.tick > 2 and e.tick % 4 == 0 then
+  end
+  if e.tick > 2 and e.tick % 3600 == 0 then  -- (burner columns: how many are short of fuel, minute by minute)
+    local s = game.surfaces.nauvis
+    local n, fuel, ore = 0, 0, 0
+    for _, f in pairs(s.find_entities_filtered({ type = "furnace" })) do
+      n = n + 1
+      if f.status == defines.entity_status.no_fuel then fuel = fuel + 1 end
+      if f.status == defines.entity_status.no_ingredients then ore = ore + 1 end
+    end
+    if n > 0 then helpers.write_file("bpgen/busdesign.txt", "status minute " .. math.floor(e.tick / 3600) .. ": " .. n
+      .. " furnaces, " .. fuel .. " without fuel, " .. ore .. " without ore\n", true) end
+  end
+  if e.tick < 3 then
+  elseif e.tick % 4 == 0 then
     for i, belt in pairs(ends) do
       for l = 1, 2 do
         local line = belt.get_transport_line(l)
@@ -138,7 +152,7 @@ def main():
     print("\n".join(out["notes"]))
     x0, y0, w, h = out["box"]
     ticks = WARMUP + int(MINUTES * 3600)
-    spec = {"entities": [{k: e[k] for k in ("name", "position", "direction", "ug_type", "recipe") if k in e}
+    spec = {"entities": [{k: e[k] for k in ("name", "position", "direction", "ug_type", "recipe", "output_priority") if k in e}
                          for e in out["entities"]],
             "lanes": out["lanes"], "patches": {k: list(v) for k, v in PATCHES.items()},
             "box": [x0 - 8, y0 - 8, x0 + w + 8, y0 + h + 8], "ticks": ticks, "warmup": WARMUP}

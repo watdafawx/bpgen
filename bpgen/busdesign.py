@@ -20,7 +20,7 @@ The bus head is laid out flowing north, then turned to the chosen direction and 
 """
 import math
 
-from bpgen import chain, extend, planner, router
+from bpgen import chain, extend, oil, planner, router
 from bpgen.planner import EAST, NORTH, POLE, SOUTH, WEST, PlanError
 
 DIR_VEC = {NORTH: (0, -1), EAST: (1, 0), SOUTH: (0, 1), WEST: (-1, 0)}
@@ -233,7 +233,8 @@ def head(lanes, columns, length, names, balance=True, max_ug=4):
         splitters = {xs[k] + 7 for k, _, _ in coal_goals}
         for x in range(bx0, bx1 + 1):
             if x in splitters:
-                ents.append(ent(splitter, x + 0.5, m_row + 0.0, EAST))  # (rows m_row - 1 and m_row: the branch above)
+                # (rows m_row - 1 and m_row: the branch above, first: the furnaces get their coal, the bus what they leave)
+                ents.append(ent(splitter, x + 0.5, m_row + 0.0, EAST, output_priority="left"))
             else:
                 ents.append(ent(belt, x + 0.5, m_row + 0.5, EAST))
         blocked = occupied | ext.plan_tiles([e for e in ents if e["position"]["y"] > m_row - 2])
@@ -468,7 +469,7 @@ def plan(svc, params):
     origin = params.get("origin") or {}
     ox, oy = origin.get("x", 0), origin.get("y", 0)
     r = math.floor((dp.get("resource_searching_radius") or 2.49) + 0.5)
-    notes = []
+    notes, inputs = [], []  # (inputs: what has to be brought by hand, and where)
 
     # mining: every patch's ore tiles, per resource, in bands of one trunk each
     resources = {name: extend.runs_tiles(runs) for name, runs in (snap.get("resources") or {}).items()}
@@ -503,6 +504,15 @@ def plan(svc, params):
                 mine_ents += ents
                 trunks.append({"item": item, "start": start, "dir": d, "rate": min(cap / 2 if half else cap, n * rate),
                                "drills": n, "ore_lane": "L" if d == EAST else "R"})  # (north collectors: header's north lane)
+    # oil fields picked: pumpjacks, their crude to an oil block (plastic, sulfur), its products onto bus lanes
+    oil_fields = oil.fields(snap, patches)
+    oil_block = None
+    if oil_fields:
+        crude = sum(oil.crude_rate(data, n, a) for n, _, a in oil_fields)
+        oil_block = oil.plan_block(svc, crude, belt, water=True)
+        oil_block["crude"] = crude
+        for item, r in oil_block["products"].items():
+            trunks.append({"item": item, "rate": r, "drills": 0, "oil": True, "start": None, "dir": EAST})
     if not trunks:
         raise PlanError("no ore in the picked areas that the drills can mine")
 
@@ -531,6 +541,30 @@ def plan(svc, params):
         if coal and fuel:
             burn = planner.energy(fp.get("energy_usage") or "90kW") / planner.energy(fuel)
             coal["out_rate"] = max(0.0, coal["rate"] - burn * sum(2 * tr["n"] for tr in cols if tr["kind"] == "smelt"))
+    adding = None
+    if params.get("add_to_bus"):  # (more for the bus that's here: a lane of its own beside it for each new trunk)
+        main = extend.find_bus(ground)
+        if not main:
+            raise PlanError("no main bus around you to add to (3+ long straight belts side by side): stand by it")
+        cols = [tr for tr in cols if tr["kind"] != "chest"]
+        new_lanes = []
+        for tr in cols:
+            got = extend.new_bus_lane(data, ground, main, tr["bus_item"], max_ug)
+            if not got:
+                raise PlanError(f"no room beside your bus for another {tr['bus_item']} lane")
+            lents, lhead, _ = got
+            ground.taken.update({t: {"type": "new"} for e in lents for t in extend.footprint(svc.decorate(e))})
+            main["lanes"].append({"at": lhead[0] if main["axis"] == 0 else lhead[1], "items": {tr["bus_item"]},
+                                  "belt": lents[0]["name"], "lo": main["lo"], "hi": main["hi"]})
+            main["lanes"].sort(key=lambda ln: ln["at"])
+            new_lanes.append((lents, lhead))
+        # (the smelters upstream of the bus, flowing its way, their lanes short stubs belted onto the new lanes)
+        k, length, balance = main["dir"] // 4, 0, False
+        lanes = [{"item": tr["bus_item"], "x": 2 * i, "in": 2 * i, "group": 2 * i, "balanced": False}
+                 for i, tr in enumerate(cols)]
+        dv = router.DIRS[main["dir"]]
+        ox, oy = new_lanes[0][1][0] - 25 * dv[0], new_lanes[0][1][1] - 25 * dv[1]
+        adding = (main, new_lanes)
     for ln, tr in zip(lanes, cols):
         tr["lane"] = ln
 
@@ -539,16 +573,60 @@ def plan(svc, params):
     turned = [svc.decorate(_turn(e, k)) for e in local]
     goals = [g and (_turn_tile(g[0], k), (g[1] + 4 * k) % 16) for g in goals]
     ground.taken.update({t: {"type": "new"} for e in mine_ents for t in extend.footprint(svc.decorate(e))})
-    dx, dy = extend.find_spot(ground, turned, (ox, oy), avoid_ore=True)
+    keep = ()
+    if adding:  # (upstream of the bus by the block's own length, the way into each new lane's head kept clear)
+        main, new_lanes = adding
+        dv = router.DIRS[main["dir"]]
+        occ = extend.plan_tiles(turned)
+        along = (max(t[1] for t in occ) - min(t[1] for t in occ)) if dv[0] == 0 else \
+            (max(t[0] for t in occ) - min(t[0] for t in occ))
+        hx, hy = new_lanes[0][1]
+        ox, oy = hx - (along // 2 + 8) * dv[0], hy - (along // 2 + 8) * dv[1]
+        keep = {(lh[0] - j * dv[0] + i * dv[1], lh[1] - j * dv[1] + i * dv[0]) for _, lh in new_lanes
+                for j in range(1, 5) for i in (-1, 0, 1)}
+    dx, dy = extend.find_spot(ground, turned, (ox, oy), avoid_ore=True, keep_clear=keep)
     head_ents = extend.shifted(turned, dx, dy)
     goals = [g and ((g[0][0] + dx, g[0][1] + dy), g[1]) for g in goals]
+    oil_ents, crude_goal = [], None
+    if oil_block:  # (the oil block beside the head: its products start where its output belts end)
+        ground.taken.update({t: {"type": "new"} for e in head_ents for t in extend.footprint(e)})
+        block = [svc.decorate(e) for e in oil_block["entities"]]
+        bdx, bdy = extend.find_spot(ground, block, (ox, oy), avoid_ore=True)
+        oil_ents = extend.shifted(block, bdx, bdy)
+        at = {t: e for e in oil_ents for t in extend.footprint(e)}
+        for sk in oil_block["sinks"]:
+            t = (math.floor(sk["position"]["x"]) + bdx, math.floor(sk["position"]["y"]) + bdy)
+            d = (at.get(t) or {}).get("direction", EAST)
+            tr = next((p for p in cols if p.get("oil") and p["item"] == sk.get("item")), None)
+            if tr:
+                tr["start"], tr["dir"] = (t[0] + router.DIRS[d][0], t[1] + router.DIRS[d][1]), d
+        for src in oil_block["sources"]:
+            t = (math.floor(src["position"]["x"]) + bdx, math.floor(src["position"]["y"]) + bdy)
+            if src.get("fluid") == "crude-oil":
+                crude_goal = t
+            elif src.get("fluid"):
+                inputs.append({"items": [src["fluid"]], "position": {"x": t[0] + 0.5, "y": t[1] + 0.5}})
+                notes.append(f"oil: the [fluid={src['fluid']}] inlet is at ({t[0]}, {t[1]}): an offshore pump's pipe "
+                             "goes there")
+            elif src.get("kind") == "belt":  # (its coal: a chest at the belt's start, filled by hand)
+                oil_ents += [svc.decorate({"name": oil.CHEST_INSERTER, "position": {"x": t[0] - 0.5, "y": t[1] + 0.5},
+                                           "direction": WEST}),
+                             svc.decorate({"name": oil.CHEST, "position": {"x": t[0] - 1.5, "y": t[1] + 0.5}})]
+                notes.append(f"oil: fill the chest at ({t[0] - 2}, {t[1]}) with "
+                             + " ".join(f"[item={i}]" for i in dict.fromkeys(i for i in src.get("lanes") or [] if i)))
 
     # the trunks, each routed from its patch to its column
-    all_new = [svc.decorate(e) for e in mine_ents] + head_ents
+    all_new = [svc.decorate(e) for e in mine_ents] + head_ents + oil_ents
     blocked = ground.blocked(avoid_ore=False) | extend.plan_tiles(all_new)
+    starts = []
+    if adding:  # (each stub's way out to its new lane: kept for its own belt, from the trunks too)
+        for tr in cols:
+            st = _turn_tile((tr["lane"]["x"], -7), k)
+            starts.append((st[0] + dx, st[1] + dy))
+        blocked |= set(starts)
     spans = set(ground.spans)
     x1, y1, x2, y2 = ground.bounds
-    inputs, routed = [], []
+    routed = []
     for tr, (goal, gd) in sorted(((t, g) for t, g in zip(cols, goals) if g), key=lambda p: abs(p[0]["start"][0] - p[1][0][0])
                                  + abs(p[0]["start"][1] - p[1][0][1])):
         try:
@@ -563,6 +641,35 @@ def plan(svc, params):
         router.reserve(path, blocked, spans)
         routed += [svc.decorate(e) for e in extend.path_entities(path, belt, ug)]
         tr["goal"] = goal
+    pj_poles = []
+    if oil_block:  # (pumpjacks on the fields, piped to the block's crude inlet, never touching its other fluids)
+        pj, outs, _ = oil.pumpjacks(svc, oil_fields, blocked)
+        pj = [svc.decorate(e) for e in pj]
+        foreign = oil.foreign_fluids(oil_ents, crude_goal) if crude_goal else {}
+        foreign.update({t: "crude-oil" for e in pj if e["name"] == oil.PUMPJACK for t in extend.footprint(e)})
+        pipes = oil.pipe_crude(crude_goal, outs, blocked, foreign, (x1, y1, x2, y2)) if crude_goal else None
+        if pipes is None:
+            notes.append("oil: no pipe route from the pumpjacks to the refineries: pipe the crude in yourself")
+            if crude_goal:
+                inputs.append({"items": ["crude-oil"], "position": {"x": crude_goal[0] + 0.5, "y": crude_goal[1] + 0.5}})
+        routed += pj + [svc.decorate(e) for e in pipes or []]
+        pj_poles = extend.pole_tiles(pj)
+        n_pj = sum(e["name"] == oil.PUMPJACK for e in pj)
+        notes.insert(0, f"oil: {n_pj} pumpjacks, {oil_block['crude']:.0f} crude a second: "
+                     + ", ".join(f"[item={k}] {v * 60:.0f}/min" for k, v in oil_block["products"].items()))
+    if adding:  # (each stub onto its new lane's head)
+        main, new_lanes = adding
+        for tr, (lents, lhead), st in zip(cols, new_lanes, starts):
+            blocked.discard(st)
+            try:
+                path = router.route(blocked, [(st, [main["dir"], (main["dir"] + 4) % 16, (main["dir"] + 12) % 16])],
+                                    tuple(lhead), main["dir"], (x1, y1, x2, y2), max_ug, underground_spans=spans)
+            except router.RouteError:
+                raise PlanError(f"no way for the {tr['bus_item']} from its smelters to its new lane") from None
+            router.reserve(path, blocked, spans)
+            routed += [svc.decorate(e) for e in extend.path_entities(path, belt, ug) + lents]
+        notes.append(f"added to your bus: {len(new_lanes)} new lane{'s' if len(new_lanes) > 1 else ''} beside it ("
+                     + ", ".join(f"[item={tr['bus_item']}]" for tr in cols) + "), fed from these patches")
     # power, one network: a pole line from each patch along its trunk to the smelters, and on to the bus's end
     mine_poles = extend.pole_tiles(mine_ents)
     head_poles = extend.pole_tiles(head_ents)
@@ -582,6 +689,19 @@ def plan(svc, params):
             blocked.add(t)
             lines += run + [{"name": POLE, "position": {"x": t[0] + 0.5, "y": t[1] + 0.5}}]
             end_pole = list(t)
+    if oil_block:  # (the oil block and each pumpjack's pole: onto the network, each from the nearest pole so far)
+        net = extend.pole_tiles(head_ents) + extend.pole_tiles(lines)
+        for group in (extend.pole_tiles(oil_ents), *[[p] for p in pj_poles]):
+            if not group or not net:
+                continue
+            a, b = min(((extend.nearest(net, g), g) for g in group),
+                       key=lambda ab: (ab[0][0] - ab[1][0]) ** 2 + (ab[0][1] - ab[1][1]) ** 2)
+            run = extend.pole_chain(a, b, blocked)
+            if run is None:
+                unpowered += 1
+                continue
+            lines += run
+            net += extend.pole_tiles(run) + group
     ents = [dict(e, new=True) for e in all_new + routed + [svc.decorate(e) for e in lines]]
 
     nd = sum(tr["drills"] for tr in trunks)

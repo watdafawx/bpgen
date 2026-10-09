@@ -283,6 +283,8 @@ local MODES = { "line", "mall", "base", "extend", "busdesign" }
 local MODE_NAMES = { "Production line", "Mall", "Starter base", "Extend my base", "Bus design" }  -- (the tabs along the top)
 local BUS_DIRS = { "north", "east", "south", "west" }
 local patch_areas = {}  -- player index -> {{area, counts = {resource = tiles}}}: the ore patches picked for a bus design
+local bus_shift = {}  -- player index -> tiles the bus head is moved sideways from the player (the ◀ ▶ arrows)
+local BUS_STEP = 16
 
 local function row(parent, caption, tooltip)
   local f = parent.add({ type = "flow", direction = "horizontal" })
@@ -535,6 +537,8 @@ function M.open(player, prefill)
     lose_focus_on_confirm = true }).style.width = 50
   field(fs, "Length").add({ type = "textfield", name = "bpgen_bus_length", text = "40", numeric = true,
     lose_focus_on_confirm = true }).style.width = 50
+  sec.add({ type = "checkbox", name = "bpgen_bus_add", caption = "Add to my bus here", state = false,
+    tooltip = "Stand by your main bus (a lane running dry: more of its item): the patches' ore is smelted upstream of the bus and goes onto new lanes laid along it" })
   sec.add({ type = "checkbox", name = "bpgen_bus_wood", caption = "A wood lane", state = true,
     tooltip = "A lane of wood beside the others, for wooden chests and small poles in a mall: fill the chest at its head (its burner inserter runs on the wood)" })
   sec.add({ type = "checkbox", name = "bpgen_bus_balance", caption = "Balancers", state = true,
@@ -758,11 +762,15 @@ local function request(player, frame)
       list[i] = { a.left_top.x, a.left_top.y, a.right_bottom.x, a.right_bottom.y }
     end
     if #list == 0 then return nil, "pick the ore patches first" end
-    req.params = { mode = "busdesign", patches = list, origin = { x = player.position.x, y = player.position.y },
+    local dir = BUS_DIRS[find(frame, "bpgen_bus_dir").selected_index] or "north"
+    local shift = bus_shift[player.index] or 0  -- (across the bus's flow)
+    local across = (dir == "north" or dir == "south") and { shift, 0 } or { 0, shift }
+    req.params = { mode = "busdesign", patches = list,
+      origin = { x = player.position.x + across[1], y = player.position.y + across[2] },
       direction = BUS_DIRS[find(frame, "bpgen_bus_dir").selected_index] or "north",
       group = tonumber(find(frame, "bpgen_bus_group").text) or 4, gap = tonumber(find(frame, "bpgen_bus_gap").text) or 4,
       length = tonumber(find(frame, "bpgen_bus_length").text) or 40, balance = find(frame, "bpgen_bus_balance").state,
-      wood = find(frame, "bpgen_bus_wood").state,
+      wood = find(frame, "bpgen_bus_wood").state, add_to_bus = find(frame, "bpgen_bus_add").state or nil,
       drill = value(frame, "bpgen_bus_drill"), furnace = value(frame, "bpgen_bus_furnace"),
       belt = value(frame, "bpgen_bus_belt") or u.belts[#u.belts] }
     return req
@@ -1020,7 +1028,7 @@ function M.on_result(player, res)
   pb.caption = res.absolute and "Place it" or "Place near me"
   pb.tooltip = res.absolute and "Ghosts where the preview shows it, its taps replacing the belts they cut into"
     or "Ghosts at a free spot next to you, inputs pointed at your belts that carry them"
-  local fixed = res.mode == "lane" or res.mode == "busdesign"  -- (where it is is the point: no arrows)
+  local fixed = res.mode == "lane"  -- (where it is is the point: no arrows; a bus design's move its head sideways)
   find(frame, "bpgen_nudge_back").visible = res.absolute ~= nil and not fixed
   find(frame, "bpgen_nudge_fwd").visible = res.absolute ~= nil and not fixed
   local tb = find(frame, "bpgen_test")
@@ -1401,6 +1409,11 @@ local function on_click(e)
   if action == "close" then
     if frame then frame.destroy() end
   elseif action == "plan" then
+    bus_shift[player.index] = nil
+    M.plan(player)
+  elseif action == "nudge" and r and r.res.mode == "busdesign" then  -- (its head, sideways: planned again)
+    bus_shift[player.index] = (bus_shift[player.index] or 0) + el.tags.d * BUS_STEP
+    status(frame, "Moving the bus head...")
     M.plan(player)
   elseif action == "recipe" then  -- a bpgen button in another mod's window (compat.lua)
     M.open(player, { recipe = el.tags.recipe })

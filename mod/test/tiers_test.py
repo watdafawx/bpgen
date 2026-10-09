@@ -30,6 +30,10 @@ old = extend.plan_tiles([s.decorate(e) for e in ents1])
 new = extend.plan_tiles([s.decorate(e) for e in ents2])
 assert not old & new, f"tier 2 overlaps tier 1 on {len(old & new)} tiles"
 assert set(t2["summary"]["bring_in"]) <= {"iron-plate", "copper-plate", "stone-brick"}, t2["summary"]["bring_in"]
+_, _, print2 = tiers.held_base(t2["blueprint"])
+made2 = tiers.read_makes(base._decode(print2)["blueprint"].get("description"))
+assert made2 == {"automation-science-pack": 30.0, "logistic-science-pack": 30.0}, f"tier 2 should say both make 30: {made2}"
+assert t1["summary"]["bring_in"] == {"copper-plate": 25.0, "iron-plate": 75.0}, t1["summary"]["bring_in"]
 print("tier 2:", len(ents2), "entities;", t2["summary"]["notes"][0])
 (ROOT / "run").mkdir(exist_ok=True)
 (ROOT / "run" / "tier1.txt").write_text(bp1, encoding="utf-8")

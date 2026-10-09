@@ -711,8 +711,11 @@ snapshot = function(player, area, keep)  -- keep: the snapshot back instead of w
       ents[#ents + 1] = out
     end
   end
-  local resources = {}
+  local resources, fluid_resources = {}, {}
   for _, r in pairs(surface.find_entities_filtered({ area = area, type = "resource" })) do
+    if r.prototype.resource_category == "basic-fluid" then  -- (oil: each one a pumpjack's spot, and its yield)
+      fluid_resources[#fluid_resources + 1] = { name = r.name, x = r.position.x, y = r.position.y, amount = r.amount }
+    end
     resources[r.name] = resources[r.name] or {}
     local list = resources[r.name]
     list[#list + 1] = r.position
@@ -729,6 +732,7 @@ snapshot = function(player, area, keep)  -- keep: the snapshot back instead of w
     entities = ents,
     obstacles = obstacles,
     resources = resources,
+    fluid_resources = fluid_resources,
     water = runs(water),
   }
   if keep then return snap end

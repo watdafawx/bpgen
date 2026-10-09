@@ -51,6 +51,11 @@ Windows only. Single player.
   item, and a wood lane fed from a chest at its head (for a mall's wooden chests and small poles). Pick its
   direction, group, gap, length, drill, furnace and belt. Its poles are one network (pole lines along the ore
   belts and on to the bus's end; bases fitted to it and their tiers join it): wire one pole to your grid.
+  **Add to my bus here**: stand by your bus (a lane running dry) and pick another patch: its ore is smelted upstream
+  of the bus and goes onto new lanes laid along it.
+  **Oil**: pick an oil field too and pumpjacks go on its wells, their crude piped to an oil block at the bus head
+  (refineries and chemical plants) whose plastic and sulfur go onto bus lanes; its water inlet is left for your
+  offshore pump, and its coal comes from a chest you fill.
 
 In game, after each plan you see whether your save can build it (missing research, buildings you don't have), what
 modules would change, and what your factory is short of. **Test run** runs the preview for real (powered, fed and

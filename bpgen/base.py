@@ -618,7 +618,10 @@ def plan_base(service, params, progress=None, cancel=None):
             except planner.PlanError as e:
                 err = err or e
                 continue
-            bp = planner.blueprint_string(ents, "starter base (connected)", description=desc)
+            makes = tiers.makes_line({p: round(targets.get(p, rate) * 60, 2) for p in packs})
+            if params.get("makes_total"):  # (a tier added to a base: what both make, for the tier after it)
+                makes = tiers.makes_line(params["makes_total"])
+            bp = planner.blueprint_string(ents, "starter base (connected)", description=makes + "\n" + (desc or ""))
             corner = tiers.head_corner(srcs) if layout == "bus" else None
             fit = None
             if corner and params.get("plates") and params.get("fit_bus"):  # (its head on a bus design's lanes)
@@ -628,7 +631,7 @@ def plan_base(service, params, progress=None, cancel=None):
                     if bus:  # (clear of the bus design's own belts and of what's on the ground around you)
                         bus = dict(bus, tiles=[list(t) for t in {tuple(t) for t in bus.get("tiles") or []}
                                                | tiers.ground_taken(service, params.get("snapshot"), buildings=False)])
-                    fit = tiers.fit_to_bus(service, ents, srcs, bus, belt) if bus else None
+                    fit = tiers.fit_to_bus(service, ents, srcs, bus, belt, makes=makes) if bus else None
                 except planner.PlanError as e:
                     fit_notes.append(f"not fitted to your bus design: {e}")
                 if not bus:
@@ -654,19 +657,16 @@ def plan_base(service, params, progress=None, cancel=None):
         if err:
             route_note = f"couldn't connect the sections automatically ({err}); build them from the separate prints"
 
-    # what comes in from outside: the raw sources of every section (x copies), and what isn't automated
+    # what comes in from outside: what the science really takes of each raw item (the solved rates, not what the
+    # sections' belts are sized for: those have headroom), and what isn't automated
     bring_in = {}
     made_here = {st.item for st in steps.values() if st.recipe}  # by-products count as made here too
     for st in steps.values():
         if st.kind == "multi":
             made_here |= {o["name"] for o in data.raw["recipe"][st.recipe].get("results") or []}
-    for s in sections:
-        if s["kind"] in ("mall", "routed"):
-            continue  # the mall draws a trickle; it isn't sized by rate
-        for src in s["result"].get("sources", []):
-            for it, r in (src.get("rates") or {}).items():
-                if it in raw and it not in made_here:
-                    bring_in[it] = bring_in.get(it, 0) + r * 60 * s["copies"]
+    for st in steps.values():
+        if not st.recipe and st.item in raw and st.item not in made_here and st.rate > 0:
+            bring_in[st.item] = bring_in.get(st.item, 0) + st.rate * 60
     for na in not_automated:
         if na.get("rate"):
             bring_in[na["item"]] = bring_in.get(na["item"], 0) + na["rate"]
