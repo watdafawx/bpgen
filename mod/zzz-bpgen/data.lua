@@ -40,7 +40,7 @@ data:extend({
     small_icon = "__base__/graphics/icons/blueprint.png",
     small_icon_size = 64,
   },
-  -- the bpgen window (planning in game needs the fnative loader)
+  -- the bpgen window (planning in game needs the fse loader)
   { type = "custom-input", name = "bpgen-window", key_sequence = "CONTROL + ALT + B", consuming = "game-only" },
   {
     type = "shortcut",

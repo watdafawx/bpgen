@@ -109,7 +109,7 @@ def _cases(inserter, belt, force_name, key, item, tiles=1):
     ]
 
 
-# in game (bpgen.ingame through the fnative py plugin) nothing is measured: a headless game would be a second
+# in game (bpgen.ingame through the fse py plugin) nothing is measured: a headless game would be a second
 # process and minutes of waiting. A plan needing an unmeasured setup fails with NotMeasured instead.
 NO_MEASURE = contextvars.ContextVar("no_measure", default=False)
 

@@ -1,5 +1,5 @@
 -- Never crash the game: every event handler of the mod runs through guard() (an error becomes a log line and one
--- chat message, the save goes on), and the fnative loader is only used when it's there and has the plugin.
+-- chat message, the save goes on), and the fse loader is only used when it's there and has the plugin.
 
 local M = {}
 local warned = {}
@@ -11,7 +11,7 @@ function M.has(plugin)
   return ok and type(list) == "table" and list[plugin] ~= nil
 end
 
---- a line in the game's log, and in fnative.log when the loader is there
+--- a line in the game's log, and in fse.log when the loader is there
 function M.log(msg)
   log(msg)
   if type(native) == "table" and type(native.log) == "function" then pcall(native.log, msg) end

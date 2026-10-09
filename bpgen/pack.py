@@ -143,7 +143,7 @@ def user_enabled():
 
 
 def game_wants(active):
-    """from the game's data stage (the zzz-bpgen mod, fnative loader): bpgen's copy is stale and the game runs the
+    """from the game's data stage (the zzz-bpgen mod, fse loader): bpgen's copy is stale and the game runs the
     user's own mods (not a test's mod folder) -> what to send: (types, keys to leave out), else None"""
     if up_to_date():
         return None

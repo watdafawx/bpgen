@@ -6,10 +6,10 @@ the game.
 
 It runs two ways:
 
-- **In game** (recommended), with the [fnative](https://github.com/watdafawx/fnative) loader: a bpgen window inside
+- **In game** (recommended), with the [FSE](https://github.com/watdafawx/fse) loader: a bpgen window inside
   Factorio plans in the game process and previews the blueprint with the game's own renderer. Nothing else to run.
 - **Web app**: `python -m bpgen serve` opens a planner in your browser and checks blueprints with a headless copy of
-  the game. Works without fnative.
+  the game. Works without fse.
 
 Windows only. Single player.
 
@@ -64,10 +64,10 @@ drained) and shows the rate it reaches. **Place near me** puts it down as ghosts
 
 ## Getting started: in game
 
-### 1. Install fnative
+### 1. Install FSE
 
-Follow [fnative's Getting started](https://github.com/watdafawx/fnative#getting-started): build it, start Factorio
-through its launcher, install `fnative-std` (and `fnative-hub` if you like).
+Follow [FSE's Getting started](https://github.com/watdafawx/fse#getting-started): install it, start Factorio
+as always (FSE puts `fse-std` and `fse-hub` into your mods folder).
 
 ### 2. Get bpgen
 
@@ -81,12 +81,12 @@ python -m bpgen.build_fast
 `build_fast` builds the belt router in Rust (about 5x faster planning). It's optional: without it bpgen uses the
 same search in Python.
 
-### 3. Tell fnative where bpgen is
+### 3. Tell FSE where bpgen is
 
-In fnative's `dist\fnative.env`, add the bpgen folder to `FNATIVE_PYPATH` (`;`-separated):
+In FSE's `fse\fse.env` (in the game's folder), add the bpgen folder to `FSE_PYPATH` (`;`-separated):
 
 ```
-FNATIVE_PYPATH=C:\path\to\fnative\py;C:\path\to\bpgen
+FSE_PYPATH=C:\path\to\FSE\py;C:\path\to\bpgen
 ```
 
 ### 4. Install the mod
@@ -109,7 +109,7 @@ that recipe. Ctrl+Shift+B over any recipe icon in a window (theirs, Factoriopedi
 The first time a plan needs an inserter setup bpgen hasn't measured yet (a new belt, a research level), the game
 measures it itself on a hidden surface (about 30 s) and plans again.
 
-Without fnative the mod still loads and doesn't crash: the window opens but can't plan, and Ctrl+Shift+B
+Without FSE the mod still loads and doesn't crash: the window opens but can't plan, and Ctrl+Shift+B
 writes a request for the web app instead.
 
 ## Getting started: web app

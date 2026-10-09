@@ -1,17 +1,17 @@
--- The bpgen window (with the fnative loader): pick a recipe with the game's own recipe picker, plan it in game
+-- The bpgen window (with the fse loader): pick a recipe with the game's own recipe picker, plan it in game
 -- (bpgen.ingame on a worker thread), and see the blueprint as the game draws it: it is built for real on a hidden
 -- preview surface ("bpgen-preview", its own force, lab tiles) and shown through a camera. Then put it in your hand
 -- (the game's own placement preview) or copy its string.
 --
 -- Opened by Ctrl+Shift+B over a machine (filled in from it, planned at once), the bpgen shortcut, Ctrl+Alt+B, or the
--- fnative hub. Results live in this Lua state only (not saved); the preview surface is rebuilt on demand.
+-- fse hub. Results live in this Lua state only (not saved); the preview surface is rebuilt on demand.
 
 local M = {}
 local NAME = "bpgen_window"
 local PREVIEW = "bpgen-preview"
--- with the fnative-std library mod (optional): its window, resized by its corner grip like every fnative window
-local stdwin = script.active_mods["fnative-std"] and require("__fnative-std__/window") or nil
-local stdinput = stdwin and require("__fnative-std__/input") or nil
+-- with the fse-std library mod (optional): its window, resized by its corner grip like every fse window
+local stdwin = script.active_mods["fse-std"] and require("__fse-std__/window") or nil
+local stdinput = stdwin and require("__fse-std__/input") or nil
 local FRAME_W, FRAME_H = 360, 366  -- (the window around the preview: the tabs, the left panel, the rows under it)
 local INFO_H = 170                   -- (the scroll area under the preview, at most)
 local LEFT_W = 324                   -- (the library window's width besides the preview: the left panel, borders)

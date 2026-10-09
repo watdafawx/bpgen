@@ -1,4 +1,4 @@
-"""bpgen inside the game, through the fnative "py" plugin (native/README.md): no web app, no files, no second
+"""bpgen inside the game, through the fse "py" plugin (native/README.md): no web app, no files, no second
 process. The zzz-bpgen mod sends the same request it writes to request.json:
 
     local id = native.start("py", "bpgen.ingame:plan", helpers.table_to_json(request))
@@ -466,5 +466,5 @@ def plan(request: str) -> str:
         return json.dumps({"error": str(e), "measure": e.spec, "seconds": round(time.perf_counter() - t, 3)})
     except planner.PlanError as e:
         return json.dumps({"error": str(e), "seconds": round(time.perf_counter() - t, 3)})
-    except Exception as e:  # noqa: BLE001 - shown in game, with the trace in the fnative log via the error text
+    except Exception as e:  # noqa: BLE001 - shown in game, with the trace in the fse log via the error text
         return json.dumps({"error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-2000:]})

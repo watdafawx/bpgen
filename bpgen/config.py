@@ -12,6 +12,8 @@ import os
 import re
 from pathlib import Path
 
+os.environ.setdefault("FSE_OFF", "1")  # (games started from here run plain even with the fse loader installed)
+
 ROOT = Path(__file__).resolve().parent.parent
 FILE = ROOT / "bpgen.json"
 STEAM_GUESSES = [Path(p) / "steamapps/common/Factorio" for p in (

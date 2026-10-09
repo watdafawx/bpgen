@@ -93,7 +93,7 @@ local function write_request(force, ent)
   return request, err
 end
 
--- In game planning (optional): with the fnative loader and its py plugin, bpgen runs inside the game process
+-- In game planning (optional): with the fse loader and its py plugin, bpgen runs inside the game process
 -- (bpgen/ingame.py) on a worker thread and the blueprint lands in the player's hand. Without it, the request file
 -- above is all there is (the bpgen web app picks it up). Jobs live only in this Lua state: not saved.
 local function in_game()
@@ -159,7 +159,7 @@ local compat = require("compat")
 window.setup({
   craftable = craftable, unlocked = unlocked, bonuses = bonuses,
   start = function(player, request)
-    if not in_game() then return false, "start the game with the fnative loader" end
+    if not in_game() then return false, "start the game with the fse loader" end
     helpers.write_file("bpgen/request.json", helpers.table_to_json(request), false)
     local function go()
       local id, err = native.start("py", "bpgen.ingame:plan", helpers.table_to_json(request))
@@ -197,7 +197,7 @@ window.setup({
   -- the last plan next to the base: a snapshot around params.seed (the player, or where the window's arrows moved
   -- it), then bpgen places it (taps, a main bus, power); the answer lands in the window as a plan's does
   place_base = function(player, params)
-    if not in_game() then return false, "start the game with the fnative loader" end
+    if not in_game() then return false, "start the game with the fse loader" end
     measure(player, around(params.seed or player.position), function(snap)
       params.snapshot = snap
       local id, err = native.start("py", "bpgen.ingame:place", helpers.table_to_json(params))
@@ -208,7 +208,7 @@ window.setup({
   end,
   -- the bus around the player, looked at (lanes, what they carry, what the base lacks): to window.on_api "bus"
   bus_report = function(player, belts)
-    if not in_game() then return false, "start the game with the fnative loader" end
+    if not in_game() then return false, "start the game with the fse loader" end
     measure(player, around(player.position), function(snap)
       local id = native.start("py", "bpgen.ingame:bus_report", helpers.table_to_json({ snapshot = snap, belts = belts }))
       if id then jobs[id] = { player = player.index, api = "bus" } end
@@ -217,7 +217,7 @@ window.setup({
   end,
   -- a new lane of an item along that bus: its answer lands in the window as a plan's does (preview, Place it)
   add_lane = function(player, item)
-    if not in_game() then return false, "start the game with the fnative loader" end
+    if not in_game() then return false, "start the game with the fse loader" end
     measure(player, around(player.position), function(snap)
       local id = native.start("py", "bpgen.ingame:add_lane", helpers.table_to_json({ snapshot = snap, item = item }))
       if id then jobs[id] = { player = player.index, recipe = "", window = true } end
@@ -278,7 +278,7 @@ end
 
 local function plan_line(player, item, rate, reply)
   auto[player.index] = { item = item, rate = rate, reply = reply or "ai-crew" }
-  if not in_game() then return line_done(player, nil, "bpgen plans only with the fnative loader") end
+  if not in_game() then return line_done(player, nil, "bpgen plans only with the fse loader") end
   local req = window.extend_request(player, item, rate)
   measure(player, around(player.position), function(snap)
     req.params.snapshot = snap
@@ -764,7 +764,7 @@ remote.add_interface("bpgen", {
   -- comes back as remote.call(reply or "ai-crew", "line_placed", player_index, item, ghosts, error, absolute) where
   -- absolute = {box = {x, y, w, h}, inputs = {{items, position}} to feed by hand, outputs = {{item, position}}}
   plan_line = function(player_index, item, rate, reply) plan_line(game.get_player(player_index), item, rate, reply) end,
-  -- the bpgen window (the fnative hub has a button for it); for tests also: fill it in and plan
+  -- the bpgen window (the fse hub has a button for it); for tests also: fill it in and plan
   -- an ore patch for the window's bus design, as if dragged with the patch tool
   add_patch = function(player_index, area) window.add_patch(game.get_player(player_index), area) end,
   open_window = function(player_index, prefill) window.open(game.get_player(player_index), prefill) end,
@@ -801,7 +801,7 @@ on_nth(compat.RESCAN, function()
   if not in_game() then return end
   for _, player in pairs(game.connected_players) do compat.scan(player) end
 end)
--- (with the fnative-std library: its window and input handlers, for the bpgen window's corner grip)
-if script.active_mods["fnative-std"] then
-  safe.chain("bpgen", { require("__fnative-std__/input").handlers, require("__fnative-std__/window").handlers })
+-- (with the fse-std library: its window and input handlers, for the bpgen window's corner grip)
+if script.active_mods["fse-std"] then
+  safe.chain("bpgen", { require("__fse-std__/input").handlers, require("__fse-std__/window").handlers })
 end
