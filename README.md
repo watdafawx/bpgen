@@ -11,7 +11,9 @@ It runs two ways:
 - **Web app**: `python -m bpgen serve` opens a planner in your browser and checks blueprints with a headless copy of
   the game. Works without fse.
 
-Windows only. Single player.
+Windows only. Single player and multiplayer: in multiplayer every player and the server need FSE with `fse-std`;
+a player's plans run in their own Python and reach everyone through FSE's `native.sync`, so every peer shows and
+places the same (no desyncs). The window's mouse-dragged preview works with its buttons only there.
 
 ## What it plans
 
@@ -187,7 +189,8 @@ one machine per product.
 
 ## Tests
 
-`mod\test\run.py`, `extend_test.py` (headless game with the mod; `bus` as its fourth argument: a main bus),
+`mod	estun_mp.py` (multiplayer: a headless server and a client; a line planned in the client's Python placed
+the same on both peers, no desync), `mod\test\run.py`, `extend_test.py` (headless game with the mod; `bus` as its fourth argument: a main bus),
 `bus_extend_test.py` (placement beside a bus, no game), `harness\botmall_test.py` (a robot-fed mall built and
 run), `mod\test\bus_feed_test.py` (a line fed from the bus, no game), `mod\test\mall_bus_test.py` (a grid mall fed
 from the bus, no game), `harness\grid_mall_run.py [minutes]` (the starter grid mall built and run: every product

@@ -1,0 +1,1 @@
+{"name": "bp-mp", "version": "0.0.1", "title": "bpgen multiplayer test", "author": "mtopfox", "factorio_version": "2.0", "dependencies": ["base", "zzz-bpgen", "fse-std"]}

@@ -97,14 +97,48 @@ end
 -- (bpgen/ingame.py) on a worker thread and the blueprint lands in the player's hand. Without it, the request file
 -- above is all there is (the bpgen web app picks it up). Jobs live only in this Lua state: not saved.
 local function in_game()
-  return safe.has("py")
+  -- (multiplayer answers travel through fse-std's sync)
+  return safe.has("py") and (not game.is_multiplayer() or script.active_mods["fse-std"] ~= nil)
 end
-local jobs = {}  -- job id -> {player = index, recipe = name, window = true if the bpgen window asked}
+
+-- Jobs (bpgen's Python: plans, placing, the bus). Every peer records a job in storage the same way; only the asking
+-- player's own peer runs it and, in multiplayer, sends the answer to all with native.sync (fse-std raises
+-- "fse-sync"), so every peer shows and places the same thing in the same tick. Single player: the answer applies
+-- at once. A job: {player = index, recipe = name, window = true | api = tag | measured = true | auto = true}
+local running = {}     -- native job id -> job number (only on the peer running it)
+local local_jobs = {}  -- native job id -> {warm | stale}: this peer's own housekeeping, never applied to the game
 local warmed = false
+local apply  -- (below)
+
+local function runs_here(player_index)
+  if not game.is_multiplayer() then return true end
+  return native.local_player ~= nil and native.local_player() == player_index
+end
+
+local function deliver(n, status, out)
+  if game.is_multiplayer() then
+    native.sync("bpgen:answer", helpers.table_to_json({ n = n, status = status, out = out }))
+  else
+    apply(n, status, out)
+  end
+end
+
+local function start_job(player_index, fn, input, job)
+  storage.bpgen_jobs = storage.bpgen_jobs or {}
+  storage.bpgen_job_n = (storage.bpgen_job_n or 0) + 1
+  local n = storage.bpgen_job_n
+  job.at = game.tick
+  storage.bpgen_jobs[n] = job
+  if runs_here(player_index) then
+    local id, err = native.start("py", fn, input)
+    if id then running[id] = n else deliver(n, "error", tostring(err)) end
+  end
+  return true
+end
 
 local snapshot  -- (below: an area of the base, for bpgen to build next to)
 local PLACE_R = 48  -- without an area picked with the snapshot tool: the snapshot reaches this far around a spot
-local snaps = {}  -- player index -> the area last picked with the snapshot tool (this session only)
+local snaps = safe.stored("snaps")  -- player index -> the area last picked with the snapshot tool
 local function around(c, r)
   r = r or PLACE_R
   return { left_top = { x = c.x - r, y = c.y - r }, right_bottom = { x = c.x + r, y = c.y + r } }
@@ -112,9 +146,14 @@ end
 
 -- What the belts carry, measured: an area's snapshot, then each belt looked at again MEASURE_TICKS later; a belt's
 -- flow is its belt speed times the items that moved on it (items/s, both lanes), so bpgen knows how much of a bus
--- lane is used and whether it runs dry or backs up. Pending measurements live in this Lua state only.
+-- lane is used and whether it runs dry or backs up. Pending measurements are kept in storage (what follows is a
+-- kind of after[] and its plain data, so a peer joining meanwhile finishes them too).
 local MEASURE_TICKS = 30
-local measuring = {}  -- {tick, snap, belts = {{e, ids, rec}}, done}
+local after = {}  -- kind -> function(player, snap, data): what follows a measurement
+local function measuring()
+  storage.bpgen_measuring = storage.bpgen_measuring or {}  -- {tick, snap, belts = {{e, ids, rec}}, kind, data, player | fake}
+  return storage.bpgen_measuring
+end
 
 local function belt_ids(e)  -- unique id -> position along its line, both lines
   local t = {}
@@ -125,7 +164,7 @@ local function belt_ids(e)  -- unique id -> position along its line, both lines
 end
 
 --- snapshot `area` and, MEASURE_TICKS later, give it to done(snap) with each transport belt's flow and items
-local function measure(player, area, done)
+local function measure(player, area, kind, data)
   local snap = snapshot(player, area, true)
   local recs = {}
   for _, r in ipairs(snap.entities) do
@@ -136,7 +175,9 @@ local function measure(player, area, done)
     local rec = recs[string.format("%.1f,%.1f", e.position.x, e.position.y)]
     if rec then belts[#belts + 1] = { e = e, ids = belt_ids(e), rec = rec } end
   end
-  measuring[#measuring + 1] = { tick = game.tick + MEASURE_TICKS, snap = snap, belts = belts, done = done }
+  local m = measuring()
+  m[#m + 1] = { tick = game.tick + MEASURE_TICKS, snap = snap, belts = belts, kind = kind, data = data,
+    player = player.index, fake = not player.index and { surface = player.surface.name, force = player.force.name } or nil }
 end
 
 local function measured_now(m)
@@ -151,7 +192,9 @@ local function measured_now(m)
       b.rec.flow = math.floor(b.e.prototype.belt_speed * 60 * moved * 10 + 0.5) / 10
     end
   end
-  m.done(m.snap)
+  local player = m.player and game.get_player(m.player)
+    or m.fake and { surface = game.get_surface(m.fake.surface), force = game.forces[m.fake.force] }
+  if player and player.surface then after[m.kind](player, m.snap, m.data) end
 end
 
 local window = require("window")
@@ -162,9 +205,8 @@ window.setup({
     if not in_game() then return false, "start the game with the fse loader" end
     helpers.write_file("bpgen/request.json", helpers.table_to_json(request), false)
     local function go()
-      local id, err = native.start("py", "bpgen.ingame:plan", helpers.table_to_json(request))
-      if id then jobs[id] = { player = player.index, recipe = request.recipe, window = true } end
-      return id ~= nil, err
+      return start_job(player.index, "bpgen.ingame:plan", helpers.table_to_json(request),
+        { player = player.index, recipe = request.recipe, window = true })
     end
     if request.params and (request.params.mode == "base" and (request.params.fit_bus or request.params.add_to)
         or request.params.mode == "mall" and request.params.add_to) then
@@ -187,8 +229,7 @@ window.setup({
         request.params.snapshot = snaps[player.index]
       else
         -- (a line fed from the bus: room beside the bus for the line and what it makes for itself)
-        measure(player, around(player.position, request.params.bus_feed and 128 or nil),
-          function(snap) request.params.snapshot = snap go() end)
+        measure(player, around(player.position, request.params.bus_feed and 128 or nil), "plan", request)
         return true
       end
     end
@@ -198,41 +239,34 @@ window.setup({
   -- it), then bpgen places it (taps, a main bus, power); the answer lands in the window as a plan's does
   place_base = function(player, params)
     if not in_game() then return false, "start the game with the fse loader" end
-    measure(player, around(params.seed or player.position), function(snap)
-      params.snapshot = snap
-      local id, err = native.start("py", "bpgen.ingame:place", helpers.table_to_json(params))
-      if id then jobs[id] = { player = player.index, recipe = "", window = true }
-      else player.print("[bpgen] in-game planning failed: " .. tostring(err)) end
-    end)
+    measure(player, around(params.seed or player.position), "place_base", params)
     return true
   end,
   -- the bus around the player, looked at (lanes, what they carry, what the base lacks): to window.on_api "bus"
   bus_report = function(player, belts)
     if not in_game() then return false, "start the game with the fse loader" end
-    measure(player, around(player.position), function(snap)
-      local id = native.start("py", "bpgen.ingame:bus_report", helpers.table_to_json({ snapshot = snap, belts = belts }))
-      if id then jobs[id] = { player = player.index, api = "bus" } end
-    end)
+    measure(player, around(player.position), "bus_report", belts)
     return true
   end,
   -- a new lane of an item along that bus: its answer lands in the window as a plan's does (preview, Place it)
   add_lane = function(player, item)
     if not in_game() then return false, "start the game with the fse loader" end
-    measure(player, around(player.position), function(snap)
-      local id = native.start("py", "bpgen.ingame:add_lane", helpers.table_to_json({ snapshot = snap, item = item }))
-      if id then jobs[id] = { player = player.index, recipe = "", window = true } end
-    end)
+    measure(player, around(player.position), "add_lane", item)
     return true
   end,
   -- the web app's helpers (recipe tree, save check, module ideas, history): answers go to window.on_api
   api = function(player, fn, params, tag)
-    local id = in_game() and native.start("py", "bpgen.ingame:api", helpers.table_to_json({ fn = fn, params = params }))
-    if id then jobs[id] = { player = player.index, api = tag } end
+    if in_game() then
+      start_job(player.index, "bpgen.ingame:api", helpers.table_to_json({ fn = fn, params = params }),
+        { player = player.index, api = tag })
+    end
   end,
   -- inserter setups measured in game: into bpgen's table, then the window plans again
   measured = function(player, cases)
-    local id = in_game() and native.start("py", "bpgen.ingame:measured", helpers.table_to_json({ cases = cases }))
-    if id then jobs[id] = { player = player.index, measured = true } end
+    if in_game() then
+      start_job(player.index, "bpgen.ingame:measured", helpers.table_to_json({ cases = cases }),
+        { player = player.index, measured = true })
+    end
   end,
 })
 
@@ -266,7 +300,7 @@ end)
 
 -- lines other mods ask for (remote plan_line, AI Crew's goals): planned like Extend, placed as ghosts straight away,
 -- then remote.call(<asker>, "line_placed", player_index, item, ghosts, error, {box, inputs, outputs})
-local auto = {} -- player index -> {item, rate, reply}
+local auto = safe.stored("auto") -- player index -> {item, rate, reply}
 
 local function line_done(player, ghosts, err, abs)
   local a = auto[player.index]
@@ -280,11 +314,7 @@ local function plan_line(player, item, rate, reply)
   auto[player.index] = { item = item, rate = rate, reply = reply or "ai-crew" }
   if not in_game() then return line_done(player, nil, "bpgen plans only with the fse loader") end
   local req = window.extend_request(player, item, rate)
-  measure(player, around(player.position), function(snap)
-    req.params.snapshot = snap
-    local id, err = native.start("py", "bpgen.ingame:plan", helpers.table_to_json(req))
-    if id then jobs[id] = { player = player.index, auto = true } else line_done(player, nil, err) end
-  end)
+  measure(player, around(player.position), "plan_line", req)
 end
 
 local function finish(job, out)
@@ -320,26 +350,56 @@ local function finish(job, out)
 end
 
 on_nth(6, function()
-  for i = #measuring, 1, -1 do
-    if game.tick >= measuring[i].tick then measured_now(table.remove(measuring, i)) end
+  local m = measuring()
+  for i = #m, 1, -1 do
+    if game.tick >= m[i].tick then measured_now(table.remove(m, i)) end
   end
   if not warmed then
     warmed = true
-    -- (loads bpgen's data before the first plan; its answer is collected and dropped like any job's)
+    -- (loads bpgen's data before the first plan; its answer is collected and dropped)
     local id = in_game() and native.start("py", "bpgen.ingame:warm", "")
-    if id then jobs[id] = { warm = true } end
+    if id then local_jobs[id] = { warm = true } end
     -- (bpgen's copy of the mods' data stale although the data stage ran: the game used its data stage cache; then
     -- that cache goes, and the next start hands the data over)
     local sid = in_game() and native.start("py", "bpgen.ingame:stale", "")
-    if sid then jobs[sid] = { stale = true } end
+    if sid then local_jobs[sid] = { stale = true } end
   end
-  for id, job in pairs(jobs) do
+  for id, job in pairs(local_jobs) do
     local status, out = native.poll(id)
     if status ~= "pending" then
-      jobs[id] = nil
+      local_jobs[id] = nil
       if job.warm then
         if status ~= "done" then safe.log("bpgen.ingame:warm failed: " .. tostring(out)) end
-      elseif job.api then
+      else
+        local r = status == "done" and helpers.json_to_table(out) or {}
+        if r.stale then
+          local msg = "[bpgen] your mods changed since bpgen read them: it reads them at the next game start"
+          -- (this peer's own news: printing it would make its console differ from the others')
+          if game.is_multiplayer() then safe.log(msg) else game.print(msg) end
+        end
+      end
+    end
+  end
+  for id, n in pairs(running) do
+    local status, out = native.poll(id)
+    if status ~= "pending" then
+      running[id] = nil
+      deliver(n, status, out)
+    end
+  end
+  if game.tick % 600 == 0 and storage.bpgen_jobs then -- (a job whose peer left, or never answered)
+    for n, job in pairs(storage.bpgen_jobs) do if game.tick - job.at > 36000 then storage.bpgen_jobs[n] = nil end end
+  end
+end)
+
+-- a job's answer, on every peer
+function apply(n, status, out)
+  local job = storage.bpgen_jobs and storage.bpgen_jobs[n]
+  if not job then return end
+  storage.bpgen_jobs[n] = nil
+  do
+    do
+      if job.api then
         local player = game.get_player(job.player)
         if player then window.on_api(player, job.api, status == "done" and out or nil) end
       elseif job.measured then
@@ -349,19 +409,17 @@ on_nth(6, function()
           local a = auto[player.index]
           if a then plan_line(player, a.item, a.rate, a.reply) else window.plan(player) end
         end
-      elseif job.stale then
-        local r = status == "done" and helpers.json_to_table(out) or {}
-        if r.stale then
-          game.print("[bpgen] your mods changed since bpgen read them: it reads them at the next game start")
-        end
       elseif status == "done" then finish(job, out)
+      elseif job.auto then
+        local player = game.get_player(job.player)
+        if player then line_done(player, nil, tostring(out)) end
       else
         local player = game.get_player(job.player)
         if player then player.print("[bpgen] in-game planning failed: " .. tostring(out)) end
       end
     end
   end
-end)
+end
 
 -- State: tech and production --------------------------------------------------------------------------------
 
@@ -742,18 +800,54 @@ snapshot = function(player, area, keep)  -- keep: the snapshot back instead of w
   return #ents
 end
 
+-- what follows a measurement (see measure): one function per kind, the data plain
+local function plan_with(player, snap, request, fn, job)
+  request.params.snapshot = snap
+  start_job(player.index, fn, helpers.table_to_json(request), job)
+end
+after.plan = function(player, snap, request)
+  plan_with(player, snap, request, "bpgen.ingame:plan", { player = player.index, recipe = request.recipe, window = true })
+end
+after.plan_line = function(player, snap, req)
+  plan_with(player, snap, req, "bpgen.ingame:plan", { player = player.index, auto = true })
+end
+after.place_base = function(player, snap, params)
+  params.snapshot = snap
+  start_job(player.index, "bpgen.ingame:place", helpers.table_to_json(params), { player = player.index, recipe = "", window = true })
+end
+after.bus_report = function(player, snap, belts)
+  start_job(player.index, "bpgen.ingame:bus_report", helpers.table_to_json({ snapshot = snap, belts = belts }),
+    { player = player.index, api = "bus" })
+end
+after.add_lane = function(player, snap, item)
+  start_job(player.index, "bpgen.ingame:add_lane", helpers.table_to_json({ snapshot = snap, item = item }),
+    { player = player.index, recipe = "", window = true })
+end
+after.snapshot_tool = function(player, snap, area)
+  snaps[player.index] = snap  -- (in game: sent with the next extend; the file is for the web app)
+  helpers.write_file("bpgen/snapshot.json", helpers.table_to_json(snap), false)
+  write_state(player.force)
+  player.print({ "", "[bpgen] snapshot sent: ", #snap.entities, " entities, ",
+    math.floor(area.right_bottom.x - area.left_top.x), "x", math.floor(area.right_bottom.y - area.left_top.y), " tiles" })
+end
+after.measure_area = function(fake, snap)
+  helpers.write_file("bpgen/snapshot.json", helpers.table_to_json(snap), false)
+  write_state(fake.force)
+end
+
+-- answers from the peer that ran a job (multiplayer)
+if script.active_mods["fse-std"] then
+  on_event("fse-sync", function(e)
+    if e.key ~= "bpgen:answer" then return end
+    local d = helpers.json_to_table(e.data)
+    if d and d.n then apply(d.n, d.status, d.out) end
+  end)
+end
+
 local function on_selected(e)
   if e.item == "bpgen-patches" then return window.add_patch(game.get_player(e.player_index), e.area) end
   if e.item ~= "bpgen-snapshot" then return end
-  local player = game.get_player(e.player_index)
-  local area = e.area
-  measure(player, area, function(snap)
-    snaps[player.index] = snap  -- (in game: sent with the next extend; the file is for the web app)
-    helpers.write_file("bpgen/snapshot.json", helpers.table_to_json(snap), false)
-    write_state(player.force)
-    player.print({ "", "[bpgen] snapshot sent: ", #snap.entities, " entities, ",
-      math.floor(area.right_bottom.x - area.left_top.x), "x", math.floor(area.right_bottom.y - area.left_top.y), " tiles" })
-  end)
+  measure(game.get_player(e.player_index), e.area, "snapshot_tool", e.area)
 end
 on_event(defines.events.on_player_selected_area, on_selected)
 on_event(defines.events.on_player_alt_selected_area, on_selected)
@@ -788,10 +882,7 @@ remote.add_interface("bpgen", {
   -- the same, with the belts' flows measured: snapshot.json is written MEASURE_TICKS later
   measure_area = function(surface_name, area, force_name)
     local fake = { surface = game.surfaces[surface_name or "nauvis"], force = game.forces[force_name or "player"] }
-    measure(fake, area, function(snap)
-      helpers.write_file("bpgen/snapshot.json", helpers.table_to_json(snap), false)
-      write_state(fake.force)
-    end)
+    measure(fake, area, "measure_area")
   end,
 })
 

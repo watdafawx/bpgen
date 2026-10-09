@@ -57,13 +57,14 @@ local bench = require("bench")
 local safe = require("safe")
 local place = require("place")
 local ctx          -- from control.lua: craftable, unlocked, bonuses, start, measured
-local results = {} -- player index -> { blueprint, res, center, zoom }
-local placed = {}     -- player index -> the ghosts "Place near me" and "Next to my base" made
-local unmark = {}     -- player index -> what those pastes marked for deconstruction (Undo unmarks it)
+-- (per-player state in storage: in multiplayer every peer must show and place the same; see safe.stored)
+local results = safe.stored("results") -- player index -> { blueprint, res, center, zoom }
+local placed = safe.stored("placed")     -- player index -> the ghosts "Place near me" and "Next to my base" made
+local unmark = safe.stored("unmark")     -- player index -> what those pastes marked for deconstruction (Undo unmarks it)
 -- (the preview's drag, zoom and size grip: momentary, not saved)
 local cam_hover, drags, wheel_seen, left_during = {}, {}, {}, {}
 local grip_hover, resizing, resized_at = {}, {}, {}
-local unlocks = {} -- player index -> what the force can build (read once per window)
+local unlocks = safe.stored("unlocks") -- player index -> what the force can build (read once per window)
 
 function M.setup(c) ctx = c end
 
@@ -284,8 +285,8 @@ local MODES = { "line", "mall", "base", "extend", "busdesign" }
 local MODE_NAMES = { "Line", "Mall", "Base", "Extend", "Bus" }
 local MODE_TIPS = { "Production line", "Mall", "Starter base", "Extend my base", "Bus design" }
 local BUS_DIRS = { "north", "east", "south", "west" }
-local patch_areas = {}  -- player index -> {{area, counts = {resource = tiles}}}: the ore patches picked for a bus design
-local bus_shift = {}  -- player index -> tiles the bus head is moved sideways from the player (the ◀ ▶ arrows)
+local patch_areas = safe.stored("patch_areas")  -- player index -> {{area, counts = {resource = tiles}}}: the ore patches picked for a bus design
+local bus_shift = safe.stored("bus_shift")  -- player index -> tiles the bus head is moved sideways from the player (the ◀ ▶ arrows)
 local BUS_STEP = 16
 
 local function row(parent, caption, tooltip)
@@ -1211,7 +1212,7 @@ local function show_history(frame, items)
   end
 end
 
-local histories = {}  -- player index -> the last history list (its blueprints for "To cursor")
+local histories = safe.stored("histories")  -- player index -> the last history list (its blueprints for "To cursor")
 
 local function show_short(frame, rows)
   local box = extra(frame)
@@ -1637,7 +1638,8 @@ end
 
 local function camera_tick()
   if not next(cam_hover) and not next(drags) and not next(grip_hover) and not next(resizing) then return end
-  if not safe.has("std") then return end
+  -- (the mouse is this peer's own: in multiplayer the preview moves with its buttons only)
+  if not safe.has("std") or game.is_multiplayer() then return end
   local ok, m = pcall(function() return helpers.json_to_table(native.call("std", "input") or "") end)
   if not (ok and m) then return end
   -- the size grip: dragged, the preview follows the cursor (in GUI units: pixels over the display scale)
