@@ -280,7 +280,9 @@ end
 -- the window
 
 local MODES = { "line", "mall", "base", "extend", "busdesign" }
-local MODE_NAMES = { "Production line", "Mall", "Starter base", "Extend my base", "Bus design" }  -- (the tabs along the top)
+-- (the tabs along the top: short, so all five fit a narrow window; the full name as their tooltip)
+local MODE_NAMES = { "Line", "Mall", "Base", "Extend", "Bus" }
+local MODE_TIPS = { "Production line", "Mall", "Starter base", "Extend my base", "Bus design" }
 local BUS_DIRS = { "north", "east", "south", "west" }
 local patch_areas = {}  -- player index -> {{area, counts = {resource = tiles}}}: the ore patches picked for a bus design
 local bus_shift = {}  -- player index -> tiles the bus head is moved sideways from the player (the ◀ ▶ arrows)
@@ -396,7 +398,9 @@ function M.open(player, prefill)
   tabs.style.horizontal_spacing = 0
   tabs.style.left_padding = 4
   for i, m in ipairs(MODES) do
-    tabs.add({ type = "button", caption = MODE_NAMES[i], toggled = i == 1, tags = { bpgen = "tab", mode = m } })
+    local tab = tabs.add({ type = "button", caption = MODE_NAMES[i], tooltip = MODE_TIPS[i], toggled = i == 1,
+      tags = { bpgen = "tab", mode = m } })
+    tab.style.minimal_width = 56
   end
   local body = holder.add({ type = "flow", direction = "horizontal" })
   local outer = body.add({ type = "frame", style = "inside_shallow_frame", direction = "vertical" })
@@ -531,11 +535,12 @@ function M.open(player, prefill)
   fs = fields(sec)
   field(fs, "Flows").add({ type = "drop-down", name = "bpgen_bus_dir", items = { "north", "east", "south", "west" },
     selected_index = 1 })
+  field(fs, "Length").add({ type = "textfield", name = "bpgen_bus_length", text = "40", numeric = true,
+    lose_focus_on_confirm = true }).style.width = 50
+  fs = fields(sec)  -- (a second row: four fields don't fit the panel's width)
   field(fs, "Belts a group").add({ type = "textfield", name = "bpgen_bus_group", text = "4", numeric = true,
     lose_focus_on_confirm = true }).style.width = 50
   field(fs, "Gap").add({ type = "textfield", name = "bpgen_bus_gap", text = "4", numeric = true,
-    lose_focus_on_confirm = true }).style.width = 50
-  field(fs, "Length").add({ type = "textfield", name = "bpgen_bus_length", text = "40", numeric = true,
     lose_focus_on_confirm = true }).style.width = 50
   sec.add({ type = "checkbox", name = "bpgen_bus_add", caption = "Add to my bus here", state = false,
     tooltip = "Stand by your main bus (a lane running dry: more of its item): the patches' ore is smelted upstream of the bus and goes onto new lanes laid along it" })
