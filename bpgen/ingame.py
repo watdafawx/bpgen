@@ -179,6 +179,62 @@ def _absolute(placed):
             "inputs": placed.get("inputs") or [], "outputs": placed.get("outputs") or []}
 
 
+def _bus_feed(s, params):
+    """a production line fed from the player's main bus: the bus in the snapshot, and what the line takes from it.
+    Ingredients the bus doesn't carry are made inside the blueprint (params["make"], as if ticked in the window)
+    when there's a recipe for them. -> (the bus or None, notes)"""
+    from bpgen import base, extend
+    snap = s.snapshot_view(params.get("snapshot"))
+    main = extend.find_bus(extend.Ground(snap)) if snap else None
+    if not main:
+        return None, ["no main bus around you (3+ long straight belts side by side): planned as a plain line"]
+    data = s.data
+    on_bus = {i for ln in main["lanes"] for i in ln.get("items") or [] if i}
+    r = data.raw["recipe"][params["recipe"]]
+    out_items = {x.get("name") for x in r.get("results") or []}
+    make = dict(params.get("make") or {})
+    machine_for = base.machines_by_category(data, [params.get("machine"), "assembling-machine-2", "electric-furnace",
+                                                   "stone-furnace"])
+    taken, made, missing = [], [], []
+    for ing in r.get("ingredients") or []:
+        n = ing["name"]
+        if ing.get("type") == "fluid":
+            continue
+        if n in make:
+            made.append(n)
+        elif n in on_bus:
+            taken.append(n)
+        else:
+            rn = base.pick_recipe(data, n, machine_for, on_bus, avoid=out_items)
+            if rn:
+                make[n] = {"recipe": rn, "machine": machine_for[data.raw["recipe"][rn].get("category", "crafting")]}
+                made.append(n)
+            else:
+                missing.append(n)
+    params["make"] = make
+    notes = [f"from your bus: {' '.join(f'[item={i}]' for i in taken) or 'nothing'}"]
+    if made:
+        notes.append(f"made in the blueprint (not on your bus): {' '.join(f'[item={i}]' for i in made)}")
+    if missing:
+        notes.append(f"not on your bus and not made here: {' '.join(f'[item={i}]' for i in missing)}")
+    return main, notes
+
+
+def _mall_bus_feed(s, params):
+    """a grid mall fed from the player's main bus: what the bus carries comes in on its belts (tapped from the bus),
+    the parts it doesn't are made at the top. -> (the bus or None, notes)"""
+    from bpgen import base, extend
+    snap = s.snapshot_view(params.get("snapshot"))
+    main = extend.find_bus(extend.Ground(snap)) if snap else None
+    if not main:
+        return None, ["no main bus around you (3+ long straight belts side by side): only plates come in"]
+    on_bus = {i for ln in main["lanes"] for i in ln.get("items") or [] if i}
+    raw = base.raw_items(s.data) - base.MADE_HERE
+    plates = base.plate_items(s.data, raw)
+    params["inputs"] = sorted(raw | plates | base.plate_items(s.data, plates) | on_bus)
+    return main, [f"your bus carries {' '.join(f'[item={i}]' for i in sorted(on_bus))}: taken from it"]
+
+
 def place(request: str) -> str:
     """the last plan next to the player's base: {"bus": "auto"|"on"|"off", "seed": {x, y}, "snapshot": the area
     around the player, as the snapshot tool takes it} -> as plan(), an absolute blueprint with taps on the base's
@@ -315,6 +371,11 @@ def plan(request: str) -> str:
                                "mall": bool(a.get("mall")),
                                "machines": sorted({m["machine"] for m in a.get("machines") or []}),
                                "before": {"size": a.get("size"), "entities": a.get("entities")}})
+            bus, bus_notes = None, []
+            if params.get("bus_feed") and params.get("recipe"):
+                bus, bus_notes = _bus_feed(s, params)
+            elif params.get("bus_feed") and params.get("mode") == "mall":
+                bus, bus_notes = _mall_bus_feed(s, params)
             token = calibrate.NO_MEASURE.set(True)
             try:
                 tries = [m for m in (params.pop("machines_try", None) or []) if m] if params.get("mode") == "mall" else []
@@ -335,6 +396,12 @@ def plan(request: str) -> str:
                                  label=f"bpgen: {params.get('item')} next to the base")
                     out = {"blueprint": out["blueprint"], "summary": {"notes": out.get("notes") or []},
                            "absolute": _absolute(out)}
+                elif params.get("mode") == "busdesign":  # (absolute, like extend: it lands on the patches)
+                    from bpgen import busdesign
+                    busdesign.save_last(out, dict(params, surface=req.get("surface")))
+                    _last = None
+                    out = {"blueprint": out["blueprint"], "summary": {"notes": out.get("notes") or []},
+                           "absolute": _absolute(out)}
                 elif out.get("entities"):  # (for place(): this plan, put next to the base on request)
                     sm = out.get("summary") or {}
                     _sections = {x["name"]: x for x in out.get("sections") or []}
@@ -344,6 +411,17 @@ def plan(request: str) -> str:
                              "sinks": [dict(k, item=k.get("item") or sm.get("output")) for k in out.get("sinks") or []],
                              "belt": sm.get("belt") or params.get("belt"), "mode": params.get("mode") or "line",
                              "label": f"bpgen: {sm.get('recipe') or params.get('recipe') or params.get('mode')} next to the base"}
+                    if bus:  # (fed from the bus: placed beside it straight away, its inputs tapped from the lanes)
+                        o = params.get("origin") or {}
+                        try:
+                            placed = s.extend(dict(_last, bus="on", seed=o if o else None,
+                                                   snapshot=params.get("snapshot")))
+                            out = {"blueprint": placed["blueprint"], "absolute": _absolute(placed),
+                                   "summary": dict(sm, notes=bus_notes + list(sm.get("notes") or []) + placed["notes"])}
+                        except (ValueError, planner.PlanError) as e:  # (no room beside the bus: the plain line)
+                            bus, bus_notes = None, bus_notes + [f"not placed beside your bus ({e}): place it yourself"]
+                if bus_notes and not bus:
+                    out.setdefault("summary", {})["notes"] = bus_notes + list(out["summary"].get("notes") or [])
             finally:
                 calibrate.NO_MEASURE.reset(token)
         summary = out.get("summary") or {}

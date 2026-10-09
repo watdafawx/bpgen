@@ -83,7 +83,9 @@ KEEP = ["recipe", "assembling-machine", "furnace", "rocket-silo", "inserter", "t
         "tool", "capsule", "ammo", "gun", "armor", "repair-tool", "item-with-entity-data", "rail-planner",
         "space-platform-starter-pack", "item-with-tags", "selection-tool", "spidertron-remote",
         # starter base: labs to place, resources and the start planet's map settings to know what is mined there
-        "lab", "resource", "planet"]
+        "lab", "resource", "planet",
+        # the bus design: drills on the ore patches
+        "mining-drill"]
 # icon paths are kept (tiny) for the web preview
 DROP_KEYS = {"graphics_set", "animation", "picture", "pictures", "working_sound", "sprites",
              "structure", "belt_animation_set", "hand_base_picture", "hand_closed_picture", "hand_open_picture",

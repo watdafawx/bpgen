@@ -46,6 +46,8 @@ local function bonuses(force)
   }
 end
 
+local recipe_request
+
 --- @return table? request, string? error
 local function build_request(force, ent)
   local proto_type = ent and ent.valid and (ent.type == "entity-ghost" and ent.ghost_type or ent.type)
@@ -59,21 +61,30 @@ local function build_request(force, ent)
   if inv then
     for _, c in pairs(inv.get_contents()) do modules[#modules + 1] = { name = c.name, quality = c.quality, count = c.count } end
   end
+  return recipe_request(force, recipe.name, ent.type == "entity-ghost" and ent.ghost_name or ent.name, {
+    recipe_quality = quality and quality.name or "normal", machine_quality = ent.quality.name, modules = modules,
+    surface = ent.surface.name })
+end
+
+--- a request for `recipe` in `machine`; `more` overrides the defaults (normal quality, no modules, nauvis)
+function recipe_request(force, recipe, machine, more)
   local made = craftable(force)
-  return {
+  local req = {
     tick = game.tick,
-    recipe = recipe.name,
-    recipe_quality = quality and quality.name or "normal",
-    recipe_productivity = force.recipes[recipe.name] and force.recipes[recipe.name].productivity_bonus or 0,
-    machine = ent.type == "entity-ghost" and ent.ghost_name or ent.name,
-    machine_quality = ent.quality.name,
-    modules = modules,
-    surface = ent.surface.name,
+    recipe = recipe,
+    recipe_quality = "normal",
+    recipe_productivity = force.recipes[recipe] and force.recipes[recipe].productivity_bonus or 0,
+    machine = machine,
+    machine_quality = "normal",
+    modules = {},
+    surface = "nauvis",
     bonuses = bonuses(force),
     inserters = unlocked(made, { "inserter" }),
     belts = unlocked(made, { "transport-belt" }),
     poles = unlocked(made, { "electric-pole" }),
   }
+  for k, v in pairs(more or {}) do req[k] = v end
+  return req
 end
 
 local function write_request(force, ent)
@@ -94,8 +105,9 @@ local warmed = false
 local snapshot  -- (below: an area of the base, for bpgen to build next to)
 local PLACE_R = 48  -- without an area picked with the snapshot tool: the snapshot reaches this far around a spot
 local snaps = {}  -- player index -> the area last picked with the snapshot tool (this session only)
-local function around(c)
-  return { left_top = { x = c.x - PLACE_R, y = c.y - PLACE_R }, right_bottom = { x = c.x + PLACE_R, y = c.y + PLACE_R } }
+local function around(c, r)
+  r = r or PLACE_R
+  return { left_top = { x = c.x - r, y = c.y - r }, right_bottom = { x = c.x + r, y = c.y + r } }
 end
 
 -- What the belts carry, measured: an area's snapshot, then each belt looked at again MEASURE_TICKS later; a belt's
@@ -143,6 +155,7 @@ local function measured_now(m)
 end
 
 local window = require("window")
+local compat = require("compat")
 window.setup({
   craftable = craftable, unlocked = unlocked, bonuses = bonuses,
   start = function(player, request)
@@ -153,11 +166,28 @@ window.setup({
       if id then jobs[id] = { player = player.index, recipe = request.recipe, window = true } end
       return id ~= nil, err
     end
-    if request.params and request.params.mode == "extend" then  -- (the base it builds next to, with the request)
+    if request.params and request.params.mode == "base" and (request.params.fit_bus or request.params.add_to) then
+      -- (a base fitted to a bus lands where the bus ends: the ground there, water and what's built, around you)
+      request.params.snapshot = snapshot(player, around(player.position, 200), true)
+    end
+    if request.params and request.params.mode == "busdesign" then
+      -- (the ground from the patches to the player and round it: ore, what's in the way, room for the bus head)
+      local pos = player.position
+      local x1, y1, x2, y2 = pos.x, pos.y, pos.x, pos.y
+      for _, a in ipairs(request.params.patches) do
+        x1, y1, x2, y2 = math.min(x1, a[1]), math.min(y1, a[2]), math.max(x2, a[3]), math.max(y2, a[4])
+      end
+      local m = 100
+      request.params.snapshot = snapshot(player,
+        { left_top = { x = x1 - m, y = y1 - m }, right_bottom = { x = x2 + m, y = y2 + m } }, true)
+    end
+    if request.params and (request.params.mode == "extend" or request.params.bus_feed) then  -- (the base it builds next to, with the request)
       if snaps[player.index] then
         request.params.snapshot = snaps[player.index]
       else
-        measure(player, around(player.position), function(snap) request.params.snapshot = snap go() end)
+        -- (a line fed from the bus: room beside the bus for the line and what it makes for itself)
+        measure(player, around(player.position, request.params.bus_feed and 128 or nil),
+          function(snap) request.params.snapshot = snap go() end)
         return true
       end
     end
@@ -207,6 +237,18 @@ window.setup({
 
 on_event("bpgen-request", function(e)
   local player = game.get_player(e.player_index)
+  -- over a recipe in a window (Recipe Book, Factory Planner, Factoriopedia...): that recipe, in the best machine
+  local recipe = (e.in_gui or not player.selected) and compat.hovered_recipe(e)
+  if recipe then
+    if in_game() then
+      window.open(player, { recipe = recipe })
+      return window.plan(player)
+    end
+    local machine = window.best_machine(player, recipe)
+    if not machine then return player.print("[bpgen] no unlocked machine makes [recipe=" .. recipe .. "]") end
+    helpers.write_file("bpgen/request.json", helpers.table_to_json(recipe_request(player.force, recipe, machine)), false)
+    return player.print({ "", "[bpgen] request sent: [recipe=" .. recipe .. "] in [entity=" .. machine .. "]" })
+  end
   local request, err = write_request(player.force, player.selected)
   if in_game() then
     -- the bpgen window: filled in from the hovered machine and planned now, else empty
@@ -696,6 +738,7 @@ snapshot = function(player, area, keep)  -- keep: the snapshot back instead of w
 end
 
 local function on_selected(e)
+  if e.item == "bpgen-patches" then return window.add_patch(game.get_player(e.player_index), e.area) end
   if e.item ~= "bpgen-snapshot" then return end
   local player = game.get_player(e.player_index)
   local area = e.area
@@ -717,11 +760,15 @@ remote.add_interface("bpgen", {
   -- absolute = {box = {x, y, w, h}, inputs = {{items, position}} to feed by hand, outputs = {{item, position}}}
   plan_line = function(player_index, item, rate, reply) plan_line(game.get_player(player_index), item, rate, reply) end,
   -- the bpgen window (the fnative hub has a button for it); for tests also: fill it in and plan
+  -- an ore patch for the window's bus design, as if dragged with the patch tool
+  add_patch = function(player_index, area) window.add_patch(game.get_player(player_index), area) end,
   open_window = function(player_index, prefill) window.open(game.get_player(player_index), prefill) end,
   plan_window = function(player_index) window.plan(game.get_player(player_index)) end,
   click = function(player_index, tags) window.click(player_index, tags) end,
   hover_camera = function(player_index) return window.test_hover_camera(player_index) end,
+  last_absolute = function(player_index) return window.last_absolute(player_index) end,
   hover_grip = function(player_index) window.test_hover_grip(player_index) end,
+  compat_scan = function(player_index) compat.scan(game.get_player(player_index)) end,
   preview = function(bp, force_name) return window.preview({ index = 1, force = game.forces[force_name or "player"] }, bp) end,
   bench_test = function(spec, where) return window.bench_test(1, spec, where) end,
   bench_calibrate = function(spec) return window.bench_calibrate(1, spec) end,
@@ -744,6 +791,11 @@ remote.add_interface("bpgen", {
 })
 
 for event, handler in pairs(window.handlers) do on_event(event, handler) end
+-- bpgen buttons in Recipe Book's and Factory Planner's windows (with in-game planning: they open the bpgen window)
+on_nth(compat.RESCAN, function()
+  if not in_game() then return end
+  for _, player in pairs(game.connected_players) do compat.scan(player) end
+end)
 -- (with the fnative-std library: its window and input handlers, for the bpgen window's corner grip)
 if script.active_mods["fnative-std"] then
   safe.chain("bpgen", { require("__fnative-std__/input").handlers, require("__fnative-std__/window").handlers })

@@ -58,9 +58,38 @@ function M.place(player, bp, c, box)
   local reach = box and { { box[1] - 1, box[2] - 1 }, { box[1] + box[3] + 1, box[2] + box[4] + 1 } }
     or { { c.x - 200, c.y - 200 }, { c.x + 200, c.y + 200 } }
   local before = marked(player.surface, reach)
-  local ghosts = stack.build_blueprint({ surface = player.surface, force = player.force, position = c,
-    build_mode = box and defines.build_mode.superforced or defines.build_mode.forced, skip_fog_of_war = false,
-    raise_built = true, player = player })
+  local function build()
+    return stack.build_blueprint({ surface = player.surface, force = player.force, position = c,
+      build_mode = box and defines.build_mode.superforced or defines.build_mode.forced, skip_fog_of_war = false,
+      raise_built = true, player = player })
+  end
+  local ghosts = build()
+  -- (snapping on a grid of box[5] tiles: which cell the game picks depends on the print's size; pasted whole cells
+  -- off its box (give or take what couldn't be built there), it's taken back and pasted again that many cells over)
+  for _ = 1, box and box[5] and 3 or 0 do
+    local g_ = box[5]
+    local ex, ey
+    for _, g in pairs(ghosts) do
+      if g.valid and g.type ~= "tile-ghost" then
+        local b = g.bounding_box
+        ex, ey = math.min(ex or b.left_top.x, b.left_top.x), math.min(ey or b.left_top.y, b.left_top.y)
+      end
+    end
+    if not ex then break end
+    local dx = math.floor((box[1] - ex) / g_ + 0.5) * g_
+    local dy = math.floor((box[2] - ey) / g_ + 0.5) * g_
+    if dx == 0 and dy == 0 then break end
+    for _, g in pairs(ghosts) do  -- (what that paste marked for removal, under its ghosts: unmarked)
+      if g.valid then
+        for _, e in pairs(player.surface.find_entities_filtered({ area = g.bounding_box, to_be_deconstructed = true })) do
+          if e.type ~= "entity-ghost" then e.cancel_deconstruction(player.force) end
+        end
+        g.destroy()
+      end
+    end
+    c = { x = c.x + dx, y = c.y + dy }
+    ghosts = build()
+  end
   inv.destroy()
   local now = {}
   for id, e in pairs(marked(player.surface, reach)) do

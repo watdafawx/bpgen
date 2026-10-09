@@ -131,6 +131,17 @@ def raw_items(data, planet=START_PLANET):
     return out
 
 
+def plate_items(data, raw):
+    """what smelting makes straight from a raw item (iron and copper plate, stone brick...): what a bus head brings"""
+    out = set()
+    for r in data.raw["recipe"].values():
+        ing, res = r.get("ingredients") or [], r.get("results") or []
+        if (r.get("category", "crafting") == "smelting" and not r.get("hidden") and len(ing) == 1
+                and ing[0].get("name") in raw and len(res) == 1 and res[0].get("type", "item") == "item"):
+            out.add(res[0]["name"])
+    return out
+
+
 def _cached(data, key, make):
     """per loaded data: computed once (the data doesn't change while it's loaded)"""
     store = data.__dict__.setdefault("_base_cache", {})
@@ -450,7 +461,7 @@ def _encode(obj):
 def plan_base(service, params, progress=None, cancel=None):
     """params: spm (per pack), addons ["military", "chemical"], belt, assembler, furnace, inserters, bonuses.
     -> {"sections": [...], "book": str, "bus": [...], "bring_in": {...}, "not_automated": [...]}"""
-    from bpgen import labels
+    from bpgen import labels, tiers
 
     data = service.data
     spm = float(params.get("spm") or 30)
@@ -471,6 +482,8 @@ def plan_base(service, params, progress=None, cancel=None):
     picks = [assembler, furnace] + list(params.get("machines") or [])
     # an extension of the player's base: what its belts carry is "raw" (taken from the base, not made here)
     raw = set(params["raw"]) if params.get("raw") is not None else raw_items(data) - MADE_HERE
+    if params.get("plates"):  # (plates come in at the bus head: from a bus design, or smelted elsewhere)
+        raw |= plate_items(data, raw)
     overrides = params.get("recipes") or {}
     fluid_plans = params.get("fluid_plans") or {}
     steps = solve(data, targets, picks, raw, overrides, fluid_plans)
@@ -587,6 +600,7 @@ def plan_base(service, params, progress=None, cancel=None):
     # everything as one blueprint, belts routed between the sections: in the compact layout all but the mall (a print
     # of its own), in the main-bus layout the mall takes its items from the bus too
     route_note = None
+    fit_notes, absolute = [], None
     if params.get("routed", True) and any(s["kind"] == "line" for s in sections):
         if progress:
             progress("routing belts between the sections")
@@ -605,6 +619,26 @@ def plan_base(service, params, progress=None, cancel=None):
                 err = err or e
                 continue
             bp = planner.blueprint_string(ents, "starter base (connected)", description=desc)
+            corner = tiers.head_corner(srcs) if layout == "bus" else None
+            fit = None
+            if corner and params.get("plates") and params.get("fit_bus"):  # (its head on a bus design's lanes)
+                from bpgen import busdesign
+                bus = busdesign.load_last()
+                try:
+                    if bus:  # (clear of the bus design's own belts and of what's on the ground around you)
+                        bus = dict(bus, tiles=[list(t) for t in {tuple(t) for t in bus.get("tiles") or []}
+                                               | tiers.ground_taken(service, params.get("snapshot"), buildings=False)])
+                    fit = tiers.fit_to_bus(service, ents, srcs, bus, belt) if bus else None
+                except planner.PlanError as e:
+                    fit_notes.append(f"not fitted to your bus design: {e}")
+                if not bus:
+                    fit_notes.append("no bus design planned yet (Bus design tab): the head is as usual")
+            if fit:
+                bp, ents, absolute = fit["blueprint"], fit["entities"], {"box": list(fit["box"]), "taps": 0,
+                                                                          "fitted": True}
+                fit_notes += fit["notes"]
+            elif corner:  # (the stone-brick C over the bus head: the next tier pastes onto it)
+                bp = tiers.marked(bp, corner)
             sections.insert(0, {"name": "whole base (connected)", "kind": "routed", "item": None, "copies": 1,
                                 "result": {"mode": "routed", "entities": [service.decorate(e) for e in ents],
                                            "sources": srcs, "sinks": sinks, "blueprint": bp, "description": desc,
@@ -658,7 +692,7 @@ def plan_base(service, params, progress=None, cancel=None):
     return {"sections": sections, "book": _encode(book), "bus": bus, "packs": packs, "spm": spm, "steps": steps,
             "outputs": outputs,
             "bring_in": {k: round(v, 1) for k, v in sorted(bring_in.items())}, "not_automated": not_automated,
-            "route_note": route_note, "text": "\n".join(lines)}
+            "route_note": route_note, "text": "\n".join(lines), "absolute": absolute, "notes": fit_notes}
 
 
 def _all_fluid(data, recipe):

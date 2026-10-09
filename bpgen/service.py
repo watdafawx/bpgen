@@ -233,7 +233,7 @@ class Service:
         r = base.plan_base(self, params, progress, cancel)
         first = r["sections"][0]["result"] if r["sections"] else {"entities": [], "sources": [], "sinks": []}
         return {
-            "params": params, "mode": "base", "blueprint": r["book"], "text": r["text"],
+            "params": params, "mode": "base", "blueprint": r["book"], "text": r["text"], "absolute": r.get("absolute"),
             "entities": first["entities"], "sources": first.get("sources", []), "sinks": first.get("sinks", []),
             "sections": [{"name": s["name"], "kind": s["kind"], "item": s["item"], "rate": s.get("rate"),
                           "copies": s["copies"], "result": s["result"], "recipe": s.get("recipe"),
@@ -242,7 +242,7 @@ class Service:
                         "size": _size_of(first["entities"]) if r["sections"] and r["sections"][0]["kind"] == "routed" else None,
                         "entity_count": len(first["entities"]), "before": params.get("before"),
                         "bring_in": r["bring_in"], "not_automated": r["not_automated"], "route_note": r.get("route_note"),
-                        "outputs": r.get("outputs") or [], "targets": {k: round(v, 1) for k, v in (params.get("targets") or {}).items()}},
+                        "outputs": r.get("outputs") or [], "notes": r.get("notes") or [], "targets": {k: round(v, 1) for k, v in (params.get("targets") or {}).items()}},
         }
 
     def plan_fluid(self, params, progress=None, cancel=None):
@@ -270,6 +270,8 @@ class Service:
     def plan_mall(self, params, progress=None, cancel=None):
         if params.get("feed") == "robots":
             return self.plan_bot_mall(params)
+        if params.get("layout") == "grid":
+            return self.plan_grid_mall(params)
         calib = self.ensure_calibrated(params, progress, cancel)
         if progress:
             progress("planning the mall")
@@ -315,6 +317,25 @@ class Service:
             "text": text,
             "entities": [self.decorate(e) for e in ents], "sources": sources, "sinks": sinks,
             "blueprint": blueprint,
+        }
+
+    def plan_grid_mall(self, params):
+        """a mall in columns between mixed belts, parts made at the top (see mall_grid.py)"""
+        from bpgen import mall_grid
+        g = mall_grid.plan_grid(self.data, params.get("products") or [], params["machine"], params["belt"],
+                                inputs=params.get("inputs"), allowed=params.get("inserters"),
+                                chest=params.get("chest") or "wooden-chest", chest_limit=int(params.get("chest_limit") or 2))
+        ents, sources, sinks, description = labels.add_labels(self.data, g["entities"], g["sources"], [], "", 0)
+        label = f"mall: {', '.join(g['products'])}"[:60]
+        text = "\n".join(g["notes"])
+        return {
+            "params": params, "mode": "mall", "description": description,
+            "summary": {"mode": "mall", "products": g["products"], "machines": len(g["products"]) + sum(g["makers"].values()),
+                        "machine": params["machine"], "belt": params["belt"], "chest": params.get("chest") or "wooden-chest",
+                        "notes": g["notes"], "raw_inputs": g["inputs"], "makers": g["makers"],
+                        "lanes": {k: ", ".join(v) for k, v in g["lanes"].items()}, "text": text},
+            "text": text, "entities": [self.decorate(e) for e in ents], "sources": sources, "sinks": sinks,
+            "blueprint": planner.blueprint_string(ents, label, description=description),
         }
 
     def plan_bot_mall(self, params):
@@ -473,9 +494,15 @@ class Service:
         if params.get("mode") == "mall":
             return self.plan_mall(params, progress, cancel)
         if params.get("mode") == "base":
+            if params.get("add_to"):  # (the next tier beside the held base, on its C)
+                from bpgen import tiers
+                return tiers.add_tier(self, params, progress, cancel)
             return self.plan_base(params, progress, cancel)
         if params.get("mode") == "extend":
             return self.plan_extension(params, progress, cancel)
+        if params.get("mode") == "busdesign":
+            from bpgen import busdesign
+            return busdesign.plan(self, params)
         if params.get("feed") == "robots":
             return self.plan_bot_line(params)
         if progress:

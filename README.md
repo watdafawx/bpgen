@@ -18,7 +18,12 @@ Windows only. Single player.
 - **Production lines**: one recipe at a rate, on the belt you pick. Machine and quality, modules, beacons,
   productivity and your research bonuses are counted. Inserters are picked from throughput measured in the game,
   not from formulas. Optionally its ingredients too (the recipe tree), fed by belts or by robots.
-- **Malls**: several products on a shared belt bus, each with its machine and chest.
+- **Malls**: several products, each with its machine and chest. By default (**Fed by: mixed belts**) in columns of
+  machines between pairs of mixed belts (one item a lane, 8 within each machine's reach): only plates come in at the
+  top (and wood, for wooden chests and small poles), the parts (gears, cable, circuits, inserters...) are made in a band of machines above the products and put on
+  the lanes, and a product that is a component of exactly one other sits right above it and hands it down through
+  its chest. **Fed by: my main bus** takes the parts your bus carries from it, makes the rest, and places the mall
+  beside the bus with taps. The older layout (rows on a 4-lane bus) and robots are still there.
 - **Starter bases**: science per minute up to labs, with a mall. Laid out compact (blocks in columns, belts routed
   between them) or as a **main bus**: one column of blocks beside a bus of belts, each block taking what it needs and
   putting back what it makes, the mall taking from the same bus.
@@ -27,6 +32,21 @@ Windows only. Single player.
   branch off its lanes, the lanes in between dive underground under each branch, and an output the bus doesn't carry
   yet gets a new lane of its own beside it. Auto by default; "Build from my main bus" in the window turns it off.
   Any line or mall goes the same way: plan it, stand by your base and press **Next to my base**.
+  Or set a line's **Feed** to *my main bus*: stand by your bus and press Plan; what the bus carries is tapped from
+  it, the other ingredients are made in the blueprint, and the line lands beside the bus.
+- **Starter base tiers**: every main-bus starter base has a C of stone brick over its bus head and snaps to a 64-tile
+  grid on it, so the next tier pastes with its C on the last one's. **Plates in at the bus head**: the base takes
+  plates (from the Bus design tab, or your smelters) instead of smelting ore. A bigger tier: plan it and paste it over
+  the old one, C on C. **Its head on my bus design** (with plates in, on by default): the base is turned the way
+  the bus you last planned flows, belts run from the ends of its lanes to the base's inputs, and **Place it** puts it
+  at the bus's end; lanes it doesn't need end there for the next tier. **Add to the base in my hand**: hold the old base; bpgen plans only the science it doesn't make
+  yet, beside it, its bus inputs on the same row, and nothing of the old base changes.
+- **Bus design** (in game): pick ore patches with the patch tool (one drag each), stand where the bus should start
+  and press Plan. Drills cover each patch, their ore gathers onto trunk belts (one full belt each), the trunks run
+  to a smelter column apiece (electric furnaces) at the bus head, and the plates (or raw coal) feed a main bus:
+  lanes in groups (default 4 belts, 4 tiles free, repeat), a 4-to-4 balancer at the start of each full group of one
+  item, and a wood lane fed from a chest at its head (for a mall's wooden chests and small poles). Pick its
+  direction, group, gap, length, drill, furnace and belt. Wire its poles to your grid.
 
 In game, after each plan you see whether your save can build it (missing research, buildings you don't have), what
 modules would change, and what your factory is short of. **Test run** runs the preview for real (powered, fed and
@@ -71,6 +91,10 @@ name makes it load last, after every other mod's final fixes, so bpgen sees your
 In a game: the bpgen button in the shortcut bar, **Ctrl+Alt+B**, or hover an assembler and press **Ctrl+Shift+B** to
 plan a line for its recipe. Pick a recipe, set the rate, and the preview appears. **Blueprint to cursor** puts it in
 your hand.
+
+**Recipe Book** (and its fork) and **Factory Planner**: a blueprint button sits in Recipe Book's page header (for an
+item, its main recipe) and beside each recipe in Factory Planner's production table; it opens the bpgen window with
+that recipe. Ctrl+Shift+B over any recipe icon in a window (theirs, Factoriopedia, the crafting menu) does the same.
 
 The first time a plan needs an inserter setup bpgen hasn't measured yet (a new belt, a research level), the game
 measures it itself on a hidden surface (about 30 s) and plans again.
@@ -154,8 +178,16 @@ one machine per product.
 ## Tests
 
 `mod\test\run.py`, `extend_test.py` (headless game with the mod; `bus` as its fourth argument: a main bus),
-`bus_extend_test.py` (placement beside a bus, no game) and `harness\botmall_test.py` (a robot-fed mall built and
-run). They use the same `run\` folder as the web app.
+`bus_extend_test.py` (placement beside a bus, no game), `harness\botmall_test.py` (a robot-fed mall built and
+run), `mod\test\bus_feed_test.py` (a line fed from the bus, no game), `mod\test\mall_bus_test.py` (a grid mall fed
+from the bus, no game), `harness\grid_mall_run.py [minutes]` (the starter grid mall built and run: every product
+made), `mod\test\tiers_test.py` then
+`harness\tiers_paste_test.py` (starter base tiers, then pasted in a game: C on C), `mod\test\fit_bus_test.py`
+then `harness\fit_place_test.py` and `harness\fit_bus_run.py [direction] [minutes]` (a base fitted to a bus design:
+placed exactly, then ore to science packs in a game), `harness\busdesign_check.py` (bus design, no game) and `harness\busdesign_test.py [vanilla] [minutes]
+[direction]` (bus design built on made-up patches and run: every lane's rate, the balancers even). They use the same `run\` folder as the web app.
+`mod\test\run_compat.py` opens a real game with Recipe Book and Factory Planner (from your mods folder) and checks
+bpgen's buttons in their windows.
 
 ## License
 

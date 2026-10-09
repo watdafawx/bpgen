@@ -1,5 +1,6 @@
 data:extend({
-  { type = "custom-input", name = "bpgen-request", key_sequence = "CONTROL + SHIFT + B", consuming = "game-only" },
+  { type = "custom-input", name = "bpgen-request", key_sequence = "CONTROL + SHIFT + B", consuming = "game-only",
+    include_selected_prototype = true },
   -- drag over part of the base: writes it to script-output/bpgen/snapshot.json for bpgen to build next to
   {
     type = "selection-tool",
@@ -11,6 +12,20 @@ data:extend({
     stack_size = 1,
     select = { border_color = { 0.3, 0.8, 1 }, cursor_box_type = "copy", mode = { "any-entity" } },
     alt_select = { border_color = { 0.3, 0.8, 1 }, cursor_box_type = "copy", mode = { "any-entity" } },
+  },
+  -- drag over an ore patch: the bpgen window's bus design mines it
+  {
+    type = "selection-tool",
+    name = "bpgen-patches",
+    icon = "__base__/graphics/icons/electric-mining-drill.png",
+    icon_size = 64,
+    flags = { "only-in-cursor", "not-stackable", "spawnable" },
+    hidden = true,
+    stack_size = 1,
+    select = { border_color = { 1, 0.6, 0.1 }, cursor_box_type = "entity", mode = { "any-entity" },
+      entity_type_filters = { "resource" } },
+    alt_select = { border_color = { 1, 0.6, 0.1 }, cursor_box_type = "entity", mode = { "any-entity" },
+      entity_type_filters = { "resource" } },
   },
   { type = "custom-input", name = "bpgen-snapshot", key_sequence = "CONTROL + SHIFT + N", action = "spawn-item",
     item_to_spawn = "bpgen-snapshot", consuming = "game-only" },
