@@ -484,6 +484,12 @@ def plan_base(service, params, progress=None, cancel=None):
     raw = set(params["raw"]) if params.get("raw") is not None else raw_items(data) - MADE_HERE
     if params.get("plates"):  # (plates come in at the bus head: from a bus design, or smelted elsewhere)
         raw |= plate_items(data, raw)
+        # (and whatever else the bus carries: a bus design's plastic and sulfur, a fitted base's passed-on lanes)
+        bus_items = set(params.get("bus_items") or [])
+        if params.get("fit_bus"):
+            from bpgen import busdesign
+            bus_items |= {ln["item"] for ln in (busdesign.load_last(params) or {}).get("lanes") or []}
+        raw |= bus_items
     overrides = params.get("recipes") or {}
     fluid_plans = params.get("fluid_plans") or {}
     steps = solve(data, targets, picks, raw, overrides, fluid_plans)

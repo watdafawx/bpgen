@@ -273,6 +273,9 @@ class Service:
     def plan_mall(self, params, progress=None, cancel=None):
         if params.get("feed") == "robots":
             return self.plan_bot_mall(params)
+        if params.get("layout") == "grid" and params.get("add_to"):  # (beside the held base, on its spare lanes)
+            from bpgen import tiers
+            return tiers.add_mall(self, params)
         if params.get("layout") == "grid":
             return self.plan_grid_mall(params)
         calib = self.ensure_calibrated(params, progress, cancel)

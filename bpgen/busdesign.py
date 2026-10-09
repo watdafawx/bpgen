@@ -180,8 +180,14 @@ def head(lanes, columns, length, names, balance=True, max_ug=4):
     xs = [x + shift for x in xs]
     left = [k for k in range(len(columns)) if xs[k] < lanes[k]["in"]]
     right = [k for k in range(len(columns)) if xs[k] > lanes[k]["in"]]
-    if any(k > mid for k in left) or any(k < mid for k in right):
-        raise PlanError("the bus is wider than its smelter columns: use a smaller gap between lane groups")
+    if left and right and max(left) > min(right):
+        # (the lanes spread wider than the columns: each column at or right of its own lane, all turning west)
+        xs, x = [], lanes[0]["in"]
+        for k, w in enumerate(widths):
+            xs.append(max(x, lanes[k]["in"]))
+            x = xs[-1] + w + COL_GAP
+        left = []
+        right = [k for k in range(len(columns)) if xs[k] > lanes[k]["in"]]
     turn = {k: 1 + i for i, k in enumerate(left)}
     turn.update({k: 1 + i for i, k in enumerate(reversed(right))})
     rows = max([len(left), len(right), 0])
@@ -587,7 +593,7 @@ def plan(svc, params):
     dx, dy = extend.find_spot(ground, turned, (ox, oy), avoid_ore=True, keep_clear=keep)
     head_ents = extend.shifted(turned, dx, dy)
     goals = [g and ((g[0][0] + dx, g[0][1] + dy), g[1]) for g in goals]
-    oil_ents, crude_goal = [], None
+    oil_ents, crude_goal, water_inlet, coal_src = [], None, None, None
     if oil_block:  # (the oil block beside the head: its products start where its output belts end)
         ground.taken.update({t: {"type": "new"} for e in head_ents for t in extend.footprint(e)})
         block = [svc.decorate(e) for e in oil_block["entities"]]
@@ -604,20 +610,29 @@ def plan(svc, params):
             t = (math.floor(src["position"]["x"]) + bdx, math.floor(src["position"]["y"]) + bdy)
             if src.get("fluid") == "crude-oil":
                 crude_goal = t
+            elif src.get("fluid") == "water":
+                water_inlet = t
             elif src.get("fluid"):
                 inputs.append({"items": [src["fluid"]], "position": {"x": t[0] + 0.5, "y": t[1] + 0.5}})
-                notes.append(f"oil: the [fluid={src['fluid']}] inlet is at ({t[0]}, {t[1]}): an offshore pump's pipe "
-                             "goes there")
-            elif src.get("kind") == "belt":  # (its coal: a chest at the belt's start, filled by hand)
-                oil_ents += [svc.decorate({"name": oil.CHEST_INSERTER, "position": {"x": t[0] - 0.5, "y": t[1] + 0.5},
-                                           "direction": WEST}),
-                             svc.decorate({"name": oil.CHEST, "position": {"x": t[0] - 1.5, "y": t[1] + 0.5}})]
-                notes.append(f"oil: fill the chest at ({t[0] - 2}, {t[1]}) with "
-                             + " ".join(f"[item={i}]" for i in dict.fromkeys(i for i in src.get("lanes") or [] if i)))
+                notes.append(f"oil: the [fluid={src['fluid']}] inlet is at ({t[0]}, {t[1]}): pipe it in yourself")
+            elif src.get("kind") == "belt":
+                coal_src = (t, [i for i in dict.fromkeys(src.get("lanes") or []) if i])
+        coal_tr = next((tr for tr in cols if tr["item"] == "coal" and tr.get("start") and not tr.get("oil")), None)
+        if coal_src and not (coal_tr and coal_src[1] == ["coal"]):  # (no coal patch: a chest at the belt's start)
+            t = coal_src[0]
+            # (plastic takes a coal for two: an electric inserter, a burner one is too slow; a pole by it for power)
+            oil_ents += [svc.decorate({"name": inserter, "position": {"x": t[0] - 0.5, "y": t[1] + 0.5},
+                                       "direction": WEST}),
+                         svc.decorate({"name": oil.CHEST, "position": {"x": t[0] - 1.5, "y": t[1] + 0.5}}),
+                         svc.decorate({"name": POLE, "position": {"x": t[0] - 1.5, "y": t[1] - 0.5}})]
+            notes.append(f"oil: fill the chest at ({t[0] - 2}, {t[1]}) with "
+                         + " ".join(f"[item={i}]" for i in coal_src[1]))
+            coal_src = None
 
     # the trunks, each routed from its patch to its column
     all_new = [svc.decorate(e) for e in mine_ents] + head_ents + oil_ents
     blocked = ground.blocked(avoid_ore=False) | extend.plan_tiles(all_new)
+    blocked |= {t for t in (crude_goal, water_inlet) if t}  # (the oil block's inlets: kept for their pipes)
     starts = []
     if adding:  # (each stub's way out to its new lane: kept for its own belt, from the trunks too)
         for tr in cols:
@@ -627,8 +642,42 @@ def plan(svc, params):
     spans = set(ground.spans)
     x1, y1, x2, y2 = ground.bounds
     routed = []
+    branch = None
+    if oil_block and coal_src:  # (the oil block's coal: a splitter where the coal patch's belt starts, its branch there)
+        tr = next(tr for tr in cols if tr["item"] == "coal" and tr.get("start") and not tr.get("oil"))
+        s0, d0 = tr["start"], tr["dir"]
+        dv0 = router.DIRS[d0]
+        for j, side in ((j, side) for j in range(4) for side in (4, 12)):  # (a few tiles on, where there's room)
+            sj = (s0[0] + j * dv0[0], s0[1] + j * dv0[1])
+            pv = router.DIRS[(d0 + side) % 16]
+            s1 = (sj[0] + pv[0], sj[1] + pv[1])
+            run = [(s0[0] + i * dv0[0], s0[1] + i * dv0[1]) for i in range(j)]
+            if sj in blocked or s1 in blocked or any(t in blocked for t in run):
+                continue
+            routed += [svc.decorate({"name": belt, "direction": d0, "position": {"x": t[0] + 0.5, "y": t[1] + 0.5}})
+                       for t in run]
+            routed.append(svc.decorate({"name": splitter, "direction": d0, "position": {
+                "x": (sj[0] + s1[0]) / 2 + 0.5, "y": (sj[1] + s1[1]) / 2 + 0.5}}))
+            blocked |= {sj, s1} | set(run)
+            tr["start"] = (sj[0] + dv0[0], sj[1] + dv0[1])
+            branch = ((s1[0] + dv0[0], s1[1] + dv0[1]), d0, coal_src[0])
+            blocked.add(branch[0])
+            break
+    # (the last tiles before each column's goal and after each trunk's start: kept for its own belt, so the trunks
+    # routed first don't wall in the ones after; two of each, straight on)
+    reserved = {}
+    for tr, g in zip(cols, goals):
+        if g and tr.get("start"):
+            (gx, gy), gd = g
+            dv = router.DIRS[gd]
+            sv = router.DIRS[tr["dir"]]
+            mine = [(gx - k * dv[0], gy - k * dv[1]) for k in (1, 2)] + \
+                [(tr["start"][0] + k * sv[0], tr["start"][1] + k * sv[1]) for k in (0, 1)]
+            reserved[id(tr)] = {t for t in mine if t not in blocked}
+            blocked |= reserved[id(tr)]
     for tr, (goal, gd) in sorted(((t, g) for t, g in zip(cols, goals) if g), key=lambda p: abs(p[0]["start"][0] - p[1][0][0])
                                  + abs(p[0]["start"][1] - p[1][0][1])):
+        blocked -= reserved.get(id(tr), set())
         try:
             path = router.route(blocked, [(tr["start"], [tr["dir"], (tr["dir"] + 4) % 16, (tr["dir"] + 12) % 16])],
                                 goal, gd, (x1, y1, x2, y2), max_ug, underground_spans=spans)
@@ -641,18 +690,54 @@ def plan(svc, params):
         router.reserve(path, blocked, spans)
         routed += [svc.decorate(e) for e in extend.path_entities(path, belt, ug)]
         tr["goal"] = goal
+    if branch:  # (the coal branch to the oil block's coal belt, coming in at its start)
+        blocked.discard(branch[0])
+        try:
+            path = router.route(blocked, [(branch[0], [branch[1], (branch[1] + 4) % 16, (branch[1] + 12) % 16])],
+                                branch[2], EAST, (x1, y1, x2, y2), max_ug, underground_spans=spans)
+            router.reserve(path, blocked, spans)
+            routed += [svc.decorate(e) for e in extend.path_entities(path, belt, ug)]
+            notes.append("oil: its coal comes off your coal patch's belt")
+        except router.RouteError:
+            notes.append(f"oil: no way for coal to its coal belt at ({branch[2][0]}, {branch[2][1]}): bring it yourself")
+            inputs.append({"items": ["coal"], "position": {"x": branch[2][0] + 0.5, "y": branch[2][1] + 0.5}})
     pj_poles = []
     if oil_block:  # (pumpjacks on the fields, piped to the block's crude inlet, never touching its other fluids)
         pj, outs, _ = oil.pumpjacks(svc, oil_fields, blocked)
         pj = [svc.decorate(e) for e in pj]
         foreign = oil.foreign_fluids(oil_ents, crude_goal) if crude_goal else {}
         foreign.update({t: "crude-oil" for e in pj if e["name"] == oil.PUMPJACK for t in extend.footprint(e)})
-        pipes = oil.pipe_crude(crude_goal, outs, blocked, foreign, (x1, y1, x2, y2)) if crude_goal else None
+        pipes = oil.pipe_crude(crude_goal, outs, blocked, foreign, (x1, y1, x2, y2), oil_ents) if crude_goal else None
         if pipes is None:
             notes.append("oil: no pipe route from the pumpjacks to the refineries: pipe the crude in yourself")
             if crude_goal:
                 inputs.append({"items": ["crude-oil"], "position": {"x": crude_goal[0] + 0.5, "y": crude_goal[1] + 0.5}})
         routed += pj + [svc.decorate(e) for e in pipes or []]
+        if water_inlet:  # (an offshore pump on the nearest shore, piped to the water inlet; else left to you)
+            pump = oil.offshore(ground, water_inlet, blocked)
+            wpipes = None
+            if pump:
+                pe, out_t = pump
+                blocked |= extend.plan_tiles([svc.decorate(pe)])
+                wforeign = oil.foreign_fluids(oil_ents, water_inlet, "water")
+                # (the crude pipes and pumpjacks just placed: another fluid too, a water pipe mustn't touch them)
+                wforeign.update({t: "crude-oil" for e in pj + [svc.decorate(x) for x in pipes or []]
+                                 for t in extend.footprint(e)})
+                at = {(math.floor(e["position"]["x"]), math.floor(e["position"]["y"])) for e in oil_ents
+                      if e["name"] in (oil.PIPE, oil.PIPE_UG)}
+                into = next((d for d, v in router.DIRS.items() if (water_inlet[0] + v[0], water_inlet[1] + v[1]) in at),
+                            EAST)
+                blocked.discard(water_inlet)
+                wpipes = oil.pipe_to(water_inlet, out_t, "water", blocked, wforeign, (x1, y1, x2, y2), into,
+                                     oil_ents + (pipes or []))
+            if wpipes:
+                routed += [svc.decorate(pe)] + [svc.decorate(e) for e in wpipes]
+                notes.append(f"oil: water from an offshore pump at ({pe['position']['x'] - 0.5:.0f}, "
+                             f"{pe['position']['y'] - 0.5:.0f})")
+            else:
+                inputs.append({"items": ["water"], "position": {"x": water_inlet[0] + 0.5, "y": water_inlet[1] + 0.5}})
+                notes.append(f"oil: the [fluid=water] inlet is at ({water_inlet[0]}, {water_inlet[1]}): no shore near "
+                             "enough for an offshore pump, put one there yourself")
         pj_poles = extend.pole_tiles(pj)
         n_pj = sum(e["name"] == oil.PUMPJACK for e in pj)
         notes.insert(0, f"oil: {n_pj} pumpjacks, {oil_block['crude']:.0f} crude a second: "

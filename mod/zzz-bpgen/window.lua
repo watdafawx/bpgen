@@ -470,7 +470,8 @@ function M.open(player, prefill)
   field(fs, "Chest").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_chest",
     elem_filters = { { filter = "type", type = { "container", "logistic-container" } } } })
   field(fs, "Fed by", "mixed belts: columns of machines between mixed belts, gears, cable, circuits... made at the top, only plates come in. My main bus: the same, the parts your bus carries taken from it, placed beside it. Rows: the older layout, its own 4-lane bus").add({
-    type = "drop-down", name = "bpgen_mall_feed", items = { "rows on a 4-lane bus", "robots", "mixed belts", "my main bus" },
+    type = "drop-down", name = "bpgen_mall_feed", items = { "rows on a 4-lane bus", "robots", "mixed belts", "my main bus",
+      "the base in my hand" },
     selected_index = 3 })
   fs = fields(sec)
   field(fs, "Buffer", "crafts each machine keeps ahead").add({ type = "textfield", name = "bpgen_mall_buffer", text = "5",
@@ -488,6 +489,11 @@ function M.open(player, prefill)
     allow_decimal = true, lose_focus_on_confirm = true }).style.width = 60
   field(fs, "Lab").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_lab",
     elem_filters = { { filter = "type", type = "lab" } } })
+  fs = fields(sec)
+  fs.add({ type = "checkbox", name = "bpgen_base_military", caption = "Military", state = false,
+    tooltip = "Military science too" })
+  fs.add({ type = "checkbox", name = "bpgen_base_chemical", caption = "Chemical (blue)", state = false,
+    tooltip = "Chemical science too: plastic and sulfur from your bus (a bus design with an oil field), or made here" })
   sec = section(base, "Buildings", "empty: bpgen's starter picks")
   fs = fields(sec)
   field(fs, "Assembler").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_assembler",
@@ -747,11 +753,17 @@ local function request(player, frame)
       feed = find(frame, "bpgen_mall_feed").selected_index == 2 and "robots" or "belt",
       layout = find(frame, "bpgen_mall_feed").selected_index >= 3 and "grid" or nil,
       bus_feed = find(frame, "bpgen_mall_feed").selected_index == 4 or nil,
+      add_to = find(frame, "bpgen_mall_feed").selected_index == 5 and player.cursor_stack
+        and player.cursor_stack.valid_for_read and player.cursor_stack.export_stack() or nil,
+      wants_base = find(frame, "bpgen_mall_feed").selected_index == 5 or nil,
       origin = { x = player.position.x, y = player.position.y },
       buffer_crafts = tonumber(find(frame, "bpgen_mall_buffer").text) or 5,
       chest_limit = tonumber(find(frame, "bpgen_chest_limit").text) or 4,
       stock = tonumber(find(frame, "bpgen_mall_stock").text),
       belt = req.belt }
+    if req.params.wants_base and not req.params.add_to then
+      return nil, "hold the blueprint of the base on your bus to put the mall beside"
+    end
     return req
   elseif mode == "extend" then
     local item = value(frame, "bpgen_ext_item")
@@ -780,7 +792,10 @@ local function request(player, frame)
       belt = value(frame, "bpgen_bus_belt") or u.belts[#u.belts] }
     return req
   elseif mode == "base" then
-    req.params = { mode = "base", spm = tonumber(find(frame, "bpgen_spm").text) or 30,
+    local addons = {}
+    if find(frame, "bpgen_base_military").state then addons[#addons + 1] = "military" end
+    if find(frame, "bpgen_base_chemical").state then addons[#addons + 1] = "chemical" end
+    req.params = { mode = "base", spm = tonumber(find(frame, "bpgen_spm").text) or 30, addons = addons,
       -- (empty pickers: bpgen's starter defaults, not the fastest thing unlocked: a late-game lab takes dozens of
       -- science packs, a "starter base" for it isn't one)
       assembler = value(frame, "bpgen_assembler"), furnace = value(frame, "bpgen_furnace"),

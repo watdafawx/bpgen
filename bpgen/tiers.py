@@ -59,11 +59,13 @@ def _snap_of(bp_string, corner):
 FLOW = {"north": 0, "east": 4, "south": 8, "west": 12}
 
 
-def fit_to_bus(svc, ents, sources, bus, belt, beside=False, makes=None):
+def fit_to_bus(svc, ents, sources, bus, belt, beside=False, makes=None, split=False):
     """a bus-layout base (flowing south, its inputs on row 0) fitted to the end of a bus's lanes: turned to the bus's
     direction, belts from each lane to the base's input of that item (in order, crossing underground). The lanes it
     doesn't need run on past its east side (its frame) and end there, side by side, for the next tier (`exits`).
     beside: the base all east of its lanes (a later tier, fitted to the lanes the last one passed on, next to it).
+    split: a lane may feed up to 3 inputs of its item, through splitters at its start (a mall: it takes a trickle of
+    each; the lanes a fitted base passes on are 3 apart for this).
     -> dict(entities (world), blueprint, box, corner (world), exits [{item, end}], notes) or None (nothing to fit)"""
     from bpgen import busdesign, chain, router
     direction = bus.get("direction") or "north"
@@ -81,27 +83,54 @@ def fit_to_bus(svc, ents, sources, bus, belt, beside=False, makes=None):
         ln["u"] = ln["local"][0] - u0
     cols = sorted((s for s in sources if s.get("kind") == "belt"), key=lambda s: s["position"]["x"])
     notes, pairs, spare, missing = [], [], [], []
-    for item in sorted({s["lanes"][0] for s in cols if s.get("lanes")} | {ln["item"] for ln in lanes}):
-        cs = [s for s in cols if (s.get("lanes") or [None])[0] == item]
+    # what each input wants: (item, goal: (x, y, the way the lane comes in)). One item: straight in from the north.
+    # Two (iron plate and coal for steel furnaces): each from its own bus lane, side-loaded onto its lane of the
+    # input's first belt (lanes[0], the east one of a belt flowing south: from the east, moving west)
+    wants = []
+    for s in cols:
+        a, b = ((s.get("lanes") or []) + [None, None])[:2]
+        x = math.floor(s["position"]["x"])
+        if a and b and a != b:
+            wants += [(a, (x, 0, 12)), (b, (x, 0, 4))]
+        elif a or b:
+            wants.append((a or b, (x, 0, 8)))
+    for item in sorted({w[0] for w in wants} | {ln["item"] for ln in lanes}):
+        gs = sorted((g for i, g in wants if i == item), key=lambda g: (g[0], g[2]))
         ls = sorted((ln for ln in lanes if ln["item"] == item), key=lambda ln: ln["u"])
-        pairs += [(ln, (math.floor(s["position"]["x"]), 0)) for ln, s in zip(ls, cs)]
-        spare += ls[len(cs):]
-        missing += [item for _ in cs[len(ls):]]
+        free = {ln["u"] for ln in lanes}
+        rest = list(gs)
+        for ln in ls:
+            room = 1 if not split else 3 if not ({ln["u"] + 1, ln["u"] + 2} & free) else \
+                2 if ln["u"] + 1 not in free else 1  # (splitters need the tiles east of the lane)
+            mine, rest = rest[:room], rest[room:]
+            if not mine:
+                spare.append(ln)
+            ln["branches"] = len(mine)
+            pairs += [(ln, g, b) for b, g in enumerate(mine)]
+        missing += [item for _ in rest]
     if not pairs:
         return None
     ug, max_ug = chain.related_belts(svc.data, belt)
+    splitter = chain.related_splitter(svc.data, belt)
     base_tiles = extend.plan_tiles([svc.decorate(e) for e in ents])
     span = max(ln["u"] for ln in lanes)
     if beside:  # (all of it east of its lanes: the last tier is west of them)
         bx = min(t[0] for t in base_tiles) - span - 3
     else:  # (the lanes centred over the inputs)
-        cx = [g[0] for _, g in pairs]
+        cx = [p[1][0] for p in pairs]
         bx = round((min(cx) + max(cx)) / 2 - span / 2)
     # the spare lanes' ends: past the base's east side, side by side, flowing on (south) from row 0
     ex0 = max(max(t[0] for t in base_tiles), bx + span) + 2
     spare.sort(key=lambda ln: ln["u"])
-    exits = [(ln, (ex0 + j, 1)) for j, ln in enumerate(spare)]
-    xs = [t[0] for t in base_tiles] + [bx + ln["u"] for ln in lanes] + [g[0] for _, g in exits]
+    exits = [(ln, (ex0 + 3 * j, 1, 8), 0) for j, ln in enumerate(spare)]  # (3 apart: room for a mall's splitters)
+    for ln in spare:
+        ln["branches"] = 1
+    xs = [t[0] for t in base_tiles] + [bx + ln["u"] for ln in lanes] + [p[1][0] for p in exits]
+
+    def start_of(ln, b):  # (where a lane's branch b starts: the lane itself, or after its splitters)
+        x, n_ = bx + ln["u"], ln["branches"]
+        return (x, top) if n_ <= 1 else [(x, top + 1), (x + 1, top + 1)][b] if n_ == 2 else \
+            [(x, top + 1), (x + 1, top + 2), (x + 2, top + 2)][b]
     routed = None
     n = len(pairs) + len(exits)
     for height in (n + 3, n * 2 + 6, n * 3 + 12):
@@ -109,16 +138,27 @@ def fit_to_bus(svc, ents, sources, bus, belt, beside=False, makes=None):
         bounds = (min(xs) - height, top, max(xs) + height, max(t[1] for t in base_tiles))
         for order in (lambda p: abs(bx + p[0]["u"] - p[1][0]), lambda p: p[0]["u"], lambda p: -p[0]["u"],
                       lambda p: -p[1][0], lambda p: p[1][0]):
-            approach = {(g[0], g[1] - 1) for _, g in pairs + exits}  # (each goal's last tile: its own belt's only)
-            blocked = (set(base_tiles) | {(bx + ln["u"], top) for ln in lanes} | {g for _, g in exits}
-                       | {(g[0], g[1] + 1) for _, g in exits} | approach)
+            # (each goal's last tile: its own belt's only)
+            approach = {(g[0] - router.DIRS[g[2]][0], g[1] - router.DIRS[g[2]][1]) for _, g, _ in pairs + exits}
+            blocked = (set(base_tiles) | {(bx + ln["u"], top) for ln in lanes} | {g[:2] for _, g, _ in exits}
+                       | {(g[0], g[1] + 1) for _, g, _ in exits} | approach
+                       | {start_of(ln, b) for ln, _, b in pairs + exits})
             spans, out = set(), []
+            for ln in lanes:  # (splitters: a lane into 2 or 3)
+                x = bx + ln["u"]
+                if ln.get("branches", 0) >= 2:
+                    out.append({"name": splitter, "position": {"x": x + 1.0, "y": top + 0.5}, "direction": 8})
+                    blocked |= {(x, top), (x + 1, top)}
+                if ln.get("branches", 0) == 3:
+                    out.append({"name": splitter, "position": {"x": x + 2.0, "y": top + 1.5}, "direction": 8})
+                    blocked |= {(x + 1, top + 1), (x + 2, top + 1)}
             try:
-                for ln, goal in sorted(pairs + exits, key=order):
-                    start = (bx + ln["u"], top)
+                for ln, goal, b in sorted(pairs + exits, key=order):
+                    start = start_of(ln, b)
                     blocked.discard(start)
-                    blocked.discard((goal[0], goal[1] - 1))
-                    path = router.route(blocked, [(start, [8, 4, 12])], goal, 8, bounds, max_ug,
+                    dv = router.DIRS[goal[2]]
+                    blocked.discard((goal[0] - dv[0], goal[1] - dv[1]))
+                    path = router.route(blocked, [(start, [8, 4, 12])], goal[:2], goal[2], bounds, max_ug,
                                         underground_spans=spans)
                     router.reserve(path, blocked, spans)
                     out += extend.path_entities(path, belt, ug)
@@ -149,7 +189,7 @@ def fit_to_bus(svc, ents, sources, bus, belt, beside=False, makes=None):
         x, y = min(clash)
         raise planner.PlanError(f"at the end of the bus something's in the way (at {x}, {y}: water, a cliff, the bus's "
                                 "own belts or a building): plan the bus longer or another way, or clear it")
-    out_lanes = [{"item": ln["item"], "end": list(to_world((g[0], g[1] - 1)))} for ln, g in exits]
+    out_lanes = [{"item": ln["item"], "end": list(to_world((g[0], g[1] - 1)))} for ln, g, _ in exits]
     if bus.get("end_pole"):  # (power: a pole line from the bus's (or the last tier's) pole to this base's)
         mine = extend.pole_tiles(world)
         taken = extend.plan_tiles([svc.decorate(e) for e in world]) | {tuple(t) for t in bus.get("tiles") or []}
@@ -247,6 +287,41 @@ def held_base(bp_string):
     return b.get("entities") or [], _corner(b), base._encode(bp)
 
 
+def add_mall(svc, params):
+    """a grid mall beside the held base, fitted to the bus lanes it passes on (its inputs only what those carry: plates,
+    wood, coal...). -> a mall result, absolute, or raises PlanError"""
+    from bpgen import busdesign, mall_grid
+    old, corner, print_ = held_base(params["add_to"])
+    fitted = read_fitted((base._decode(print_).get("blueprint") or {}).get("description"))
+    if not fitted:
+        raise planner.PlanError("hold a base that sits on your bus design (fitted to it, with lanes passed on)")
+    if not fitted["lanes"]:
+        raise planner.PlanError("the held base passes no spare bus lanes on: nothing for a mall to take")
+    items = sorted({ln["item"] for ln in fitted["lanes"]})
+    g = mall_grid.plan_grid(svc.data, params.get("products") or [], params["machine"], params["belt"], inputs=items,
+                            allowed=params.get("inserters"), chest=params.get("chest") or "wooden-chest",
+                            chest_limit=int(params.get("chest_limit") or 2),
+                            stock=int(params["stock"]) if params.get("stock") is not None else mall_grid.STOCK)
+    cw = fitted["corner"]
+    old_world = extend.shifted([svc.decorate({k: v for k, v in e.items() if k in ("name", "position", "direction")})
+                                for e in old], cw[0], cw[1])
+    taken = ({tuple(t) for t in (busdesign.load_last(params) or {}).get("tiles") or []} | extend.plan_tiles(old_world)
+             | ground_taken(svc, params.get("snapshot")))
+    fit = fit_to_bus(svc, [svc.decorate(e) for e in g["entities"]], g["sources"],
+                     {"direction": fitted["direction"], "lanes": fitted["lanes"], "tiles": sorted(taken),
+                      "end_pole": extend.nearest(extend.pole_tiles(old_world), tuple(fitted["lanes"][0]["end"]))},
+                     params["belt"], beside=True, split=True)
+    if not fit:
+        raise planner.PlanError("none of the lanes the held base passes on carry what the mall needs")
+    notes = g["notes"] + fit["notes"]
+    return {"params": params, "mode": "mall", "blueprint": fit["blueprint"], "text": "\n".join(notes),
+            "entities": fit["entities"], "sources": [], "sinks": [],
+            "summary": {"mode": "mall", "products": g["products"], "machines": len(g["products"]) + sum(g["makers"].values()),
+                        "machine": params["machine"], "belt": params["belt"], "notes": notes, "raw_inputs": g["inputs"],
+                        "makers": g["makers"]},
+            "absolute": {"box": list(fit["box"]), "taps": 0, "fitted": True}}
+
+
 def add_tier(svc, params, progress=None, cancel=None):
     """params as a starter base's, with "add_to": the held base's blueprint. -> a base result of what it doesn't
     make yet, beside it, carrying its C"""
@@ -274,6 +349,8 @@ def add_tier(svc, params, progress=None, cancel=None):
     p = {k: v for k, v in params.items() if k not in ("add_to", "spm", "import")}
     total = {k: round(have.get(k, 0) + targets.get(k, 0), 2) for k in set(have) | set(targets)}
     p.update(targets=targets, layout="bus", fit_bus=False, makes_total=total)
+    if fitted:  # (what the held base passes on comes in at this one's head: plastic, sulfur... as plates)
+        p["bus_items"] = sorted({ln["item"] for ln in fitted["lanes"]})
     recipes = data.raw["recipe"]
     if not any((recipes.get(e.get("recipe") or "") or {}).get("category") == "smelting" or svc.decorate(e)["type"] == "furnace"
                for e in old):

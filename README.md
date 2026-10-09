@@ -25,7 +25,8 @@ Windows only. Single player.
   its chest. Each product's machine is wired to its chest and takes from the belts only while it holds fewer than
   **Keep** (10), so the machines down a column get plates soon (every product of the starter mall in 9 minutes).
   **Fed by: my main bus** takes the parts your bus carries from it, makes the rest, and places the mall
-  beside the bus with taps. The older layout (rows on a 4-lane bus) and robots are still there.
+  beside the bus with taps. **Fed by: the base in my hand** puts it beside a base on your bus design, on the
+  lanes that base passes on (each split into up to three of the mall's inputs). The older layout (rows on a 4-lane bus) and robots are still there.
 - **Starter bases**: science per minute up to labs, with a mall. Laid out compact (blocks in columns, belts routed
   between them) or as a **main bus**: one column of blocks beside a bus of belts, each block taking what it needs and
   putting back what it makes, the mall taking from the same bus.
@@ -54,8 +55,8 @@ Windows only. Single player.
   **Add to my bus here**: stand by your bus (a lane running dry) and pick another patch: its ore is smelted upstream
   of the bus and goes onto new lanes laid along it.
   **Oil**: pick an oil field too and pumpjacks go on its wells, their crude piped to an oil block at the bus head
-  (refineries and chemical plants) whose plastic and sulfur go onto bus lanes; its water inlet is left for your
-  offshore pump, and its coal comes from a chest you fill.
+  (refineries and chemical plants) whose plastic and sulfur go onto bus lanes; an offshore pump on the nearest shore
+  (within 80 tiles, else its water inlet is left to you) and coal off your coal patch's belt (else a chest you fill).
 
 In game, after each plan you see whether your save can build it (missing research, buildings you don't have), what
 modules would change, and what your factory is short of. **Test run** runs the preview for real (powered, fed and

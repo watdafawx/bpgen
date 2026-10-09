@@ -16,6 +16,8 @@ from bpgen.service import Service  # noqa: E402
 
 RUN = ROOT / "run"
 IRON = (100, 129, -50, -21)
+LAKE = (62, 80, -40, -15) if "--lake" in sys.argv else None  # (x1 x2 y1 y2: water near the oil block's inlet)
+COAL = (160, 179, -20, -6) if "--coal" in sys.argv else None
 WELLS = [(-90 + 7 * i, -70 + 5 * (i % 2)) for i in range(6)]  # (tile; each 50%)
 
 CONTROL = r'''
@@ -39,6 +41,15 @@ script.on_event(defines.events.on_tick, function(e)
     local p = spec.iron
     for x = p[1], p[2] do for y = p[3], p[4] do s.create_entity({ name = "iron-ore", position = { x + 0.5, y + 0.5 }, amount = 1000000 }) end end
     for _, w in ipairs(spec.wells) do s.create_entity({ name = "crude-oil", position = { w[1] + 0.5, w[2] + 0.5 }, amount = 150000 }) end
+    if spec.coal then
+      local c = spec.coal
+      for x = c[1], c[2] do for y = c[3], c[4] do s.create_entity({ name = "coal", position = { x + 0.5, y + 0.5 }, amount = 1000000 }) end end
+    end
+    if spec.lake then
+      local w, t = spec.lake, {}
+      for x = w[1], w[2] do for y = w[3], w[4] do t[#t + 1] = { name = "water", position = { x, y } } end end
+      s.set_tiles(t)
+    end
   elseif e.tick == 2 then
     local missing, made_ = 0, {}
     for i, en in ipairs(spec.entities) do
@@ -93,6 +104,20 @@ script.on_event(defines.events.on_tick, function(e)
       by[k] = (by[k] or 0) + 1
     end
     for k, v in pairs(by) do out[#out + 1] = "status " .. k .. " " .. v end
+    for _, m in pairs(s.find_entities_filtered({ name = { "oil-refinery", "offshore-pump" } })) do
+      local fb = {}
+      for i = 1, #m.fluidbox do
+        local f = m.fluidbox[i]
+        fb[#fb + 1] = i .. "=" .. (f and (f.name .. ":" .. math.floor(f.amount)) or "-") .. "/" .. #m.fluidbox.get_connections(i)
+      end
+      out[#out + 1] = "status fb " .. m.name .. " @" .. m.position.x .. "," .. m.position.y .. " " .. (names[m.status] or "?") .. " " .. table.concat(fb, " ")
+    end
+    if spec.probe then
+      for _, m in pairs(s.find_entities_filtered({ area = { { spec.probe[1] - 2, spec.probe[2] - 3 }, { spec.probe[1] + 3, spec.probe[2] + 6 } }, type = { "pipe", "pipe-to-ground" } })) do
+        local f = m.fluidbox[1]
+        out[#out + 1] = "status probe " .. m.name .. " @" .. m.position.x .. "," .. m.position.y .. " " .. (f and (f.name .. ":" .. math.floor(f.amount)) or "empty") .. " conns " .. #m.fluidbox.get_connections(1)
+      end
+    end
     for _, m in pairs(s.find_entities_filtered({ name = "pumpjack" })) do
       local conns = m.fluidbox.get_connections(1)
       out[#out + 1] = "status pj @" .. m.position.x .. "," .. m.position.y .. " " .. (names[m.status] or "?") .. " connections " .. #conns
@@ -108,12 +133,20 @@ def main():
     s = Service("vanilla")
     planner.configure(s.data)
     x1, x2, y1, y2 = IRON
-    snap = {"area": [-150, -200, 250, 200], "entities": [], "obstacles": [], "water": {},
-            "resources": {"iron-ore": {str(y): [[x1, x2]] for y in range(y1, y2 + 1)}},
+    water = {str(y): [[LAKE[0], LAKE[1]]] for y in range(LAKE[2], LAKE[3] + 1)} if LAKE else {}
+    snap = {"area": [-150, -200, 250, 200], "entities": [], "obstacles": [], "water": water,
+            "resources": {"iron-ore": {str(y): [[x1, x2]] for y in range(y1, y2 + 1)},
+                          **({"coal": {str(y): [[COAL[0], COAL[1]]] for y in range(COAL[2], COAL[3] + 1)}} if COAL else {})},
             "fluid_resources": [{"name": "crude-oil", "x": x + 0.5, "y": y + 0.5, "amount": 150000} for x, y in WELLS]}
     out = s.plan({"mode": "busdesign", "snapshot": snap, "origin": {"x": 0, "y": 0}, "belt": "transport-belt",
                   "furnace": "electric-furnace", "length": 20, "wood": False,
-                  "patches": [[x1 - 5, y1 - 5, x2 + 6, y2 + 6], [-100, -80, -40, -55]]})
+                  "patches": [[x1 - 5, y1 - 5, x2 + 6, y2 + 6], [-100, -80, -40, -55]]
+                  + ([[COAL[0] - 5, COAL[2] - 5, COAL[1] + 6, COAL[3] + 6]] if COAL else [])})
+    if LAKE:
+        assert any("offshore pump at" in n for n in out["notes"]), "no offshore pump placed"
+        assert not any("water" in i["items"] for i in out["inputs"]), "water still left to the player"
+    if COAL:
+        assert any("coal comes off" in n for n in out["notes"]), "the oil block's coal isn't from the patch"
     print("\n".join(out["notes"]))
     seen, bad = {}, []
     for e in out["entities"]:
@@ -149,7 +182,8 @@ def main():
     xs = [e["position"]["x"] for e in ents]
     ys = [e["position"]["y"] for e in ents]
     warmup, ticks = (8 * 3600, 14 * 3600) if "--quick" not in sys.argv else (60, 600)
-    spec = {"entities": ents, "wires": planner.pole_wires(ents), "iron": list(IRON), "wells": [list(w) for w in WELLS], "water": [list(w) for w in water],
+    spec = {"entities": ents, "wires": planner.pole_wires(ents), "iron": list(IRON), "lake": LAKE and list(LAKE),
+            "coal": COAL and list(COAL), "probe": [11, -31] if "--probe" in sys.argv else None, "wells": [list(w) for w in WELLS], "water": [list(w) for w in water],
             "lanes": out["lanes"], "box": [int(min(xs)) - 10, int(min(ys)) - 10, int(max(xs)) + 10, int(max(ys)) + 10],
             "warmup": warmup, "ticks": ticks}
     mods = RUN / "oil-mods"

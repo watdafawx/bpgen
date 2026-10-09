@@ -166,7 +166,8 @@ window.setup({
       if id then jobs[id] = { player = player.index, recipe = request.recipe, window = true } end
       return id ~= nil, err
     end
-    if request.params and request.params.mode == "base" and (request.params.fit_bus or request.params.add_to) then
+    if request.params and (request.params.mode == "base" and (request.params.fit_bus or request.params.add_to)
+        or request.params.mode == "mall" and request.params.add_to) then
       -- (a base fitted to a bus lands where the bus ends: the ground there, water and what's built, around you)
       request.params.snapshot = snapshot(player, around(player.position, 200), true)
     end
