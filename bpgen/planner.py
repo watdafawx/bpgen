@@ -609,6 +609,7 @@ def warmup_ticks(data, p: Plan):
 
 
 POLE_COPPER = 5  # defines.wire_connector_id.pole_copper
+CIRCUIT_RED = 1  # defines.wire_connector_id.circuit_red
 POLE_REACH = 9
 PIPE_UG_MAX = 10  # tiles a pipe-to-ground pair may span
 
@@ -693,8 +694,14 @@ def blueprint_string(entities, label, game_version=(2, 0, 77), description=None)
             if e.get(key):
                 be[key] = e[key]
         bp_entities.append(be)
+    # circuit wires (red): an entity's "circuit_to" names others by their "wire_id" (a mall's chest and the inserters
+    # that only run while it's short)
+    number = {e["wire_id"]: i for i, e in enumerate(entities, 1) if e.get("wire_id") is not None}
+    circuit = [[i, CIRCUIT_RED, number[w], CIRCUIT_RED] for i, e in enumerate(entities, 1)
+               for w in e.get("circuit_to") or [] if w in number]
     major, minor, patch = game_version
-    bp = {"blueprint": {"item": "blueprint", "label": label, "entities": bp_entities, "wires": pole_wires(entities),
+    bp = {"blueprint": {"item": "blueprint", "label": label, "entities": bp_entities,
+                        "wires": pole_wires(entities) + circuit,
                         "version": (major << 48) | (minor << 32) | (patch << 16)}}
     if description:
         bp["blueprint"]["description"] = description

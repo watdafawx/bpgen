@@ -324,7 +324,8 @@ class Service:
         from bpgen import mall_grid
         g = mall_grid.plan_grid(self.data, params.get("products") or [], params["machine"], params["belt"],
                                 inputs=params.get("inputs"), allowed=params.get("inserters"),
-                                chest=params.get("chest") or "wooden-chest", chest_limit=int(params.get("chest_limit") or 2))
+                                chest=params.get("chest") or "wooden-chest", chest_limit=int(params.get("chest_limit") or 2),
+                                stock=int(params["stock"]) if params.get("stock") is not None else mall_grid.STOCK)
         ents, sources, sinks, description = labels.add_labels(self.data, g["entities"], g["sources"], [], "", 0)
         label = f"mall: {', '.join(g['products'])}"[:60]
         text = "\n".join(g["notes"])

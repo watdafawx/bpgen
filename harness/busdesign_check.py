@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from bpgen import extend  # noqa: E402
+from bpgen import extend, planner  # noqa: E402
 from bpgen.service import Service  # noqa: E402
 
 
@@ -35,6 +35,20 @@ def main():
             seen[t] = e
     assert not bad, f"{len(bad)} overlapping tiles, first: {bad[:3]}"
     assert not out["inputs"], f"trunks not routed: {out['inputs']}"
+    poles = [(e["position"]["x"], e["position"]["y"]) for e in out["entities"] if e["name"] == planner.POLE]
+    group = {p: p for p in poles}  # (pole networks: wire reach)
+
+    def root(p):
+        while group[p] != p:
+            p = group[p]
+        return p
+    for i, p in enumerate(poles):
+        for q in poles[i + 1:]:
+            if (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 <= planner.POLE_REACH ** 2:
+                group[root(p)] = root(q)
+    nets = len({root(p) for p in poles})
+    print("pole networks:", nets)
+    assert nets == 1, f"{nets} pole networks: the drills, smelters and bus end should be one"
     items = [ln["item"] for ln in out["lanes"]]
     print("lanes:", items)
     assert items.count("iron-plate") >= 2 and "copper-plate" in items and "coal" in items, items

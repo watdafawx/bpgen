@@ -99,6 +99,37 @@ def smelter_column(x0, top, n, furnace, inserter, belt, recipe=None):
     return out, (x0 + 6, bottom)
 
 
+def burner_column(x0, top, n, furnace, inserter, belt, recipe=None):
+    """2x2 burner furnaces both sides of an ore belt that carries ore on its west lane and coal on its east (side-loaded
+    at the bottom), n a side, 2 rows each. The west output belt (x0) leaves north from row top-2; the east one (x0+10)
+    turns west along row top-1 onto it. -> (entities, ore goal (the ore belt's bottom, entered moving north),
+    coal goal (the same tile, entered moving west: side-loaded onto its east lane))"""
+    out = []
+    bottom = top + 2 * n - 1
+    for i in range(n):
+        r = top + 2 * i
+        kw = {"recipe": recipe} if recipe else {}
+        out.append(ent(furnace, x0 + 3.0, r + 1.0, **kw))
+        out.append(ent(furnace, x0 + 8.0, r + 1.0, **kw))
+        out.append(ent(inserter, x0 + 4.5, r + 1.5, EAST))  # ore and coal from the belt into the furnace
+        out.append(ent(inserter, x0 + 6.5, r + 1.5, WEST))
+        out.append(ent(inserter, x0 + 1.5, r + 1.5, EAST))  # plates out
+        out.append(ent(inserter, x0 + 9.5, r + 1.5, WEST))
+        if i % 2 == 0:
+            out.append(ent(POLE, x0 + 4.5, r + 0.5))
+            out.append(ent(POLE, x0 + 9.5, r + 0.5))
+    for y in range(top + 1, bottom + 2):  # (a row short at the top, as the electric column; one past the bottom)
+        out.append(ent(belt, x0 + 5.5, y + 0.5, NORTH))
+    for y in range(top - 1, bottom + 1):
+        out.append(ent(belt, x0 + 0.5, y + 0.5, NORTH))
+    for y in range(top, bottom + 1):
+        out.append(ent(belt, x0 + 10.5, y + 0.5, NORTH))
+    for x in range(1, 11):
+        out.append(ent(belt, x0 + x + 0.5, top - 1 + 0.5, WEST))
+    return out, (x0 + 5, bottom + 1), ((x0 + 5, bottom + 1), WEST)
+
+
+
 def lane_layout(items, group, gap):
     """items: [(item, lanes)] -> [{"item", "x" (bus column), "in" (input column at row 0), "group", "balanced"}];
     each item starts a group of its own, a group holds up to `group` lanes"""
@@ -115,7 +146,7 @@ def lane_layout(items, group, gap):
     return lanes
 
 
-def head(lanes, columns, length, names, balance=True):
+def head(lanes, columns, length, names, balance=True, max_ug=4):
     """the bus head, local frame. columns: one per lane, in lane order: {"kind": "smelt"|"raw", "n": furnaces a side,
     "item"...}. -> (entities, goals: per column (tile, direction) its trunk enters)"""
     belt, ug, splitter, furnace, inserter = names
@@ -139,7 +170,7 @@ def head(lanes, columns, length, names, balance=True):
             for y in range(-6 - length, -6):
                 ents.append(ent(belt, ln["x"] + 0.5, y + 0.5, NORTH))
     # columns side by side, the middle one under its lane
-    widths = [13 if c["kind"] == "smelt" else 1 for c in columns]
+    widths = [(11 if c.get("burner") else 13) if c["kind"] == "smelt" else 1 for c in columns]
     xs, x = [], 0
     for w in widths:
         xs.append(x)
@@ -155,10 +186,18 @@ def head(lanes, columns, length, names, balance=True):
     turn.update({k: 1 + i for i, k in enumerate(reversed(right))})
     rows = max([len(left), len(right), 0])
     top = rows + 3  # the columns' first furnace row; their output belts leave at row rows+1
-    goals = []
+    goals, coal_goals, columns_bottom = [], [], {}
+    coal_from = coal_lane_goal = None
     for k, c in enumerate(columns):
         x0, xin = xs[k], lanes[k]["in"]
-        if c["kind"] == "smelt":
+        if c["kind"] == "smelt" and c.get("burner"):
+            ce, goal, (coal_tile, _) = burner_column(x0, top, c["n"], furnace, inserter, belt, c.get("recipe"))
+            ents += ce
+            goals.append((goal, NORTH))
+            columns_bottom[k] = goal[1]
+            # (coal onto the lane the ore isn't on: the ore came on its left lane (west, flowing north) -> from east)
+            coal_goals.append((k, coal_tile, WEST if c.get("ore_lane", "L") == "L" else EAST))
+        elif c["kind"] == "smelt":
             ce, goal = smelter_column(x0, top, c["n"], furnace, inserter, belt, c.get("recipe"))
             ents += ce
             goals.append((goal, NORTH))
@@ -172,6 +211,8 @@ def head(lanes, columns, length, names, balance=True):
             for y in range(top - 1, top + 3):
                 ents.append(ent(belt, x0 + 0.5, y + 0.5, NORTH))
             goals.append(((x0, top + 2), NORTH))
+            if c.get("item") == "coal" and coal_from is None:  # (the first coal lane: its coal feeds the furnaces)
+                coal_from, coal_lane_goal = k, goals[-1]
         yk = turn.get(k, 1)
         for y in range(yk + 1, rows + 2):  # up from the column to its turn row
             ents.append(ent(belt, x0 + 0.5, y + 0.5, NORTH))
@@ -181,6 +222,51 @@ def head(lanes, columns, length, names, balance=True):
                 ents.append(ent(belt, x + 0.5, yk + 0.5, EAST if step > 0 else WEST))
         for y in range(1, yk + 1):  # up the lane to the balancer's input
             ents.append(ent(belt, xin + 0.5, y + 0.5, NORTH))
+    # burner columns: their coal, from a belt under them all (the coal patch's, else a chest filled by hand), a
+    # splitter at each, its branch side-loaded onto the column's ore belt (the lane the ore isn't on)
+    if coal_goals:
+        from bpgen import extend as ext, router as rt
+        occupied = ext.plan_tiles(ents)
+        m_row = max(g[1] for _, g, _ in coal_goals) + 5
+        bx0 = min(xs[k] for k, _, _ in coal_goals) - 3
+        bx1 = max(xs[k] for k, _, _ in coal_goals) + 12
+        splitters = {xs[k] + 7 for k, _, _ in coal_goals}
+        for x in range(bx0, bx1 + 1):
+            if x in splitters:
+                ents.append(ent(splitter, x + 0.5, m_row + 0.0, EAST))  # (rows m_row - 1 and m_row: the branch above)
+            else:
+                ents.append(ent(belt, x + 0.5, m_row + 0.5, EAST))
+        blocked = occupied | ext.plan_tiles([e for e in ents if e["position"]["y"] > m_row - 2])
+        for k, _, _ in coal_goals:  # (each column's ore comes up from the south: its way kept clear)
+            for y in range(columns_bottom[k] + 1, m_row - 1):
+                blocked.add((xs[k] + 5, y))
+        lo_x = min(t[0] for t in occupied | blocked) - 8
+        hi_x = max(t[0] for t in occupied | blocked) + 8
+        bounds = (lo_x, -10, hi_x, m_row + 2)
+        spans = set()
+        for k, goal, gdir in coal_goals:
+            sx = xs[k] + 7
+            blocked.discard(goal)
+            try:
+                path = rt.route(blocked, [((sx + 1, m_row - 1), [EAST, NORTH])], goal, gdir, bounds, max_ug,
+                                underground_spans=spans)
+            except rt.RouteError:
+                raise PlanError("no room to bring the coal to the burner furnaces") from None
+            rt.reserve(path, blocked, spans)
+            blocked.add(goal)
+            ents += ext.path_entities(path, belt, ug)
+        if coal_from is not None:  # (the coal patch's belt comes in at its west end; its east end goes on to the bus)
+            goals[coal_from] = ((bx0, m_row), EAST)
+            raw_goal = coal_lane_goal
+            try:
+                path = rt.route(blocked, [((bx1 + 1, m_row), [EAST, NORTH, SOUTH])], raw_goal[0], raw_goal[1],
+                                (lo_x, -10, hi_x + 20, m_row + 6), max_ug, underground_spans=spans)
+                ents += ext.path_entities(path, belt, ug)
+            except rt.RouteError:
+                pass  # (the coal lane then only gets what the furnaces leave: nothing; it stays empty)
+        else:  # (no coal patch: a chest at its start, its burner inserter runs on the coal it moves)
+            ents.append(ent(CHEST_INSERTER, bx0 - 0.5, m_row + 0.5, WEST))
+            ents.append(ent(CHEST, bx0 - 1.5, m_row + 0.5))
     return ents, goals
 
 
@@ -195,15 +281,15 @@ def _drill_ok(ore, cx, cy, r):
     return n >= MIN_ORE
 
 
-def band(ore, ya, yb, x0, x1, drill, belt, toward_east, r):
+def band(ore, ya, yb, x0, x1, drill, belt, toward_east, r, sides=(-1, 1)):
     """drills, collector belts, poles and the header for rows ya..yb of a patch. -> (entities, drills, header end:
     the trunk's first tile, its direction) or None (no drill fits)"""
-    H = (ya + yb) // 2
+    H = (ya + yb) // 2 if len(sides) > 1 else yb - 1  # (one side: the header at the band's foot, drills above)
     ents, n, xs = [], 0, []
     cxs = list(range(x0 - 1, x1 + 1, 7))
     for cx in cxs:
         got = False
-        for sgn in (-1, 1):  # -1: above the header (drills send south), 1: below (north)
+        for sgn in sides:  # -1: above the header (drills send south), 1: below (north)
             rows = []  # drill top rows, nearest the header first
             poles = [H + sgn]
             cur = H + 2 * sgn  # the header-side row of the next drill
@@ -243,7 +329,7 @@ def band(ore, ya, yb, x0, x1, drill, belt, toward_east, r):
     # header-side poles across the band's empty columns too, so the wires reach from one column to the next
     have = {(e["position"]["x"], e["position"]["y"]) for e in ents if e["name"] == POLE}
     for cx in range(min(xs) - 3, max(xs) - 2, 7):
-        for p in (H - 1, H + 1):
+        for p in [H + sgn for sgn in sides]:
             for px in (cx + 1.5, cx + 5.5):
                 if (px, p + 0.5) not in have:
                     ents.append(ent(POLE, px, p + 0.5))
@@ -255,7 +341,7 @@ def band(ore, ya, yb, x0, x1, drill, belt, toward_east, r):
     return ents, n, (start, d)
 
 
-def mine_patch(ore, drill, belt, rate, cap, toward_east, r):
+def mine_patch(ore, drill, belt, rate, cap, toward_east, r, sides=(-1, 1)):
     """bands over the patch, as many as it takes for each header to stay within one belt. -> [(entities, drills,
     (start, dir))]"""
     x0, x1 = min(t[0] for t in ore), max(t[0] for t in ore)
@@ -268,7 +354,7 @@ def mine_patch(ore, drill, belt, rate, cap, toward_east, r):
             ya, yb = y0 + round(i * h), y0 + round((i + 1) * h) - 1
             if yb - ya < 4:
                 continue
-            got = band(ore, ya, yb, x0, x1, drill, belt, toward_east, r)
+            got = band(ore, ya, yb, x0, x1, drill, belt, toward_east, r, sides)
             if got:
                 bands.append(got)
         if all(b[1] * rate <= cap * 1.001 for b in bands):
@@ -292,27 +378,35 @@ def smelt_recipe(data, ore, fp):
     return min(found)[1:] if found else None
 
 
-def _last_file():
+def _last_file(key=None):
+    """one a save (its map seed) and surface: a base planned in one save doesn't fit to another's bus"""
+    import re
     from bpgen.config import PATHS
-    return PATHS["script_output"] / "bpgen" / "bus_design.json"
+    name = "bus_design" + (f"-{re.sub(r'[^A-Za-z0-9_-]', '_', key)}" if key else "") + ".json"
+    return PATHS["script_output"] / "bpgen" / name
+
+
+def save_key(params):
+    return f"{params['seed']}-{params.get('surface') or 'nauvis'}" if params.get("seed") is not None else None
 
 
 def save_last(out, params):
     """the planned bus's lane ends (world tiles), for a starter base to fit its head to (tiers.fit_to_bus)"""
     import json
-    f = _last_file()
+    f = _last_file(save_key(params))
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps({"direction": params.get("direction") or "north", "surface": params.get("surface"),
                              "lanes": out.get("lanes") or [],
                              # (what it covers: a base fitted to it mustn't land on its trunks)
-                             "tiles": sorted(extend.plan_tiles(out.get("entities") or []))}), encoding="utf-8")
+                             "tiles": sorted(extend.plan_tiles(out.get("entities") or [])),
+                             "end_pole": out.get("end_pole")}), encoding="utf-8")
 
 
-def load_last():
-    """the last bus design's lanes {direction, lanes: [{item, x, rate, end}]}, or None"""
+def load_last(params=None):
+    """the last bus design's lanes {direction, lanes: [{item, x, rate, end}]} in this save, or None"""
     import json
     try:
-        return json.loads(_last_file().read_text(encoding="utf-8"))
+        return json.loads(_last_file(save_key(params or {})).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
 
@@ -359,9 +453,10 @@ def plan(svc, params):
     fp = data.raw.get("furnace", {}).get(furnace) or data.raw["assembling-machine"].get(furnace)
     if not fp:
         raise PlanError(f"{furnace} is not a furnace")
-    if (fp.get("energy_source") or {}).get("type") != "electric" or planner._dims(fp) != (3, 3):
-        raise PlanError(f"{furnace}: the bus design's smelter columns take a 3x3 electric furnace (like the "
-                        "electric furnace) for now; burner furnaces need a fuel lane, not laid out yet")
+    burner = (fp.get("energy_source") or {}).get("type") == "burner"
+    if planner._dims(fp) != ((2, 2) if burner else (3, 3)):
+        raise PlanError(f"{furnace}: the bus design's smelter columns take a 3x3 electric furnace or a 2x2 burner one "
+                        "(stone, steel)")
     allowed = params.get("inserters") or []
     inserter = next((n for n in ("fast-inserter", "inserter") if not allowed or n in allowed), "inserter")
     group, gap = int(params.get("group") or 4), int(params.get("gap") or 4)
@@ -393,7 +488,10 @@ def plan(svc, params):
                 continue
             rate = dp.get("mining_speed", 0.5) / (mined.get("mining_time") or 1)
             cx = sum(t[0] for t in ore) / len(ore)
-            for ents, _, (start, d) in mine_patch(ore, drill, belt, rate, cap, ox > cx, r):
+            # (burner furnaces: the ore on one lane of its trunk, half a belt, coal goes on the other at the furnaces)
+            half = burner and smelt_recipe(data, item, fp)
+            for ents, _, (start, d) in mine_patch(ore, drill, belt, rate, cap / 2 if half else cap, ox > cx, r,
+                                                  (-1,) if half else (-1, 1)):
                 ents = [e for e in ents if not (e["name"] == drill and any(
                     t in blocked for t in extend.footprint(svc.decorate(e))))]
                 n = sum(e["name"] == drill for e in ents)
@@ -403,7 +501,8 @@ def plan(svc, params):
                     raise PlanError(f"the {name} patch has something in the way at ({p['x']:.0f}, {p['y']:.0f}): "
                                     "clear it or pick a patch without buildings")
                 mine_ents += ents
-                trunks.append({"item": item, "start": start, "dir": d, "rate": min(cap, n * rate), "drills": n})
+                trunks.append({"item": item, "start": start, "dir": d, "rate": min(cap / 2 if half else cap, n * rate),
+                               "drills": n, "ore_lane": "L" if d == EAST else "R"})  # (north collectors: header's north lane)
     if not trunks:
         raise PlanError("no ore in the picked areas that the drills can mine")
 
@@ -415,7 +514,8 @@ def plan(svc, params):
             rname, ing, out_item, res = sr
             per = fp.get("crafting_speed", 1) / (data.raw["recipe"][rname].get("energy_required") or 0.5) * res
             out_rate = tr["rate"] / ing * res
-            tr.update(kind="smelt", bus_item=out_item, recipe=rname if fp.get("type") == "assembling-machine" else None, n=max(1, math.ceil(out_rate / per / 2)), out_rate=out_rate)
+            tr.update(kind="smelt", bus_item=out_item, recipe=rname if fp.get("type") == "assembling-machine" else None,
+                      n=max(1, math.ceil(out_rate / per / 2)), out_rate=out_rate, burner=burner)
         else:
             tr.update(kind="raw", bus_item=tr["item"], n=0, out_rate=tr["rate"])
         by_item.setdefault(tr["bus_item"], []).append(tr)
@@ -425,11 +525,17 @@ def plan(svc, params):
         order.append(WOOD)  # (last: the one lane that isn't mined)
     lanes = lane_layout([(i, len(by_item[i])) for i in order], group, gap)
     cols = [tr for i in order for tr in by_item[i]]
+    if burner:  # (the first coal lane feeds the furnaces first: the bus gets what they don't burn)
+        coal = next((tr for tr in cols if tr["item"] == "coal" and tr["kind"] == "raw"), None)
+        fuel = (data.raw.get("item", {}).get("coal") or {}).get("fuel_value")
+        if coal and fuel:
+            burn = planner.energy(fp.get("energy_usage") or "90kW") / planner.energy(fuel)
+            coal["out_rate"] = max(0.0, coal["rate"] - burn * sum(2 * tr["n"] for tr in cols if tr["kind"] == "smelt"))
     for ln, tr in zip(lanes, cols):
         tr["lane"] = ln
 
     # the bus head: laid out flowing north, turned, put on free ground near the player
-    local, goals = head(lanes, cols, length, (belt, ug, splitter, furnace, inserter), balance)
+    local, goals = head(lanes, cols, length, (belt, ug, splitter, furnace, inserter), balance, max_ug)
     turned = [svc.decorate(_turn(e, k)) for e in local]
     goals = [g and (_turn_tile(g[0], k), (g[1] + 4 * k) % 16) for g in goals]
     ground.taken.update({t: {"type": "new"} for e in mine_ents for t in extend.footprint(svc.decorate(e))})
@@ -456,7 +562,27 @@ def plan(svc, params):
             continue
         router.reserve(path, blocked, spans)
         routed += [svc.decorate(e) for e in extend.path_entities(path, belt, ug)]
-    ents = [dict(e, new=True) for e in all_new + routed]
+        tr["goal"] = goal
+    # power, one network: a pole line from each patch along its trunk to the smelters, and on to the bus's end
+    mine_poles = extend.pole_tiles(mine_ents)
+    head_poles = extend.pole_tiles(head_ents)
+    lines, unpowered = [], 0
+    for tr in cols:
+        if tr.get("goal") and mine_poles and head_poles:
+            run = extend.pole_chain(extend.nearest(mine_poles, tr["start"]), extend.nearest(head_poles, tr["goal"]),
+                                      blocked)
+            lines += run or []
+            unpowered += run is None
+    end_pole = None
+    if head_poles:
+        t = _turn_tile((lanes[0]["x"] - 2, -6 - length), k)  # (beside the first lane, where the bus ends)
+        t = (t[0] + dx, t[1] + dy)
+        run = extend.pole_chain(extend.nearest(head_poles, t), t, blocked) if t not in blocked else None
+        if run is not None:
+            blocked.add(t)
+            lines += run + [{"name": POLE, "position": {"x": t[0] + 0.5, "y": t[1] + 0.5}}]
+            end_pole = list(t)
+    ents = [dict(e, new=True) for e in all_new + routed + [svc.decorate(e) for e in lines]]
 
     nd = sum(tr["drills"] for tr in trunks)
     summary = {}
@@ -467,16 +593,22 @@ def plan(svc, params):
     notes.insert(0, "bus: " + ", ".join(f"{i} {summary[i][0]} lane{'s' if summary[i][0] > 1 else ''} "
                                         f"({summary[i][1] * 60:.0f}/min)" for i in order if i in summary)
                  + f"; {nd} drills, {sum(2 * tr['n'] for tr in trunks)} furnaces")
+    if burner:
+        notes.append("burner furnaces: coal goes onto each column's ore belt from a belt under them, fed "
+                     + ("by your coal patch (the rest goes on to the bus)" if any(tr["item"] == "coal" for tr in trunks)
+                        else "from a chest at its west end: fill it with coal (no coal patch picked)"))
     if WOOD in by_item and by_item[WOOD][0]["kind"] == "chest":
         notes.append(f"[item={WOOD}] lane: fill the chest at its head with wood (it feeds itself from it)")
     if balance and any(not ln["balanced"] for ln in lanes):
         notes.append("balancers only on full groups of 4 lanes of one item (2 lanes: one splitter)")
     if inserter == "inserter" and any(tr["kind"] == "smelt" and tr["item"] == "stone" for tr in trunks):
         notes.append("stone bricks: basic inserters may not keep up; research fast inserters")
-    notes.append("power: wire the drills' and the smelters' poles to your grid")
+    notes.append("power: one pole network, drills to the bus's end: wire one of its poles to your grid"
+                 + (f" ({unpowered} trunk{'s' if unpowered > 1 else ''} without a pole line: wire those drills too)"
+                    if unpowered else ""))
     label = "bpgen: bus from " + ", ".join(sorted({tr["item"] for tr in trunks}))
     bp, box = extend.absolute_blueprint(ents, label, description="Ore patches to a main bus, by bpgen.")
-    return {"entities": ents, "notes": notes, "inputs": inputs, "blueprint": bp, "box": box,
+    return {"entities": ents, "notes": notes, "inputs": inputs, "blueprint": bp, "box": box, "end_pole": end_pole,
             "lanes": [{"item": ln["item"], "x": ln["x"], "rate": tr["out_rate"],
                        "end": [c + o for c, o in zip(_turn_tile((ln["x"], -6 - length), k), (dx, dy))]}
                       for ln, tr in zip(lanes, cols)]}

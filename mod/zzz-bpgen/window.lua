@@ -471,6 +471,8 @@ function M.open(player, prefill)
     numeric = true, lose_focus_on_confirm = true }).style.width = 60
   field(fs, "Chest limit", "slots each product's chest may fill").add({ type = "textfield", name = "bpgen_chest_limit",
     text = "4", numeric = true, lose_focus_on_confirm = true }).style.width = 60
+  field(fs, "Keep", "mixed belts: each machine takes from the belts only while its chest has fewer than this (wired to the chest), so the ones down a column get plates soon; 0: no limit").add({
+    type = "textfield", name = "bpgen_mall_stock", text = "10", numeric = true, lose_focus_on_confirm = true }).style.width = 60
 
   -- a starter base: science
   local base = left.add({ type = "flow", name = "bpgen_base_box", direction = "vertical", visible = false })
@@ -541,7 +543,7 @@ function M.open(player, prefill)
   fs = fields(sec)
   field(fs, "Drill", "3x3").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_bus_drill",
     elem_filters = { { filter = "type", type = "mining-drill" } } })
-  field(fs, "Furnace", "3x3, electric").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_bus_furnace",
+  field(fs, "Furnace", "an electric furnace, or stone / steel (burner: coal goes onto each column's ore belt from a belt under them, fed by your coal patch or a chest)").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_bus_furnace",
     elem_filters = { { filter = "crafting-category", crafting_category = "smelting" } } })
   field(fs, "Belt").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_bus_belt",
     elem_filters = { { filter = "type", type = "transport-belt" } } })
@@ -718,7 +720,8 @@ end
 local function request(player, frame)
   local force = player.force
   local u = unlocked(player)
-  local req = { tick = game.tick, surface = player.surface.name, bonuses = ctx.bonuses(force),
+  local req = { tick = game.tick, surface = player.surface.name, seed = player.surface.map_gen_settings.seed,
+                bonuses = ctx.bonuses(force),
                 inserters = u.inserters, belts = u.belts, poles = u.poles, belt = value(frame, "bpgen_belt") }
   local mode = mode_of(frame)
   if mode == "mall" then
@@ -738,6 +741,7 @@ local function request(player, frame)
       origin = { x = player.position.x, y = player.position.y },
       buffer_crafts = tonumber(find(frame, "bpgen_mall_buffer").text) or 5,
       chest_limit = tonumber(find(frame, "bpgen_chest_limit").text) or 4,
+      stock = tonumber(find(frame, "bpgen_mall_stock").text),
       belt = req.belt }
     return req
   elseif mode == "extend" then
@@ -877,7 +881,7 @@ function M.place_absolute(player)
   end
   if r.res.mode == "busdesign" or a.fitted then
     status(frame, string.format(a.fitted and "Placed %d ghosts (outlined): the base at the end of your bus, its head on the lanes."
-      or "Placed %d ghosts (outlined): drills on your patches, the bus head near you. Wire its poles to your grid.", #ghosts))
+      or "Placed %d ghosts (outlined): drills on your patches, the bus head near you, one pole network: wire one of its poles to your grid.", #ghosts))
     ctx.api(player, "history", { add = r.blueprint, mode = r.res.mode }, "history_add")
     return
   end
@@ -1038,14 +1042,35 @@ function M.on_result(player, res)
       if pr.name == s.output then made = (pr.amount or ((pr.amount_min + pr.amount_max) / 2)) * (pr.probability or 1) end
     end
     if made > 0 then
+      -- (an ingredient made inside the blueprint isn't brought in: what its own recipe takes is, instead)
+      local stage_of, per_min = {}, {}
+      for _, st in pairs(s.stages or {}) do stage_of[st.item] = st end
+      local function add(name, n) per_min[name] = (per_min[name] or 0) + n end
       local runs = s.expected * 60 / made / (1 + (s.productivity or 0))
       for _, ing in pairs(recipe.ingredients) do
-        need[#need + 1] = string.format("%s %.1f", sig(ing.name), runs * ing.amount)
+        local st = stage_of[ing.name]
+        local r = st and prototypes.recipe[st.recipe]
+        if r then
+          local out = 1
+          for _, pr in pairs(r.products) do if pr.name == ing.name then out = pr.amount or 1 end end
+          for _, i2 in pairs(r.ingredients) do add(i2.name, runs * ing.amount / out * i2.amount) end
+        else
+          add(ing.name, runs * ing.amount)
+        end
       end
+      for name, n in pairs(per_min) do need[#need + 1] = string.format("%s %.1f", sig(name), n) end
     end
   end
   table.sort(need)
   if #need > 0 then lines[#lines + 1] = "Needs a minute: " .. table.concat(need, "   ") end
+  -- (parts the plan made inside the blueprint on its own, e.g. fed from the bus: ticked, as if picked)
+  local make_box = find(frame, "bpgen_make")
+  for _, st in pairs(s.stages or {}) do
+    for _, r in pairs(make_box and make_box.children or {}) do
+      local on = r.children[1]
+      if on and on.type == "checkbox" and on.tags and on.tags.item == st.item then on.state = true end
+    end
+  end
   local function icons(list, kind)
     local t = {}
     for _, n in ipairs(list or {}) do t[#t + 1] = kind and ("[" .. kind .. "=" .. n .. "]") or sig(n) end
@@ -1301,7 +1326,13 @@ local function describe_test(run, final)
   for k, n in pairs(count) do machines[#machines + 1] = n .. " " .. k:gsub("_", " ") end
   table.sort(machines)
   local head
-  if t < run.warmup then
+  if run.products then  -- (a mall: nothing to rate, what has reached its chests)
+    local got, waiting = bench.chest_contents(run), {}
+    for _, p in ipairs(run.products) do if not got[p] then waiting[#waiting + 1] = sig(p) end end
+    head = string.format("%s: %d of %d products in their chests (%d s)%s", final and "Test run done" or "Test run (mall)",
+      #run.products - #waiting, #run.products, math.floor(t / 60),
+      #waiting > 0 and ("\nStill waiting for: " .. table.concat(waiting, " ")) or "")
+  elseif t < run.warmup then
     head = string.format("Test run: warming up %d / %d s (inputs filling the belts)", math.floor(t / 60),
       math.floor(run.warmup / 60))
   else

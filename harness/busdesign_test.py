@@ -1,7 +1,7 @@
 """Headless check of the bus design: the ore patches of busdesign_check made for real, the planned drills, trunks,
 smelter columns, balancers and bus built, every pole network powered; after a warmup, what reaches each bus lane's
 end is counted (and cleared). Fails when a lane gets much less than planned or a balanced group is uneven.
-    python harness/busdesign_test.py [vanilla|pack] [minutes] [north|east|south|west]"""
+    python harness/busdesign_test.py [vanilla|pack] [minutes] [north|east|south|west] [furnace]"""
 import json
 import shutil
 import subprocess
@@ -17,7 +17,9 @@ from bpgen.service import Service  # noqa: E402
 MODE = sys.argv[1] if len(sys.argv) > 1 else "vanilla"
 MINUTES = float(sys.argv[2]) if len(sys.argv) > 2 else 3
 DIRECTION = sys.argv[3] if len(sys.argv) > 3 else "north"
-WARMUP = 4 * 3600  # (the trunks are long: ore takes a while to reach the furnaces)
+FURNACE = sys.argv[4] if len(sys.argv) > 4 else "electric-furnace"  # (stone-furnace: burner columns, coal from the patch)
+WARMUP = (12 if "stone" in FURNACE or "steel" in FURNACE else 4) * 3600  # (the trunks are long: ore takes a while to
+# reach the furnaces; burner ones also fill their fuel, one column after the other along the coal belt)
 RUN = ROOT / "run"
 OUT = RUN / "script-output" / "bpgen" / "busdesign.txt"
 PATCHES = {"iron-ore": (100, 139, -60, -11), "copper-ore": (100, 129, 20, 49), "coal": (160, 179, -20, -6)}
@@ -92,6 +94,32 @@ script.on_event(defines.events.on_tick, function(e)
     end
     for k, v in pairs(st) do out[#out + 1] = "status " .. k .. " " .. v end
     out[#out + 1] = "status drills " .. #s.find_entities_filtered({ name = "electric-mining-drill" })
+    local ps = force.get_item_production_statistics(s)
+    for _, n in ipairs({ "iron-plate", "copper-plate", "iron-ore", "copper-ore", "coal" }) do
+      out[#out + 1] = "status made " .. n .. " " .. ps.get_input_count(n) .. " used " .. ps.get_output_count(n)
+    end
+    -- (burner columns: what's on each ore belt's lanes at its foot, where the coal comes on)
+    for _, f in pairs(s.find_entities_filtered({ name = { "stone-furnace", "steel-furnace" } })) do
+      local below = s.find_entities_filtered({ position = { f.position.x + 2.5, f.position.y + 1.5 }, type = "transport-belt" })[1]
+      if below and not s.find_entities_filtered({ position = { f.position.x + 2.5, f.position.y + 3.5 }, name = { "stone-furnace", "steel-furnace" } })[1]
+          and not s.find_entities_filtered({ position = { f.position.x + 0.5, f.position.y + 2.5 }, name = { "stone-furnace", "steel-furnace" } })[1] then
+        local foot = below
+        for _ = 1, 0 do
+          local nxt = s.find_entities_filtered({ position = { foot.position.x, foot.position.y + 1 }, type = "transport-belt" })[1]
+          if not nxt then break end
+          foot = nxt
+        end
+        local function lane(l)
+          local t = {}
+          for _, it in pairs(foot.get_transport_line(l).get_contents()) do t[#t + 1] = it.name .. "=" .. it.count end
+          return table.concat(t, ",")
+        end
+        out[#out + 1] = "status foot @" .. foot.position.x .. "," .. foot.position.y .. " left[" .. lane(1) .. "] right[" .. lane(2) .. "]"
+      end
+    end
+    local nets = {}
+    for _, p in pairs(s.find_entities_filtered({ type = "electric-pole" })) do nets[p.electric_network_id] = true end
+    out[#out + 1] = "status networks " .. table_size(nets)
     helpers.write_file("bpgen/busdesign.txt", table.concat(out, "\n") .. "\n", true)
   end
 end)
@@ -103,7 +131,7 @@ def main():
     runs = {name: {str(y): [[x1, x2]] for y in range(y1, y2 + 1)} for name, (x1, x2, y1, y2) in PATCHES.items()}
     snap = {"area": [-150, -200, 250, 200], "entities": [], "obstacles": [], "water": {}, "resources": runs}
     patches = [[x1 - 5, y1 - 5, x2 + 6, y2 + 6] for x1, x2, y1, y2 in PATCHES.values()]
-    furnace = "electric-furnace"
+    furnace = FURNACE
     out = s.plan({"mode": "busdesign", "snapshot": snap, "patches": patches, "origin": {"x": 0, "y": 0},
                   "direction": DIRECTION, "belt": "transport-belt", "furnace": furnace, "group": 4, "gap": 4,
                   "length": 20})

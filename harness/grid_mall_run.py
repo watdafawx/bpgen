@@ -9,13 +9,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from bpgen import base, harness, planner  # noqa: E402
+from bpgen import base, extend, harness, planner  # noqa: E402
 from bpgen.config import PATHS  # noqa: E402
 from bpgen.service import Service  # noqa: E402
 
 RUN = ROOT / "run"
 OUT = RUN / "script-output" / "bpgen" / "gridmall.txt"
-MINUTES = float(sys.argv[1]) if len(sys.argv) > 1 else 40  # (till every chest has filled once)
+MINUTES = float(sys.argv[1]) if len(sys.argv) > 1 else 12  # (every product made: about 9 min)
 
 CONTROL = r'''
 local spec = require("spec")
@@ -35,12 +35,23 @@ script.on_event(defines.events.on_tick, function(e)
       if en.type ~= "character" then en.destroy() end
     end
   elseif e.tick == 2 then
+    -- (the blueprint itself, as the player gets it: pasted where it was planned, its ghosts revived)
+    local inv = game.create_inventory(1)
+    inv[1].import_stack(spec.bp)
     local missing = 0
-    for _, en in ipairs(spec.entities) do
-      local made = s.create_entity({ name = en.name, position = en.position, direction = en.direction, force = force,
-        recipe = en.recipe })
-      if not made then missing = missing + 1
-      elseif en.bar and made.type == "container" then made.get_inventory(defines.inventory.chest).set_bar(en.bar + 1) end
+    for _, g in pairs(inv[1].build_blueprint({ surface = s, force = force, position = spec.at,
+        build_mode = defines.build_mode.forced })) do
+      if g.valid then
+        local _, made = g.revive()
+        if not made and g.valid and g.type == "entity-ghost" then missing = missing + 1 end
+      end
+    end
+    local limited = 0  -- (inserters that read their product's chest and run only while it's short)
+    for _, ins in pairs(s.find_entities_filtered({ type = "inserter" })) do
+      local cb = ins.get_control_behavior()
+      if cb and cb.circuit_enable_disable and ins.get_circuit_network(defines.wire_connector_id.circuit_red) then
+        limited = limited + 1
+      end
     end
     local powered = {}
     for _, p in pairs(s.find_entities_filtered({ type = "electric-pole" })) do
@@ -56,7 +67,7 @@ script.on_event(defines.events.on_tick, function(e)
     for _, src in ipairs(spec.sources) do
       feeds[#feeds + 1] = { belt = s.find_entity("transport-belt", src.position), lanes = src.lanes }
     end
-    helpers.write_file("bpgen/gridmall.txt", "not built " .. missing .. "\n", false)
+    helpers.write_file("bpgen/gridmall.txt", "not built " .. missing .. "\nlimited " .. limited .. "\n", false)
   elseif e.tick > 2 then  -- (the input lanes kept full, as a bus lane would)
     for _, f in ipairs(feeds) do
       if f.belt and f.belt.valid then
@@ -120,13 +131,15 @@ def main():
     o = s.plan({"mode": "mall", "layout": "grid", "products": prods, "machine": "assembling-machine-2",
                 "belt": "transport-belt", "chest_limit": 1})
     print("\n".join(o["summary"]["notes"]))
-    ents = [{k: e[k] for k in ("name", "position", "direction", "recipe", "bar") if k in e} for e in o["entities"]]
+    ents = o["entities"]
+    bp, (x0, y0, w, h) = extend.absolute_blueprint(ents, "grid mall")
     xs = [e["position"]["x"] for e in ents]
     ys = [e["position"]["y"] for e in ents]
     box = [int(min(xs)) - 30, int(min(ys)) - 30, int(max(xs)) + 30, int(max(ys)) + 30]
     products = [base._only_result(s.data, r) if hasattr(base, "_only_result") else r for r in o["summary"]["products"]]
     ticks = int(MINUTES * 3600)
-    spec = {"entities": ents, "sources": o["sources"], "products": products, "box": box, "ticks": ticks,
+    limited = sum(1 for e in ents if e.get("circuit_to"))
+    spec = {"bp": bp, "at": [x0 + w / 2, y0 + h / 2], "sources": o["sources"], "products": products, "box": box, "ticks": ticks,
             "probe": [float(a) for a in sys.argv[2].split(",")] if len(sys.argv) > 2 else None}
     mods = RUN / "gridmall-mods"
     shutil.rmtree(mods, ignore_errors=True)
@@ -151,6 +164,7 @@ def main():
     text = OUT.read_text() if OUT.exists() else ""
     print(text)
     assert "not built 0" in text, "entities not built"
+    assert f"limited {limited}\n" in text, f"the game read back fewer than {limited} chest-limited inserters"
     empty = [line.split()[1] for line in text.splitlines() if line.startswith("product ") and line.endswith(" 0")]
     assert not empty, f"nothing made of: {empty}"
     print("ok")

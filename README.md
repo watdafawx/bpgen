@@ -22,7 +22,9 @@ Windows only. Single player.
   machines between pairs of mixed belts (one item a lane, 8 within each machine's reach): only plates come in at the
   top (and wood, for wooden chests and small poles), the parts (gears, cable, circuits, inserters...) are made in a band of machines above the products and put on
   the lanes, and a product that is a component of exactly one other sits right above it and hands it down through
-  its chest. **Fed by: my main bus** takes the parts your bus carries from it, makes the rest, and places the mall
+  its chest. Each product's machine is wired to its chest and takes from the belts only while it holds fewer than
+  **Keep** (10), so the machines down a column get plates soon (every product of the starter mall in 9 minutes).
+  **Fed by: my main bus** takes the parts your bus carries from it, makes the rest, and places the mall
   beside the bus with taps. The older layout (rows on a 4-lane bus) and robots are still there.
 - **Starter bases**: science per minute up to labs, with a mall. Laid out compact (blocks in columns, belts routed
   between them) or as a **main bus**: one column of blocks beside a bus of belts, each block taking what it needs and
@@ -43,10 +45,12 @@ Windows only. Single player.
   yet, beside it, its bus inputs on the same row, and nothing of the old base changes.
 - **Bus design** (in game): pick ore patches with the patch tool (one drag each), stand where the bus should start
   and press Plan. Drills cover each patch, their ore gathers onto trunk belts (one full belt each), the trunks run
-  to a smelter column apiece (electric furnaces) at the bus head, and the plates (or raw coal) feed a main bus:
+  to a smelter column apiece at the bus head (electric furnaces, or stone and steel ones: coal from your coal
+  patch onto each column's ore belt, or a chest you fill), and the plates (or raw coal) feed a main bus:
   lanes in groups (default 4 belts, 4 tiles free, repeat), a 4-to-4 balancer at the start of each full group of one
   item, and a wood lane fed from a chest at its head (for a mall's wooden chests and small poles). Pick its
-  direction, group, gap, length, drill, furnace and belt. Wire its poles to your grid.
+  direction, group, gap, length, drill, furnace and belt. Its poles are one network (pole lines along the ore
+  belts and on to the bus's end; bases fitted to it and their tiers join it): wire one pole to your grid.
 
 In game, after each plan you see whether your save can build it (missing research, buildings you don't have), what
 modules would change, and what your factory is short of. **Test run** runs the preview for real (powered, fed and

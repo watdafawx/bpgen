@@ -104,6 +104,16 @@ def _test_spec(out, params):
     }
 
 
+def _mall_test_spec(data, out, params):
+    """a mall's test run: its input belts fed, nothing drained (its products stay in their chests); the window
+    counts what has reached them"""
+    from bpgen import calibrate, mall
+    s = out.get("summary") or {}
+    return {"warmup": 0, "measure": 20 * 3600, "output": None, "expected": None,
+            "force": dict(params.get("bonuses") or calibrate.ZERO, belt_stack_size_bonus=0), "recipe_productivity": {},
+            "products": [mall._only_result(data, r) or r for r in s.get("products") or []],
+            "case": {"id": "bp", "sources": out.get("sources") or [], "sinks": []}}
+
 # what the window may ask the service for (bpgen.ingame:api {"fn": ..., "params": {...}})
 API = {"recipe_tree", "options", "siblings", "mall_candidates", "save_check", "module_ideas", "history", "save_info",
        "alternatives"}
@@ -358,6 +368,9 @@ def plan(request: str) -> str:
                           # (the fastest of the save's belts, as params_from_request picks for a line)
                           "belt": max(belts, key=lambda b: s.data.raw["transport-belt"][b]["speed"]) if belts
                           else "transport-belt"}
+            params.setdefault("surface", req.get("surface"))  # (which save and surface: the bus design kept for it)
+            if req.get("seed") is not None:
+                params.setdefault("seed", req["seed"])
             for k in ("rate_per_min", "per_row", "belt"):  # (optional, from the in-game bpgen window)
                 if req.get(k):
                     params[k] = req[k]
@@ -398,7 +411,7 @@ def plan(request: str) -> str:
                            "absolute": _absolute(out)}
                 elif params.get("mode") == "busdesign":  # (absolute, like extend: it lands on the patches)
                     from bpgen import busdesign
-                    busdesign.save_last(out, dict(params, surface=req.get("surface")))
+                    busdesign.save_last(out, params)
                     _last = None
                     out = {"blueprint": out["blueprint"], "summary": {"notes": out.get("notes") or []},
                            "absolute": _absolute(out)}
@@ -440,10 +453,12 @@ def plan(request: str) -> str:
             "sections": [x["name"] for x in out.get("sections") or []] or None,
             "expected": summary.get("expected"), "output": summary.get("output"), "notes": notes,
             "summary": {k: summary.get(k) for k in ("recipe", "machine", "machines", "per_row", "belt", "output",
-                                                    "expected", "productivity", "beacons_per_machine")},
+                                                    "expected", "productivity", "beacons_per_machine")}
+            | {"stages": [{k: st.get(k) for k in ("item", "recipe")} for st in summary.get("stages") or []]},
             "seconds": round(time.perf_counter() - t, 3),
             # (the window's test run: the harness case for this line, run live on its preview)
-            "test": _test_spec(out, params) if summary.get("expected") and out.get("sinks") else None,
+            "test": _test_spec(out, params) if summary.get("expected") and out.get("sinks")
+            else _mall_test_spec(s.data, out, params) if summary.get("mode") == "mall" and out.get("sources") else None,
         })
     except calibrate.NotMeasured as e:
         # (the game measures them itself on the preview surface, then plans again: measured() below)

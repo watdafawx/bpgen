@@ -223,7 +223,8 @@ function M.test(player_index, spec, origin, area, force_name)
   power(s, force, area, origin)
   hook_up(s, force, spec.case, origin, st)
   local run = { kind = "test", player = player_index, start = game.tick, warmup = spec.warmup, measure = spec.measure,
-                cases = { st }, area = area, force = force_name, output = spec.output, expected = spec.expected }
+                cases = { st }, area = area, force = force_name, output = spec.output, expected = spec.expected,
+                products = spec.products }
   local r = runs()
   run.id = r.next
   r.next = r.next + 1
@@ -279,6 +280,15 @@ function M.statuses(run)
     end
   end
   return count, starved
+end
+
+--- (a mall's run) what's in the chests in the run's area: {item = count}
+function M.chest_contents(run)
+  local out = {}
+  for _, c in pairs(game.surfaces[SURFACE].find_entities_filtered({ area = run.area, type = "container", force = run.force })) do
+    for _, it in pairs(c.get_inventory(defines.inventory.chest).get_contents()) do out[it.name] = (out[it.name] or 0) + it.count end
+  end
+  return out
 end
 
 M.on_done = function(run, cases) end

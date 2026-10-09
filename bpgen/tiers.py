@@ -150,6 +150,15 @@ def fit_to_bus(svc, ents, sources, bus, belt, beside=False):
         raise planner.PlanError(f"at the end of the bus something's in the way (at {x}, {y}: water, a cliff, the bus's "
                                 "own belts or a building): plan the bus longer or another way, or clear it")
     out_lanes = [{"item": ln["item"], "end": list(to_world((g[0], g[1] - 1)))} for ln, g in exits]
+    if bus.get("end_pole"):  # (power: a pole line from the bus's (or the last tier's) pole to this base's)
+        mine = extend.pole_tiles(world)
+        taken = extend.plan_tiles([svc.decorate(e) for e in world]) | {tuple(t) for t in bus.get("tiles") or []}
+        to = extend.nearest(mine, tuple(bus["end_pole"]))
+        run = extend.pole_chain(tuple(bus["end_pole"]), to, taken) if to else None
+        if run is None:
+            notes.append("power: no pole line found to the bus's poles: wire this base yourself")
+        else:
+            world += run
     clean = [{key: v for key, v in e.items() if key not in ("type", "w", "h", "fluid", "new")} for e in world]
     rel = extend.shifted(clean, -cw[0], -cw[1])  # (the blueprint's coordinates: the C's corner at 0, 0)
     desc = fitted_description(cw, direction, out_lanes)
@@ -260,10 +269,13 @@ def add_tier(svc, params, progress=None, cancel=None):
         cw = fitted["corner"]
         old_world = extend.shifted([svc.decorate({k: v for k, v in e.items() if k in ("name", "position", "direction")})
                                     for e in old], cw[0], cw[1])
-        taken = ({tuple(t) for t in (busdesign.load_last() or {}).get("tiles") or []} | extend.plan_tiles(old_world)
+        taken = ({tuple(t) for t in (busdesign.load_last(params) or {}).get("tiles") or []} | extend.plan_tiles(old_world)
                  | ground_taken(svc, params.get("snapshot")))
+        old_poles = extend.pole_tiles(old_world)
         fit = fit_to_bus(svc, ents, srcs, {"direction": fitted["direction"], "lanes": fitted["lanes"],
-                                           "tiles": sorted(taken)}, p.get("belt") or "transport-belt", beside=True)
+                                           "tiles": sorted(taken),
+                                           "end_pole": extend.nearest(old_poles, tuple(fitted["lanes"][0]["end"]))},
+                         p.get("belt") or "transport-belt", beside=True)
         if not fit:
             raise planner.PlanError("none of the lanes the held base passes on carry what this tier needs")
         sm = dict(out["summary"])

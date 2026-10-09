@@ -25,6 +25,7 @@ from bpgen.planner import EAST, NORTH, SOUTH, WEST, POLE, PlanError
 
 PX, PY = 7, 6  # column pitch (2 belts, inserters, a 3x3 machine, inserters), cell pitch (machine, out, chest, hand)
 MAX_ROWS = 7  # products a column, below the makers
+STOCK = 10  # a product's machine takes from the belts only while its chest has fewer than this (0: no limit)
 WOOD = "wood"  # (from trees, not mined: always a belt input, for wooden chests and small poles)
 EAST_LANE, WEST_LANE = "E", "W"
 RATE = {"fast-inserter": 2.3, "inserter": 0.83, "long-handed-inserter": 1.15, "burner-inserter": 0.6}  # items/s, roughly
@@ -70,7 +71,7 @@ class State:
 
 
 def plan_grid(data, products, machine, belt, inputs=None, allowed=None, chest="wooden-chest", chest_limit=2,
-              max_rows=MAX_ROWS):
+              max_rows=MAX_ROWS, stock=STOCK):
     """products: recipes, one machine and chest each. inputs: items that come in on the belts (default: the plates and
     what's mined). -> dict(entities, sources, notes, products, makers, inputs, columns)"""
     recipes = data.raw["recipe"]
@@ -311,13 +312,23 @@ def plan_grid(data, products, machine, belt, inputs=None, allowed=None, chest="w
         for f in sorted(feeds, key=lambda f: -f[0]):  # (then more where they're short, busiest first)
             spare = len(slots[f[3]]) - sum(g[1] for g in feeds if g[3] == f[3])
             f[1] += max(0, min(spare, math.ceil(f[0]) - f[1]))
+        # a product's inputs: wired to its chest, they run only while it has fewer than `stock` (the products up a
+        # column then stop early, and the plates get down to the ones below)
+        chest_id = f"chest {c},{row}"
+        limit = {}
+        if chest_out and stock and _result(data, recipe):
+            limit = {"circuit_to": [chest_id], "control_behavior": {  # (2.0's blueprint keys, as the game writes them)
+                "circuit_enabled": True,
+                "circuit_condition": {"first_signal": {"name": _result(data, recipe)},
+                                      "constant": stock, "comparator": "<"}}}
         for share, n, b, side, is_long in feeds:
             x = x0 - 1 if side == "L" else x0 + 3
             for _ in range(n):
-                put(long_ if is_long else near, x + 0.5, y0 + slots[side].pop(0) + 0.5, WEST if side == "L" else EAST)
+                put(long_ if is_long else near, x + 0.5, y0 + slots[side].pop(0) + 0.5, WEST if side == "L" else EAST,
+                    **limit)
         if chest_out:
             put(near, x0 + 1.5, y0 + 3.5, NORTH)
-            put(chest, x0 + 1.5, y0 + 4.5, bar=chest_limit)
+            put(chest, x0 + 1.5, y0 + 4.5, bar=chest_limit, wire_id=chest_id)
             if hand_down:
                 put(near, x0 + 1.5, y0 + 5.5, NORTH)
         for px in (x0 - 1, x0 + 3):

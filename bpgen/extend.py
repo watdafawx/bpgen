@@ -151,6 +151,35 @@ def find_spot(ground, entities, seed, avoid_ore=True, margin=2, keep_clear=()):
     return best[1], best[2]
 
 
+def pole_chain(a, b, blocked, reach=8):
+    """medium poles from the pole on tile a to within wire reach of tile b: each on the free tile within `reach` of
+    the last that gets nearest b (round what's in the way). Their tiles join `blocked`. -> entities, or None (stuck)"""
+    def d2(p, q):
+        return (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2
+    ring = [(dx, dy) for dx in range(-reach, reach + 1) for dy in range(-reach, reach + 1) if 0 < dx * dx + dy * dy <= reach * reach]
+    out, cur, seen = [], a, {a}
+    for _ in range(2000):
+        if d2(cur, b) <= reach * reach:
+            return out
+        spot = min(((cur[0] + dx, cur[1] + dy) for dx, dy in ring), key=lambda p: (p in blocked or p in seen, d2(p, b)))
+        if spot in blocked or spot in seen or d2(spot, b) >= d2(cur, b):
+            return None
+        seen.add(spot)
+        blocked.add(spot)
+        out.append({"name": planner.POLE, "position": {"x": spot[0] + 0.5, "y": spot[1] + 0.5}})
+        cur = spot
+    return None
+
+
+def pole_tiles(entities):
+    return [(math.floor(e["position"]["x"]), math.floor(e["position"]["y"])) for e in entities
+            if e["name"] == planner.POLE]
+
+
+def nearest(tiles, t):
+    return min(tiles, key=lambda p: (p[0] - t[0]) ** 2 + (p[1] - t[1]) ** 2) if tiles else None
+
+
 def shifted(entities, dx, dy):
     return [dict(e, position={"x": e["position"]["x"] + dx, "y": e["position"]["y"] + dy}) for e in entities]
 

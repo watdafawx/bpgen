@@ -47,9 +47,10 @@ script.on_event(defines.events.on_tick, function(e)
         type = en.ug_type, recipe = en.recipe })
       if not made then missing = missing + 1 end
     end
-    local powered = {}
+    local powered, nets = {}, {}  -- (one energy interface: the whole build must be one network to run)
+    for _, p in pairs(s.find_entities_filtered({ type = "electric-pole" })) do nets[p.electric_network_id] = true end
     for _, p in pairs(s.find_entities_filtered({ type = "electric-pole" })) do
-      if not powered[p.electric_network_id] then
+      if not next(powered) then
         local at = s.find_non_colliding_position("electric-energy-interface", p.position, 3, 1)
         if at then
           local eei = s.create_entity({ name = "electric-energy-interface", position = at, force = force })
@@ -58,7 +59,7 @@ script.on_event(defines.events.on_tick, function(e)
         end
       end
     end
-    helpers.write_file("bpgen/fit.txt", "not built " .. missing .. "\n", false)
+    helpers.write_file("bpgen/fit.txt", "not built " .. missing .. "\nnetworks " .. table_size(nets) .. "\n", false)
   elseif e.tick == spec.ticks then
     local st = force.get_item_production_statistics(s)
     local out = {}
@@ -119,6 +120,7 @@ def main():
     print(text)
     got = dict(line.rsplit(" ", 1) for line in text.splitlines() if line)
     assert got.get("not built") == "0", "entities not built"
+    assert got.get("networks") == "1", f"{got.get('networks')} pole networks: bus, base and tiers should be one"
     for pack in ("automation-science-pack", "logistic-science-pack"):
         assert float(got.get(pack, 0)) > 0, f"no {pack} made"
     if d.get("base2"):

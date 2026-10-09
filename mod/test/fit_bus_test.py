@@ -15,7 +15,7 @@ PATCHES = {"iron-ore": (100, 139, -60, -11), "copper-ore": (100, 129, 20, 49), "
 s = Service("vanilla")
 planner.configure(s.data)
 last = Path(tempfile.mkdtemp()) / "bus_design.json"
-busdesign._last_file = lambda: last  # (not the player's own)
+busdesign._last_file = lambda key=None: last  # (not the player's own)
 for direction in sys.argv[1:] or ["north", "east", "south", "west"]:
     runs = {n: {str(y): [[x1, x2]] for y in range(y1, y2 + 1)} for n, (x1, x2, y1, y2) in PATCHES.items()}
     snap = {"area": [-300, -300, 300, 300], "entities": [], "obstacles": [], "water": {}, "resources": runs}

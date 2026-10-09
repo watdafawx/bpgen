@@ -623,7 +623,7 @@ def plan_base(service, params, progress=None, cancel=None):
             fit = None
             if corner and params.get("plates") and params.get("fit_bus"):  # (its head on a bus design's lanes)
                 from bpgen import busdesign
-                bus = busdesign.load_last()
+                bus = busdesign.load_last(params)
                 try:
                     if bus:  # (clear of the bus design's own belts and of what's on the ground around you)
                         bus = dict(bus, tiles=[list(t) for t in {tuple(t) for t in bus.get("tiles") or []}
