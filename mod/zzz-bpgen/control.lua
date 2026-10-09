@@ -862,6 +862,18 @@ remote.add_interface("bpgen", {
   -- an ore patch for the window's bus design, as if dragged with the patch tool
   add_patch = function(player_index, area) window.add_patch(game.get_player(player_index), area) end,
   open_window = function(player_index, prefill) window.open(game.get_player(player_index), prefill) end,
+  -- (tests) "Only unlocked" set; the recipe picker's filters back
+  only_unlocked = function(player_index, on)
+    local player = game.get_player(player_index)
+    window.set_only_unlocked(player, on)
+    local frame = player.gui.screen.bpgen_window
+    local function find(el, name)
+      if el.name == name then return el end
+      for _, c in pairs(el.children) do local r = find(c, name) if r then return r end end
+    end
+    local b = frame and find(frame, "bpgen_recipe")
+    return b and b.elem_filters
+  end,
   plan_window = function(player_index) window.plan(game.get_player(player_index)) end,
   click = function(player_index, tags) window.click(player_index, tags) end,
   hover_camera = function(player_index) return window.test_hover_camera(player_index) end,

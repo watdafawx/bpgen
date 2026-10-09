@@ -322,10 +322,94 @@ local function fields(parent)
   return f
 end
 
+-- "Only unlocked" (the checkbox by the tabs, per player): every picker of the window offers only what the force has
+-- unlocked: recipes it may craft, items it can make, entities whose item it can make. A picker's own filter stays
+-- (kept in its tags) and the names are added to it; unticked, the own filter comes back.
+local only_unlocked = safe.stored("only_unlocked")  -- player index -> true
+
+-- the filters that keep a picker to what the force has unlocked, by its elem_type. Recipe filters have no "name":
+-- recipes are kept by what they make (items and fluids some enabled recipe makes), which leaves out locked recipes
+-- except an alternative way to make something already unlocked.
+local function unlocked_filters(force)
+  local items, fluids, entities = {}, {}, {}
+  local fluid_seen = {}
+  for _, r in pairs(force.recipes) do
+    if r.enabled and not r.hidden then
+      for _, pr in pairs(r.products) do
+        if pr.type == "fluid" and not fluid_seen[pr.name] then
+          fluid_seen[pr.name] = true
+          fluids[#fluids + 1] = pr.name
+        end
+      end
+    end
+  end
+  for name in pairs(ctx.craftable(force)) do
+    items[#items + 1] = name
+    local proto = prototypes.item[name]
+    local place = proto and proto.place_result
+    if place then entities[#entities + 1] = place.name end
+  end
+  local recipe = { { filter = "has-product-item", elem_filters = { { filter = "name", name = items } } },
+                   { filter = "has-product-fluid", elem_filters = { { filter = "name", name = fluids } } } }
+  local item = { { filter = "name", name = items } }
+  local entity = { { filter = "name", name = entities } }
+  return { recipe = recipe, ["recipe-with-quality"] = recipe, item = item, ["item-with-quality"] = item,
+           entity = entity, ["entity-with-quality"] = entity }
+end
+
+local function restrict_el(el, on, names)
+  if el.type == "choose-elem-button" then
+    local tags = el.tags
+    local own = tags.bpgen_own_filters
+    if on and names[el.elem_type] then
+      if own == nil then
+        own = el.elem_filters or false
+        tags.bpgen_own_filters = own
+        el.tags = tags
+      end
+      local f = {}
+      for _, x in ipairs(names[el.elem_type]) do f[#f + 1] = x end
+      for _, x in ipairs(own or {}) do
+        local c = {}
+        for k, v in pairs(x) do c[k] = v end
+        c.mode = "and"
+        f[#f + 1] = c
+      end
+      el.elem_filters = f
+    elseif own ~= nil then
+      el.elem_filters = own or nil
+      tags.bpgen_own_filters = nil
+      el.tags = tags
+    end
+  end
+  for _, c in pairs(el.children) do restrict_el(c, on, names) end
+end
+
+function M.set_only_unlocked(player, on)
+  only_unlocked[player.index] = on or nil
+  local box = player.gui.screen[NAME] and find(player.gui.screen[NAME], "bpgen_only_unlocked")
+  if box then box.state = on == true end
+  M.restrict(player)
+end
+
+--- the window's pickers as the player's "Only unlocked" says (call after pickers are added or their filters set)
+function M.restrict(player)
+  local frame = player and player.valid and player.gui.screen[NAME]
+  if not frame then return end
+  local on = only_unlocked[player.index] == true
+  restrict_el(frame, on, on and unlocked_filters(player.force) or {})
+end
+
 local function set_machine_filter(frame, recipe)
   local btn = find(frame, "bpgen_machine")
   local cat = recipe and prototypes.recipe[recipe] and prototypes.recipe[recipe].category
-  if btn and cat then btn.elem_filters = { { filter = "crafting-category", crafting_category = cat } } end
+  if btn and cat then
+    btn.elem_filters = { { filter = "crafting-category", crafting_category = cat } }
+    local tags = btn.tags
+    tags.bpgen_own_filters = nil -- (a new own filter: restricted again below)
+    btn.tags = tags
+    M.restrict(game.get_player(frame.player_index))
+  end
 end
 
 local function status(frame, text)
@@ -395,7 +479,8 @@ function M.open(player, prefill)
   end
 
   -- what to make: tabs along the top
-  local tabs = holder.add({ type = "flow", name = "bpgen_tabs", direction = "horizontal", tags = { mode = "line" } })
+  local top = holder.add({ type = "flow", direction = "horizontal" })  -- (the tabs, then "Only unlocked")
+  local tabs = top.add({ type = "flow", name = "bpgen_tabs", direction = "horizontal", tags = { mode = "line" } })
   tabs.style.horizontal_spacing = 0
   tabs.style.left_padding = 4
   for i, m in ipairs(MODES) do
@@ -403,6 +488,11 @@ function M.open(player, prefill)
       tags = { bpgen = "tab", mode = m } })
     tab.style.minimal_width = 56
   end
+  local spacer = top.add({ type = "empty-widget" })
+  spacer.style.horizontally_stretchable = true
+  top.add({ type = "checkbox", name = "bpgen_only_unlocked", caption = "Only unlocked",
+    state = only_unlocked[player.index] == true,
+    tooltip = "Pickers offer only recipes you can craft and what you can build now" })
   local body = holder.add({ type = "flow", direction = "horizontal" })
   local outer = body.add({ type = "frame", style = "inside_shallow_frame", direction = "vertical" })
   outer.style.width = 300
@@ -693,6 +783,7 @@ function M.open(player, prefill)
     find(frame, "bpgen_also").add({ type = "label", caption = "..." })
     ctx.api(player, "siblings", { recipe = prefill.recipe, machine = m }, "also")
   end
+  M.restrict(player)
   return frame
 end
 
@@ -1273,7 +1364,7 @@ local function show_bus(frame, r)
   end
 end
 
-function M.on_api(player, tag, out)
+local function on_api(player, tag, out)
   local frame = player.gui.screen[NAME]
   if not frame then return end
   local r = out and helpers.json_to_table(out) or {}
@@ -1602,6 +1693,13 @@ local function tree(player, frame)
   if recipe then ctx.api(player, "recipe_tree", { recipe = recipe, machine = machine and machine.name }, "tree") end
 end
 
+-- (pickers an answer adds follow "Only unlocked" too)
+function M.on_api(player, tag, out)
+  local r = on_api(player, tag, out)
+  M.restrict(player)
+  return r
+end
+
 local function on_elem_changed(e)
   local el = e.element
   if not (el and el.valid) then return end
@@ -1757,13 +1855,19 @@ M.handlers = {
     end
   end,
   [defines.events.on_gui_click] = on_click,
-  [defines.events.on_gui_elem_changed] = on_elem_changed,
+  [defines.events.on_gui_elem_changed] = function(e)
+    on_elem_changed(e)
+    M.restrict(game.get_player(e.player_index))  -- (pickers it added)
+  end,
   [defines.events.on_gui_confirmed] = function(e)
     local n = e.element and e.element.valid and e.element.name
     if n == "bpgen_rate" or n == "bpgen_per_row" or n == "bpgen_spm" then M.plan(game.get_player(e.player_index)) end
   end,
   [defines.events.on_gui_checked_state_changed] = function(e)
     local el = e.element
+    if el and el.valid and el.name == "bpgen_only_unlocked" then
+      return M.set_only_unlocked(game.get_player(e.player_index), el.state)
+    end
     if el and el.valid and el.tags and el.tags.bpgen_make_row then
       local where = el.parent["bpgen_where"]
       where.caption = el.state and "made here" or "on belt"
