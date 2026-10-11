@@ -48,8 +48,8 @@ places the same (no desyncs). The window's mouse-dragged preview works with its 
 - **Refit as a base on a bus**: the refit tool's **Refit as** choice rebuilds the area for the science it makes (its
   labs and what feeds them) as a main-bus base in its place, plates taken off your bus.
 - **Ship** (Space Age, in game: Ship tab): an inner-planet shuttle round a space platform's hub, self-sufficient.
-  Asteroid collectors (hanging over the front edge), crushers, ice melted for thruster fuel and oxidizer, iron into
-  gun-turret ammo, solar panels for the orbit's sunlight, foundation under it all; the hub is the store, and what goes
+  Four asteroid collectors in a row out front (a belt brings their chunks to the hub), crushers, ice melted for
+  thruster fuel and oxidizer, iron into gun-turret ammo, solar panels for the orbit's sunlight, foundation under it all; the hub is the store, and what goes
   into it runs only while it holds little of that item (bpgen's mod wires those inserters to the hub as they're
   built), and the collectors only take the chunks the hub is short of (a decider reading the hub sets their
   filters, so one kind can't fill them and starve the others). Pick thrusters, turrets and the orbit; stand on the

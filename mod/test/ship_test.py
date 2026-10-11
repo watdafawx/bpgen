@@ -14,7 +14,7 @@ def runs():
     s = Service("vanilla")
     planner.configure(s.data)
     for n in (2, 4):
-        yield s, n, 12
+        yield s, n, 6
     try:  # (your own pack, when bpgen has its data: Krastorio 2's condensers in place of the melters)
         s = Service("pack")
     except Exception as e:  # noqa: BLE001
@@ -22,7 +22,7 @@ def runs():
         return
     if "kr-atmospheric-condenser" in s.data.raw.get("assembling-machine", {}):
         planner.configure(s.data)
-        yield s, 2, 9
+        yield s, 2, 5
 
 
 for s, n, gated in runs():

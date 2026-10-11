@@ -3,8 +3,8 @@
 The hub (at 0,0, tiles -4..3 both ways, already there: a blueprint can't hold it) is the store. Machines sit around it,
 an inserter between each and the hub (the ring of tiles touching it):
 
-    north:  2 asteroid collectors (an inserter per chunk kind, each only while the hub holds few of it: chunks don't
-            stack) and the metallic chunk crusher
+    north:  a row of asteroid collectors (4 by default) out front, putting chunks on a belt that three inserters
+            empty into the hub, and the metallic chunk crusher
     east:   electric furnace (iron plate) and an assembler (firearm magazines); magazines go out on a belt that runs
             round to the turrets along the front
     south:  fuel chemical plant, an ice melter feeding it water directly, the oxide chunk crusher (ice)
@@ -75,7 +75,7 @@ def _usage_w(proto):
 
 
 def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-inserter", belt="transport-belt",
-              foundation=None):
+              foundation=None, collectors=4):
     """-> dict(entities (world positions round the hub at 0,0), tiles (foundation), notes, power)"""
     raw = data.raw
     need = {"asteroid-collector": "asteroid-collector", "thruster": "thruster", "electric-furnace": "furnace",
@@ -125,14 +125,20 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
         return put(inserter, x + 0.5, y + 0.5, d, **kw)
 
     chunks = ("metallic-asteroid-chunk", "carbonic-asteroid-chunk", "oxide-asteroid-chunk")
-    # north: two collectors, an inserter a chunk kind each; the metallic crusher
+    # north: a row of collectors out front (west from the hub's corner), each with an inserter onto a chunk belt
+    # running east along the hub's edge, three inserters from it into the hub; the metallic crusher
     if gas:
         chunks = chunks[:2]  # (no ice wanted: the collectors leave oxide chunks be)
-    for i, x0 in enumerate((-4, -1)):
-        put("asteroid-collector", x0 + 1.5, -6.5, NORTH, wire_id=f"collector{i}",
+    colx = [-4 - 3 * i for i in range(max(1, collectors))]
+    for i, x0 in enumerate(colx):
+        put("asteroid-collector", x0 + 1.5, -8.5, NORTH, wire_id=f"collector{i}",
+            wires_to=[(f"collector{i + 1}", 2, 2)] if i + 1 < len(colx) else [],  # (the filter signal, on along)
             bp_extra={"control_behavior": {"circuit_set_filters": True}})
-        for dx, c in enumerate(chunks):
-            ins(x0 + dx, -5, NORTH, c, HUB_CAPS["chunk"], only=c)
+        ins(x0 + 1, -7, NORTH)
+    for x in range(colx[-1], -1):
+        put(belt, x + 0.5, -5.5, EAST)
+    for x in (-4, -3, -2):
+        ins(x, -5, NORTH)
     # the collectors take only the chunks the hub is short of (else one kind fills them and the others stop coming):
     # a decider reading the hub (wired to it as it's built) plus a constant -cap a chunk sends each one short; a
     # chunk that never comes this way (promethium) keeps the filter from going empty, which would take everything
@@ -141,11 +147,11 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
     if "promethium-asteroid-chunk" in raw.get("asteroid-chunk", {}) or "promethium-asteroid-chunk" in raw.get("item", {}):
         want.append({"index": len(want) + 1, "name": "promethium-asteroid-chunk", "quality": "normal",
                      "comparator": "=", "count": -1})
-    put("constant-combinator", 5.5, -7.5, wire_id="chunk_want",
+    put("constant-combinator", 0.5, -6.5, wire_id="chunk_want",
         bp_extra={"control_behavior": {"sections": {"sections": [{"index": 1, "filters": want}]}}})
     each = {"type": "virtual", "name": "signal-each"}
-    put("decider-combinator", 4.5, -7, NORTH, tags={"bpgen_hub": True},
-        wires_to=[("chunk_want", 2, 2), ("collector0", 4, 2), ("collector1", 4, 2)],
+    put("decider-combinator", -0.5, -6, NORTH, tags={"bpgen_hub": True},
+        wires_to=[("chunk_want", 2, 2), ("collector0", 4, 2)],
         bp_extra={"control_behavior": {"decider_conditions": {
             "conditions": [{"first_signal": each, "constant": 0, "comparator": "<"}],
             "outputs": [{"signal": each, "copy_count_from_input": False, "constant": 1}]}}})
@@ -169,10 +175,10 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
         ins(-3, 4, NORTH)
         for cx in (-2.5, 2.5):
             put(gas["fuel"][0], cx, 10.5, recipe=gas["fuel"][1])
-        # west: oxidizer plant, its oxygen condenser above it
-        put("chemical-plant", -6.5, -2.5, NORTH, recipe=ox)
+        # west: oxidizer plant lying west (inputs west, outputs to the hub's edge), its oxygen condenser west of it
+        put("chemical-plant", -6.5, -2.5, WEST, recipe=ox)
         ins(-5, -3, EAST)
-        put(gas["oxidizer"][0], -6.5, -6.5, recipe=gas["oxidizer"][1])
+        put(gas["oxidizer"][0], -10.5, -2.5, recipe=gas["oxidizer"][1])
     else:
         # south: fuel plant with its melter (water straight across), the oxide crusher
         put("chemical-plant", -2.5, 6.5, EAST, recipe=fuel)
@@ -199,9 +205,10 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
     for cx in cxs:
         put("thruster", cx, ty + 0.5, NORTH)
     pipes = set()
-    if gas:  # (fuel: out of its plant's top at (-4, 4), west, down; oxidizer: out of its plant's bottom, west, down)
+    if gas:  # (fuel: out of its plant's top at (-4, 4), west, down; oxidizer: out of its plant's east side at
+        # (-5, -2), down the hub's edge, west above the carbonic crusher, down)
         pipes |= {(-4, 4), (-5, 4), (-6, 4)} | {(fx, y) for y in range(4, fy + 1)}
-        pipes |= {(-8, -1)} | {(-9, y) for y in range(-1, oy + 1)}
+        pipes |= {(-5, y) for y in range(-2, 2)} | {(x, 1) for x in range(-9, -5)} | {(-9, y) for y in range(1, oy + 1)}
     else:  # (fuel: down from the fuel plant's outputs at (-5, 5), (-5, 7); oxidizer: out of its plant's top, west, down)
         pipes |= {(fx, y) for y in range(5, fy + 1)}
         pipes |= {(x, -5) for x in range(-8, -5)} | {(-9, y) for y in range(-5, oy + 1)}
@@ -338,12 +345,13 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
                                and "platform" in n), "space-platform-foundation")
     floor = {(x + dx, y + dy) for x, y in taken for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
     floor -= {(x, y) for x in range(-4, 4) for y in range(-4, 4)}  # (the hub's own: there already, under it)
-    for x0 in (-4, -1):  # (open space where the collectors reach out: their front row and four rows ahead)
-        floor -= {(x0 + i, y) for i in range(3) for y in range(-12, -7)}
+    for x0 in colx:  # (open space where the collectors reach out: their front row and four rows ahead)
+        floor -= {(x0 + i, y) for i in range(3) for y in range(-14, -9)}
     for cx in cxs:  # (and behind the thrusters)
         floor -= {(x, y) for x in range(cx - 2, cx + 2) for y in range(ty + 3, ty + 4)}
     tiles = [{"name": tile, "position": {"x": x, "y": y}} for x, y in sorted(floor)]
-    notes = [f"{thrusters} thrusters, {turrets} gun turrets, {n_panels} solar panels ({draw / 1e6:.1f} MW at "
+    notes = [f"{thrusters} thrusters, {len(colx)} asteroid collectors, {turrets} gun turrets, {n_panels} solar panels "
+             f"({draw / 1e6:.1f} MW at "
              f"{sun:.0%} sunlight in {location}'s orbit), {len(tiles)} foundation tiles",
              "paste it centred on the hub: everything feeding the hub is wired to it as it's built"]
     if gas:
