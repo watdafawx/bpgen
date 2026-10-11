@@ -203,6 +203,11 @@ def tap_candidates(ground, want):
     return out
 
 
+# a tap gives up after this many routes in a row that don't get there: when one can, the first few do (a goal no tap
+# reaches - walled in, or too far - fails every one of hundreds of candidates, half a second each)
+MAX_FAILS = 16
+
+
 def tap(ground, blocked, spans, want, goal_tile, goal_dir, names, prefer=None, rate=0):
     """a splitter on an existing belt carrying `want` (set of items), and a routed belt from its free side to the
     goal ("enter goal_tile moving goal_dir"); prefer: (main bus, side of it the build is on) to branch off the bus
@@ -217,7 +222,10 @@ def tap(ground, blocked, spans, want, goal_tile, goal_dir, names, prefer=None, r
     cands = tap_candidates(ground, want)
     cands.sort(key=lambda c: (bool(prefer) and c[0] not in prefer, c[3],
                               abs(c[0][0] - goal_tile[0]) + abs(c[0][1] - goal_tile[1])))
+    fails = 0
     for t, d, belt, _ in [c for c in cands if c[0] not in ground.tapped][:40]:
+        if fails >= MAX_FAILS:
+            break
         dx, dy = DIR[d]
         ahead = (t[0] + dx, t[1] + dy)
         if ahead not in ground.taken:  # the belt line must go on past the splitter
@@ -232,6 +240,7 @@ def tap(ground, blocked, spans, want, goal_tile, goal_dir, names, prefer=None, r
                 path = router.route(blocked | {t, s_tile}, [(start, [d])], goal_tile, goal_dir, ground.bounds,
                                     max_ug, underground_spans=set(spans))
             except router.RouteError:
+                fails += 1
                 continue
             cx = (t[0] + s_tile[0]) / 2 + 0.5
             cy = (t[1] + s_tile[1]) / 2 + 0.5
@@ -273,7 +282,10 @@ def bus_tap(ground, blocked, spans, bus_side, want, goal, goal_dir, names, rate=
               load.get(ln["at"], 0) + ln.get("used", 0), abs(a + f - goal_a), a, ln)
              for ln in lanes if ln["items"] == want for a in range(ln["lo"] + 1, ln["hi"] - 1)]
     cands.sort(key=lambda c: c[:5])
+    fails = 0
     for *_, a, ln in cands[:300]:
+        if fails >= MAX_FAILS:
+            break
         lb, lug, lspl, _ = ln.get("names") or names  # (on the bus: the lane's own tier; routed on: the plan's)
         r = a + f  # the branch's row
         cross = [c["at"] for c in lanes if (c["at"] - ln["at"]) * side > 0]
@@ -293,6 +305,7 @@ def bus_tap(ground, blocked, spans, bus_side, want, goal, goal_dir, names, rate=
                                 [(end, [sd] if row else [d, sd])], goal, goal_dir, ground.bounds,
                                 max_ug, underground_spans=set(spans))
         except router.RouteError:
+            fails += 1
             continue
         st = bus_xy(main, a, ln["at"])
         ents = [{"name": lspl, "position": {"x": (st[0] + spare[0]) / 2 + 0.5, "y": (st[1] + spare[1]) / 2 + 0.5},
