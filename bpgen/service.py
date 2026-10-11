@@ -330,7 +330,9 @@ class Service:
         from bpgen import extend, ship
         r = ship.plan_ship(self.data, thrusters=int(params.get("thrusters") or 2),
                            turrets=int(params.get("turrets") or 6), location=params.get("location") or "nauvis",
-                           belt=params.get("belt") or "transport-belt")
+                           belt=params.get("belt") or "transport-belt",
+                           collectors=max(1, min(12, int(params.get("collectors") or 4))),
+                           throttle=None if float(params.get("throttle", -1)) < 0 else float(params["throttle"]))
         ents = [self.decorate(e) for e in r["entities"]]
         bp, box = extend.absolute_blueprint(ents, "bpgen shuttle", floor=r["tiles"],
                                             description="Paste it on the platform, on its hub: Ctrl+Shift.")

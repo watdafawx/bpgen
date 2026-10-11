@@ -54,12 +54,12 @@ places the same (no desyncs). The window's mouse-dragged preview works with its 
   to the hub as they're built), and the collectors only take the chunks the hub is short of (a decider reading the hub
   sets their filters, so one kind can't fill them and starve the others). The thrusters are throttled to what the fuel
   plant makes (a pump on each one's way in, opened one tick in so many by a clock), so they never run dry, and run
-  emptier, so more efficiently, when supply is short. Pick thrusters, turrets and the orbit; stand on the platform and
-  Place it. With Krastorio 2 (fuel from hydrogen, oxidizer from oxygen) atmospheric condensers stand in for the
-  melters: two for hydrogen under the fuel plant, one for oxygen west of the oxidizer plant; no ice, no oxide crusher,
-  and the collectors leave oxide chunks be. In a game (`harness\ship_run.py`, `--pack` with your own mods): fuel and
-  oxidizer full within 10 minutes in Nauvis orbit, turrets stocked, and it keeps flying (0.3 vanilla, where ice is
-  scarce; 0.67 with Krastorio).
+  emptier, so more efficiently, when supply is short. Pick thrusters, turrets, collectors, thrust (Auto, Efficient,
+  Half, Full) and the orbit; stand on the platform and Place it. With Krastorio 2 (fuel from hydrogen, oxidizer from
+  oxygen) atmospheric condensers stand in for the melters: two for hydrogen under the fuel plant, one for oxygen west
+  of the oxidizer plant; no ice, no oxide crusher, and the collectors leave oxide chunks be. In a game
+  (`harness\ship_run.py`, `--pack` with your own mods): fuel and oxidizer full within 10 minutes in Nauvis orbit,
+  turrets stocked, and it keeps flying (0.3 vanilla, where ice is scarce; 0.67 with Krastorio).
 - **Starter bases**: science per minute up to labs, with a mall. Laid out compact (blocks in columns, belts routed
   between them) or as a **main bus**: one column of blocks beside a bus of belts, each block taking what it needs and
   putting back what it makes, the mall taking from the same bus.

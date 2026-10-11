@@ -755,7 +755,14 @@ function M.open(player, prefill)
     lose_focus_on_confirm = true }).style.width = 60
   field(fs, "Gun turrets").add({ type = "textfield", name = "bpgen_ship_turrets", text = "6", numeric = true,
     lose_focus_on_confirm = true }).style.width = 60
+  field(fs, "Collectors", "asteroid collectors in a row out front").add({ type = "textfield",
+    name = "bpgen_ship_collectors", text = "4", numeric = true, lose_focus_on_confirm = true }).style.width = 60
   fs = fields(sec)
+  field(fs, "Thrust", "pumps on the thrusters' way in, opened one tick in so many (a thruster burns fuel most "
+    .. "efficiently nearly empty, half as efficiently full)\nAuto: what the fuel plant makes\nEfficient: slowest, "
+    .. "least fuel\nHalf\nFull: fastest, runs dry").add({ type = "drop-down", name = "bpgen_ship_throttle",
+    items = { "Auto", "Efficient", "Half", "Full" },
+    selected_index = 1, tags = { values = { -1, 0, 0.5, 1 } } })
   local orbits, names = {}, {}
   for name, loc in pairs(prototypes.space_location or {}) do
     if loc.type == "planet" then orbits[#orbits + 1] = name end
@@ -1033,6 +1040,11 @@ local function request(player, frame)
     local dd = find(frame, "bpgen_ship_orbit")
     req.params = { mode = "ship", thrusters = tonumber(find(frame, "bpgen_ship_thrusters").text) or 2,
       turrets = tonumber(find(frame, "bpgen_ship_turrets").text) or 6,
+      collectors = tonumber(find(frame, "bpgen_ship_collectors").text) or 4,
+      throttle = (function()
+        local t = find(frame, "bpgen_ship_throttle")
+        return (t.tags.values or {})[t.selected_index] or -1
+      end)(),
       location = (dd.tags.orbits or {})[dd.selected_index] or "nauvis", belt = req.belt or u.belts[1] }
     return req
   elseif mode == "busdesign" then
