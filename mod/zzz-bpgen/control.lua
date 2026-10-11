@@ -224,6 +224,13 @@ window.setup({
       request.params.snapshot = snapshot(player,
         { left_top = { x = x1 - m, y = y1 - m }, right_bottom = { x = x2 + m, y = y2 + m } }, true)
     end
+    if request.params and request.params.refit then
+      -- (the area to refit and round it: the ground the mall goes on, the bus it is fed from)
+      local a, m = request.params.refit.area, 48
+      measure(player, { left_top = { x = a[1] - m, y = a[2] - m }, right_bottom = { x = a[3] + m, y = a[4] + m } },
+        "plan", request)
+      return true
+    end
     if request.params and (request.params.mode == "extend" or request.params.bus_feed) then  -- (the base it builds next to, with the request)
       if snaps[player.index] then
         request.params.snapshot = snaps[player.index]
@@ -846,6 +853,7 @@ end
 
 local function on_selected(e)
   if e.item == "bpgen-patches" then return window.add_patch(game.get_player(e.player_index), e.area) end
+  if e.item == "bpgen-refit" then return window.refit(game.get_player(e.player_index), e.area) end
   if e.item ~= "bpgen-snapshot" then return end
   measure(game.get_player(e.player_index), e.area, "snapshot_tool", e.area)
 end
@@ -874,6 +882,8 @@ remote.add_interface("bpgen", {
     local b = frame and find(frame, "bpgen_recipe")
     return b and b.elem_filters
   end,
+  -- (tests) the recipe filters "Only unlocked" sets, for a force
+  recipe_filters = function(force_name) return window.recipe_filters(game.forces[force_name or "player"]) end,
   plan_window = function(player_index) window.plan(game.get_player(player_index)) end,
   click = function(player_index, tags) window.click(player_index, tags) end,
   hover_camera = function(player_index) return window.test_hover_camera(player_index) end,

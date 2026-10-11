@@ -70,25 +70,59 @@ class State:
         return out
 
 
+def _fluids(data, recipe):
+    return [i["name"] for i in data.raw["recipe"][recipe].get("ingredients") or [] if i.get("type") == "fluid"]
+
+
+def resolve(data, products, machine, inputs, fluids=False):
+    """a mall's products as this machine makes them -> (machine prototype, its categories, {category: machine},
+    products (recipes), inputs (what may come in on the belts: given or the plates, always what's mined), notes).
+    A product it can't craft gets another recipe for the same item it can (a mod's pipe from steel plate); one
+    needing a fluid is left out (belts only), unless `fluids` (one fluid each, the caller pipes it in)."""
+    recipes = data.raw["recipe"]
+    m = data.raw["assembling-machine"].get(machine)
+    if not m or planner._dims(m) != (3, 3):
+        raise PlanError(f"{machine}: the mall lays out 3x3 assembling machines")
+    cats = set(m.get("crafting_categories") or [])
+    machine_for = {c: machine for c in cats}
+    notes = []
+    raw = base.raw_items(data) - base.MADE_HERE
+    if inputs is None:  # (the plates, and what's smelted from them: steel)
+        plates = base.plate_items(data, raw)
+        inputs = raw | plates | base.plate_items(data, plates)
+    inputs = set(inputs) | {r for r in raw if r in data.raw.get("item", {})} | (
+        {WOOD} if WOOD in data.raw.get("item", {}) else set())
+    picked, cant, wet = [], [], []
+    for r in dict.fromkeys(products):
+        if r not in recipes:
+            continue
+        if recipes[r].get("category", "crafting") not in cats or _fluids(data, r):
+            alt = _result(data, r) and base.pick_recipe(data, _result(data, r), machine_for, inputs)
+            if alt and not _fluids(data, alt):
+                notes.append(f"{r}: made with the {alt} recipe ({machine} can't craft {r}'s here)")
+                r = alt
+            elif fluids and len(_fluids(data, r)) == 1 and recipes[r].get("category", "crafting") in cats:
+                pass
+            elif _fluids(data, r):
+                wet.append(f"{r} ({', '.join(_fluids(data, r))})")
+                continue
+            else:
+                cant.append(r)
+                continue
+        picked.append(r)
+    if cant:
+        notes.append(f"left out ({machine} can't craft them): {', '.join(cant)}")
+    if wet:
+        notes.append(f"left out (they need a fluid; the mall's belts carry items): {', '.join(wet)}")
+    return m, cats, machine_for, list(dict.fromkeys(picked)), inputs, notes
+
+
 def plan_grid(data, products, machine, belt, inputs=None, allowed=None, chest="wooden-chest", chest_limit=2,
               max_rows=MAX_ROWS, stock=STOCK):
     """products: recipes, one machine and chest each. inputs: items that come in on the belts (default: the plates and
     what's mined). -> dict(entities, sources, notes, products, makers, inputs, columns)"""
     recipes = data.raw["recipe"]
-    m = data.raw["assembling-machine"].get(machine)
-    if not m or planner._dims(m) != (3, 3):
-        raise PlanError(f"{machine}: the grid mall lays out 3x3 assembling machines")
-    cats = set(m.get("crafting_categories") or [])
-    products = [p for p in dict.fromkeys(products) if p in recipes]
-    for r in products:
-        if recipes[r].get("category", "crafting") not in cats:
-            raise PlanError(f"{machine} can't craft {r}")
-    raw = base.raw_items(data) - base.MADE_HERE
-    if inputs is None:  # (the plates, and what's smelted from them: steel)
-        plates = base.plate_items(data, raw)
-        inputs = raw | plates | base.plate_items(data, plates)
-    inputs = set(inputs) | ({WOOD} if WOOD in data.raw.get("item", {}) else set())
-    notes = []
+    m, cats, machine_for, products, inputs, notes = resolve(data, products, machine, inputs)
     made_by = {_result(data, r): r for r in products}
     # a component of exactly one product, used nowhere else: right above it, handed on through its chest
     users = {}
@@ -124,14 +158,19 @@ def plan_grid(data, products, machine, belt, inputs=None, allowed=None, chest="w
                     out.append(it)
         return out
 
-    machine_for = base.machines_by_category(data, [machine])
     part_recipe = {}
 
     def recipe_for(item):
         if item not in part_recipe:
             rn = base.pick_recipe(data, item, machine_for, inputs)
-            part_recipe[item] = rn if rn and recipes[rn].get("category", "crafting") in cats else None
+            if rn and any(i.get("type") == "fluid" for i in recipes[rn].get("ingredients") or []):
+                rn = None  # (a part needing a fluid: brought in)
+            part_recipe[item] = rn
+            if not rn:  # (nothing here makes it: it comes in on a lane, as the plates do)
+                inputs.add(item)
+                brought.add(item)
         return part_recipe[item]
+    brought = set()
 
     # products with the same ingredients next to each other
     order, left = [], list(stacks)
@@ -149,7 +188,7 @@ def plan_grid(data, products, machine, belt, inputs=None, allowed=None, chest="w
         if item in st.items_near(c):
             return True
         free = [(b, ln) for b, _, _ in reach(c) for ln in (EAST_LANE, WEST_LANE) if (b, ln) not in st.lanes]
-        if item in inputs:
+        if item in inputs or not recipe_for(item):
             if not free:
                 return False
             st.lanes[free[0]] = {"item": item, "kind": "in"}

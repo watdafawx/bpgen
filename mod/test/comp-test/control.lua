@@ -100,6 +100,18 @@ script.on_event(defines.events.on_tick, function(e)
     local area = { left_top = { x = -80, y = -80 }, right_bottom = { x = 80, y = 80 } }
     remote.call("bpgen", "measure_area", "nauvis", area, "player")
     out("snapshot measured")
+    -- "Only unlocked": the recipe picker offers exactly the enabled recipes (locked ones making what an unlocked
+    -- one makes, e.g. advanced oil processing's petroleum gas, came through before)
+    force.technologies["oil-processing"].researched = true
+    local got = prototypes.get_recipe_filtered(remote.call("bpgen", "recipe_filters", "player"))
+    local leak, miss = {}, {}
+    for name in pairs(got) do
+      if not force.recipes[name].enabled and not force.recipes[name].hidden then leak[#leak + 1] = name end
+    end
+    for name, r in pairs(force.recipes) do
+      if r.enabled and not r.hidden and #r.products > 0 and not got[name] then miss[#miss + 1] = name end
+    end
+    out("only unlocked: leaked " .. #leak .. " " .. table.concat(leak, " ") .. ", missing " .. #miss .. " " .. table.concat(miss, " "))
   elseif e.tick == 300 and spec then
     -- paste like a player (Ctrl+Shift): build_blueprint snaps it (absolute snapping) next to the cursor
     local inv = game.create_inventory(1)

@@ -276,7 +276,7 @@ class Service:
         if params.get("layout") == "grid" and params.get("add_to"):  # (beside the held base, on its spare lanes)
             from bpgen import tiers
             return tiers.add_mall(self, params)
-        if params.get("layout") == "grid":
+        if params.get("layout") in ("grid", "sushi"):
             return self.plan_grid_mall(params)
         calib = self.ensure_calibrated(params, progress, cancel)
         if progress:
@@ -326,12 +326,19 @@ class Service:
         }
 
     def plan_grid_mall(self, params):
-        """a mall in columns between mixed belts, parts made at the top (see mall_grid.py)"""
-        from bpgen import mall_grid
-        g = mall_grid.plan_grid(self.data, params.get("products") or [], params["machine"], params["belt"],
-                                inputs=params.get("inputs"), allowed=params.get("inserters"),
-                                chest=params.get("chest") or "wooden-chest", chest_limit=int(params.get("chest_limit") or 2),
-                                stock=int(params["stock"]) if params.get("stock") is not None else mall_grid.STOCK)
+        """a mall in columns between mixed belts, parts made at the top (see mall_grid.py); layout "sushi": on one
+        mixed belt loop (see mall_sushi.py)"""
+        from bpgen import mall_grid, mall_sushi
+        common = dict(inputs=params.get("inputs"), allowed=params.get("inserters"),
+                      chest=params.get("chest") or "wooden-chest", chest_limit=int(params.get("chest_limit") or 2))
+        if params.get("layout") == "sushi":
+            g = mall_sushi.plan_sushi(self.data, params.get("products") or [], params["machine"], params["belt"],
+                                      stock=int(params["stock"]) if params.get("stock") is not None else mall_grid.STOCK,
+                                      **common)
+        else:
+            g = mall_grid.plan_grid(self.data, params.get("products") or [], params["machine"], params["belt"],
+                                    stock=int(params["stock"]) if params.get("stock") is not None else mall_grid.STOCK,
+                                    **common)
         ents, sources, sinks, description = labels.add_labels(self.data, g["entities"], g["sources"], [], "", 0)
         label = f"mall: {', '.join(g['products'])}"[:60]
         text = "\n".join(g["notes"])

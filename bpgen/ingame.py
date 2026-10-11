@@ -9,15 +9,30 @@ loads once, on the first plan or on warm(). Nothing is measured in game (that ne
 needs an unmeasured inserter setup says so instead.
 """
 import json
+import math
 import threading
 import time
 import traceback
+from pathlib import Path
 
 _service = None
 _lock = threading.Lock()  # (plans share one Service: one at a time)
 _taking = None  # the thread writing data the game sent (planning waits for it)
 _last = None  # the last plan that isn't placed yet (entities, sources, sinks...): what place() puts next to the base
 _sections = {}  # a starter base's prints by name (place() can put one of them next to the base)
+
+
+def _crash(e, request):
+    """an unexpected error: the answer the window shows, and the request with its trace in run/ingame-error.json
+    (the game shows only the error line), so it can be planned again outside the game"""
+    trace = traceback.format_exc()
+    try:
+        out = Path(__file__).resolve().parents[1] / "run" / "ingame-error.json"
+        out.parent.mkdir(exist_ok=True)
+        out.write_text(json.dumps({"request": request, "trace": trace}))
+    except OSError:
+        pass
+    return json.dumps({"error": f"{type(e).__name__}: {e}", "trace": trace[-2000:]})
 
 
 def data_wanted(active: str = "") -> str:
@@ -245,6 +260,59 @@ def _mall_bus_feed(s, params):
     return main, [f"your bus carries {' '.join(f'[item={i}]' for i in sorted(on_bus))}: taken from it"]
 
 
+def _refit(s, params):
+    """a messy area of the base rebuilt as a compact grid mall in its place: params["refit"] = {"area": [x1, y1, x2,
+    y2], "add": more machines allowed} with params["snapshot"] (the area and round it). The area's entities leave
+    the snapshot (free ground for the mall) but for the main bus's belts and machines making what the mall won't.
+    -> (what to deconstruct: [{name, position}], the area's assembling machines rebuilt, notes)"""
+    from bpgen import extend, planner
+    snap = s.snapshot_view(params.get("snapshot"))
+    if not snap:
+        raise planner.PlanError("no snapshot of the area")
+    x1, y1, x2, y2 = params["refit"]["area"]
+    products = set(params.get("products") or [])
+    main = extend.find_bus(extend.Ground(snap))
+    bus_tiles = main["tiles"] if main else set()
+    keep, clear, machines, kept = [], [], 0, set()
+    for e in snap["entities"]:
+        x, y = e["position"]["x"], e["position"]["y"]
+        inside = x1 <= x <= x2 and y1 <= y <= y2
+        machine = e["type"] in ("assembling-machine", "furnace", "rocket-silo", "lab")
+        if not inside or (math.floor(x), math.floor(y)) in bus_tiles or (
+                machine and not (e["type"] == "assembling-machine" and e.get("recipe") in products)):
+            keep.append(e)
+            if inside and machine and not e.get("ghost"):
+                kept.add(e.get("recipe") or e["name"])
+            continue
+        if not e.get("ghost"):
+            clear.append({"name": e["name"], "position": e["position"]})
+            machines += e["type"] == "assembling-machine"
+    params["snapshot"] = dict(snap, entities=keep)
+    notes = [f"refit: {len(clear)} entities in the area removed, the mall built in their place"]
+    if kept:
+        notes.append("left standing (the mall doesn't make them): " + " ".join(
+            f"[recipe={k}]" if k in s.data.raw["recipe"] else f"[entity={k}]" for k in sorted(kept)))
+    if any(e["type"] == "electric-pole" for e in snap["entities"] if e not in keep and not e.get("ghost")):
+        notes.append("its poles are replaced by the mall's: check power still reaches past the area")
+    return clear, machines, notes
+
+
+def _refit_inputs(s, params):
+    """no machines added: what the area's recipes need and none of them makes comes in on the belts (from the bus
+    or by hand) instead of being made at the mall's top"""
+    from bpgen import base
+    recipes = s.data.raw["recipe"]
+    made = {x.get("name") for p in params.get("products") or [] for x in (recipes.get(p) or {}).get("results") or []}
+    need = {i["name"] for p in params.get("products") or [] for i in (recipes.get(p) or {}).get("ingredients") or []
+            if i.get("type") != "fluid"}
+    inputs = params.get("inputs")
+    if inputs is None:  # (as the grid mall's default: the plates, and what's smelted from them)
+        raw = base.raw_items(s.data) - base.MADE_HERE
+        plates = base.plate_items(s.data, raw)
+        inputs = raw | plates | base.plate_items(s.data, plates)
+    params["inputs"] = sorted(set(inputs) | (need - made))
+
+
 def place(request: str) -> str:
     """the last plan next to the player's base: {"bus": "auto"|"on"|"off", "seed": {x, y}, "snapshot": the area
     around the player, as the snapshot tool takes it} -> as plan(), an absolute blueprint with taps on the base's
@@ -270,7 +338,7 @@ def place(request: str) -> str:
             "absolute": _absolute(placed),
             "notes": placed.get("notes") or [], "summary": {}, "seconds": round(time.perf_counter() - t, 3)})
     except Exception as e:  # noqa: BLE001 - shown in game
-        return json.dumps({"error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-2000:]})
+        return _crash(e, request)
 
 
 def bus_report(request: str) -> str:
@@ -314,7 +382,7 @@ def bus_report(request: str) -> str:
                     "length": main["hi"] - main["lo"] + 1, "measured": any("used" in ln for ln in main["lanes"])},
             "items": items, "short": short[:6]}})
     except Exception as e:  # noqa: BLE001 - shown in game
-        return json.dumps({"error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-2000:]})
+        return _crash(e, request)
 
 
 def add_lane(request: str) -> str:
@@ -346,7 +414,7 @@ def add_lane(request: str) -> str:
                       f"placed)"],
             "summary": {}, "seconds": round(time.perf_counter() - t, 3)})
     except Exception as e:  # noqa: BLE001 - shown in game
-        return json.dumps({"error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-2000:]})
+        return _crash(e, request)
 
 
 def plan(request: str) -> str:
@@ -385,10 +453,20 @@ def plan(request: str) -> str:
                                "machines": sorted({m["machine"] for m in a.get("machines") or []}),
                                "before": {"size": a.get("size"), "entities": a.get("entities")}})
             bus, bus_notes = None, []
+            refit = params.get("refit") if params.get("mode") == "mall" else None
+            if refit:  # (an area rebuilt as a grid mall: always fed from the bus when there is one)
+                params.update(layout="sushi" if params.get("layout") == "sushi" else "grid", bus_feed=True,
+                              feed="belt", origin={
+                    "x": (refit["area"][0] + refit["area"][2]) / 2, "y": (refit["area"][1] + refit["area"][3]) / 2})
+                clear, had, refit_notes = _refit(s, params)
             if params.get("bus_feed") and params.get("recipe"):
                 bus, bus_notes = _bus_feed(s, params)
             elif params.get("bus_feed") and params.get("mode") == "mall":
                 bus, bus_notes = _mall_bus_feed(s, params)
+            if refit:
+                if not refit.get("add"):
+                    _refit_inputs(s, params)
+                bus_notes = refit_notes + [n for n in bus_notes if not n.startswith("no main bus")]
             token = calibrate.NO_MEASURE.set(True)
             try:
                 tries = [m for m in (params.pop("machines_try", None) or []) if m] if params.get("mode") == "mall" else []
@@ -425,14 +503,21 @@ def plan(request: str) -> str:
                              "sinks": [dict(k, item=k.get("item") or sm.get("output")) for k in out.get("sinks") or []],
                              "belt": sm.get("belt") or params.get("belt"), "mode": params.get("mode") or "line",
                              "label": f"bpgen: {sm.get('recipe') or params.get('recipe') or params.get('mode')} next to the base"}
-                    if bus:  # (fed from the bus: placed beside it straight away, its inputs tapped from the lanes)
-                        o = params.get("origin") or {}
+                    if bus or refit:  # (fed from the bus: placed beside it straight away, its inputs tapped from
+                        o = params.get("origin") or {}  # the lanes; a refit: where the area was)
                         try:
-                            placed = s.extend(dict(_last, bus="on", seed=o if o else None,
+                            placed = s.extend(dict(_last, bus="on" if bus else "off", seed=o if o else None,
                                                    snapshot=params.get("snapshot")))
-                            out = {"blueprint": placed["blueprint"], "absolute": _absolute(placed),
+                            absolute = _absolute(placed)
+                            if refit:
+                                n = sum(1 for e in placed["entities"] if e.get("recipe"))
+                                bus_notes.append(f"{n} machines (the area had {had})")
+                                absolute["clear"] = clear
+                            out = {"blueprint": placed["blueprint"], "absolute": absolute,
                                    "summary": dict(sm, notes=bus_notes + list(sm.get("notes") or []) + placed["notes"])}
                         except (ValueError, planner.PlanError) as e:  # (no room beside the bus: the plain line)
+                            if refit:
+                                raise planner.PlanError(f"no room for the refit mall: {e}")
                             bus, bus_notes = None, bus_notes + [f"not placed beside your bus ({e}): place it yourself"]
                 if bus_notes and not bus:
                     out.setdefault("summary", {})["notes"] = bus_notes + list(out["summary"].get("notes") or [])
@@ -467,4 +552,4 @@ def plan(request: str) -> str:
     except planner.PlanError as e:
         return json.dumps({"error": str(e), "seconds": round(time.perf_counter() - t, 3)})
     except Exception as e:  # noqa: BLE001 - shown in game, with the trace in the fse log via the error text
-        return json.dumps({"error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-2000:]})
+        return _crash(e, request)

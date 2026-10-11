@@ -327,30 +327,78 @@ end
 -- (kept in its tags) and the names are added to it; unticked, the own filter comes back.
 local only_unlocked = safe.stored("only_unlocked")  -- player index -> true
 
--- the filters that keep a picker to what the force has unlocked, by its elem_type. Recipe filters have no "name":
--- recipes are kept by what they make (items and fluids some enabled recipe makes), which leaves out locked recipes
--- except an alternative way to make something already unlocked.
-local function unlocked_filters(force)
-  local items, fluids, entities = {}, {}, {}
-  local fluid_seen = {}
+-- {"item/iron-plate" = true, ...} of a recipe's ingredients or products
+local function stuff(list)
+  local out = {}
+  for _, x in pairs(list) do
+    if x.type == "item" or x.type == "fluid" then out[x.type .. "/" .. x.name] = true end
+  end
+  return out
+end
+
+local function has(kind, key, invert)  -- a has-ingredient-/has-product- filter on "item/name"
+  local t, name = key:match("^(%a+)/(.+)$")
+  return { filter = "has-" .. kind .. "-" .. t, elem_filters = { { filter = "name", name = name } }, invert = invert,
+           mode = "and" }
+end
+
+-- one "and" group per unlocked recipe: what tells it apart from locked recipes (filters on recipes have no
+-- "name"). Its main product, category, subgroup and crafting time, then for each locked recipe still let through
+-- (a has-product filter matches any product: advanced oil processing makes petroleum gas too) one more clause:
+-- something the locked one has and this one doesn't, or the other way round.
+local function recipe_filters(force)
+  local groups, by_sig = {}, {}
+  local function ok(r) return r.enabled and not r.hidden end
   for _, r in pairs(force.recipes) do
-    if r.enabled and not r.hidden then
-      for _, pr in pairs(r.products) do
-        if pr.type == "fluid" and not fluid_seen[pr.name] then
-          fluid_seen[pr.name] = true
-          fluids[#fluids + 1] = pr.name
-        end
+    local p = ok(r) and r.products[1]
+    if p then
+      local g = { recipe = r, has("product", p.type .. "/" .. p.name),
+                  { filter = "category", category = r.category, mode = "and" },
+                  { filter = "subgroup", subgroup = r.subgroup.name, mode = "and" },
+                  { filter = "energy", comparison = "=", value = r.energy, mode = "and" } }
+      g[1].mode = nil
+      groups[#groups + 1] = g
+      local s = table.concat({ r.category, r.subgroup.name, r.energy }, "|")
+      by_sig[s] = by_sig[s] or {}
+      table.insert(by_sig[s], g)
+    end
+  end
+  local function flat()
+    local f = {}
+    for _, g in ipairs(groups) do for _, x in ipairs(g) do f[#f + 1] = x end end
+    return f
+  end
+  local f = flat()
+  local leaked = false
+  for name in pairs(#f > 0 and prototypes.get_recipe_filtered(f) or {}) do
+    local l = force.recipes[name]
+    if l and not ok(l) and not l.hidden then
+      leaked = true
+      local li, lp = stuff(l.ingredients), stuff(l.products)
+      for _, g in ipairs(by_sig[table.concat({ l.category, l.subgroup.name, l.energy }, "|")] or {}) do
+        local ri, rp = stuff(g.recipe.ingredients), stuff(g.recipe.products)
+        local clause
+        for k in pairs(li) do if not clause and not ri[k] then clause = has("ingredient", k, true) end end
+        for k in pairs(lp) do if not clause and not rp[k] then clause = has("product", k, true) end end
+        for k in pairs(ri) do if not clause and not li[k] then clause = has("ingredient", k) end end
+        for k in pairs(rp) do if not clause and not lp[k] then clause = has("product", k) end end
+        if clause then g[#g + 1] = clause end
       end
     end
   end
+  return leaked and flat() or f
+end
+
+-- the filters that keep a picker to what the force has unlocked, by its elem_type
+local function unlocked_filters(force)
+  local items, entities = {}, {}
+  local recipe = recipe_filters(force)
   for name in pairs(ctx.craftable(force)) do
     items[#items + 1] = name
     local proto = prototypes.item[name]
     local place = proto and proto.place_result
     if place then entities[#entities + 1] = place.name end
   end
-  local recipe = { { filter = "has-product-item", elem_filters = { { filter = "name", name = items } } },
-                   { filter = "has-product-fluid", elem_filters = { { filter = "name", name = fluids } } } }
   local item = { { filter = "name", name = items } }
   local entity = { { filter = "name", name = entities } }
   return { recipe = recipe, ["recipe-with-quality"] = recipe, item = item, ["item-with-quality"] = item,
@@ -367,13 +415,27 @@ local function restrict_el(el, on, names)
         tags.bpgen_own_filters = own
         el.tags = tags
       end
+      -- ("and" binds tighter than "or": the own filter goes into every group, each own group crossed with each)
+      local function groups(list)
+        local out = {}
+        for i, x in ipairs(list) do
+          if i == 1 or x.mode ~= "and" then out[#out + 1] = {} end
+          table.insert(out[#out], x)
+        end
+        return out
+      end
+      local mine = own and groups(own) or { {} }
       local f = {}
-      for _, x in ipairs(names[el.elem_type]) do f[#f + 1] = x end
-      for _, x in ipairs(own or {}) do
-        local c = {}
-        for k, v in pairs(x) do c[k] = v end
-        c.mode = "and"
-        f[#f + 1] = c
+      for _, g in ipairs(groups(names[el.elem_type])) do
+        for _, o in ipairs(mine) do
+          for _, x in ipairs(g) do f[#f + 1] = x end
+          for _, x in ipairs(o) do
+            local c = {}
+            for k, v in pairs(x) do c[k] = v end
+            c.mode = "and"
+            f[#f + 1] = c
+          end
+        end
       end
       el.elem_filters = f
     elseif own ~= nil then
@@ -393,6 +455,8 @@ function M.set_only_unlocked(player, on)
 end
 
 --- the window's pickers as the player's "Only unlocked" says (call after pickers are added or their filters set)
+M.recipe_filters = recipe_filters  -- (tests)
+
 function M.restrict(player)
   local frame = player and player.valid and player.gui.screen[NAME]
   if not frame then return end
@@ -560,9 +624,9 @@ function M.open(player, prefill)
     name = "bpgen_mall_machine", elem_filters = { { filter = "crafting-machine" } } })
   field(fs, "Chest").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_chest",
     elem_filters = { { filter = "type", type = { "container", "logistic-container" } } } })
-  field(fs, "Fed by", "mixed belts: columns of machines between mixed belts, gears, cable, circuits... made at the top, only plates come in. My main bus: the same, the parts your bus carries taken from it, placed beside it. Rows: the older layout, its own 4-lane bus").add({
+  field(fs, "Fed by", "mixed belts: columns of machines between mixed belts, gears, cable, circuits... made at the top, only plates come in. My main bus: the same, the parts your bus carries taken from it, placed beside it. A belt loop: plate belts and one mixed loop carrying every part, for products that don't share their inputs (modded malls; fluids piped in too); from my bus: the same beside your bus. Rows: the older layout, its own 4-lane bus").add({
     type = "drop-down", name = "bpgen_mall_feed", items = { "rows on a 4-lane bus", "robots", "mixed belts", "my main bus",
-      "the base in my hand" },
+      "the base in my hand", "a belt loop", "a belt loop, from my bus" },
     selected_index = 3 })
   fs = fields(sec)
   field(fs, "Buffer", "crafts each machine keeps ahead").add({ type = "textfield", name = "bpgen_mall_buffer", text = "5",
@@ -571,6 +635,12 @@ function M.open(player, prefill)
     text = "4", numeric = true, lose_focus_on_confirm = true }).style.width = 60
   field(fs, "Keep", "mixed belts: each machine takes from the belts only while its chest has fewer than this (wired to the chest), so the ones down a column get plates soon; 0: no limit").add({
     type = "textfield", name = "bpgen_mall_stock", text = "10", numeric = true, lose_focus_on_confirm = true }).style.width = 60
+  sec = section(mall, "Refit an area", "A part of your base that grew all over the place: drag over it, and its machines are laid out again as a compact mall in its place (fed from your main bus when there is one). Place it marks the old ones for removal")
+  fs = fields(sec)
+  fs.add({ type = "button", caption = "Pick the area", tags = { bpgen = "refit" },
+    tooltip = "Gives you the refit tool: drag over the area. Its products fill the list above, and it plans" })
+  fs.add({ type = "checkbox", name = "bpgen_refit_add", caption = "Add machines", state = false,
+    tooltip = "Off: the area's machines only (what none of them makes comes in on the belts). On: the mall makes the parts it needs, more machines" })
 
   -- a starter base: science
   local base = left.add({ type = "flow", name = "bpgen_base_box", direction = "vertical", visible = false })
@@ -843,8 +913,10 @@ local function request(player, frame)
     req.params = { mode = "mall", products = products, machine = candidates[1], machines_try = candidates,
       chest = value(frame, "bpgen_chest") or (prototypes.entity["steel-chest"] and "steel-chest") or "wooden-chest",
       feed = find(frame, "bpgen_mall_feed").selected_index == 2 and "robots" or "belt",
-      layout = find(frame, "bpgen_mall_feed").selected_index >= 3 and "grid" or nil,
-      bus_feed = find(frame, "bpgen_mall_feed").selected_index == 4 or nil,
+      layout = find(frame, "bpgen_mall_feed").selected_index >= 6 and "sushi"
+        or find(frame, "bpgen_mall_feed").selected_index >= 3 and "grid" or nil,
+      bus_feed = (find(frame, "bpgen_mall_feed").selected_index == 4 or find(frame, "bpgen_mall_feed").selected_index == 7)
+        or nil,
       add_to = find(frame, "bpgen_mall_feed").selected_index == 5 and player.cursor_stack
         and player.cursor_stack.valid_for_read and player.cursor_stack.export_stack() or nil,
       wants_base = find(frame, "bpgen_mall_feed").selected_index == 5 or nil,
@@ -982,7 +1054,13 @@ function M.place_absolute(player)
   local frame = player.gui.screen[NAME]
   local r = results[player.index]
   if not (frame and r and r.res.absolute) then return end
+  local cleared = {}  -- (a refit: the area's old entities go, the mall's ghosts on their spot; Undo unmarks them)
+  for _, c in ipairs(r.res.absolute.clear or {}) do
+    local e = player.surface.find_entity(c.name, c.position)
+    if e and not e.to_be_deconstructed() and e.order_deconstruction(player.force, player) then cleared[#cleared + 1] = e end
+  end
   local ghosts, _, area, marks = place.place(player, r.blueprint, nil, r.res.absolute.box)
+  for _, e in ipairs(cleared) do marks[#marks + 1] = e end
   placed[player.index], unmark[player.index] = ghosts, marks
   if area then
     rendering.draw_rectangle({ color = { 0.2, 0.8, 1 }, width = 4, filled = false, left_top = area[1],
@@ -1071,6 +1149,48 @@ function M.plan(player)
   if not req then return status(frame, err) end
   local ok, why = ctx.start(player, req)
   status(frame, ok and "Planning..." or ("Can't plan in game: " .. tostring(why)))
+end
+
+--- an area picked with the refit tool: its assembling machines' recipes fill the mall's products, then it plans
+--- them as a compact mall in the area's place (see ingame._refit)
+function M.refit(player, area)
+  if not player.gui.screen[NAME] then M.open(player, { mode = "mall" }) end
+  local frame = player.gui.screen[NAME]
+  set_mode(frame, "mall")
+  local count, machines, order = {}, {}, {}
+  for _, e in pairs(player.surface.find_entities_filtered({ area = area, type = "assembling-machine", force = player.force })) do
+    local r = e.get_recipe()
+    if r then
+      if not count[r.name] then order[#order + 1] = r.name end
+      count[r.name] = (count[r.name] or 0) + 1
+      machines[e.name] = (machines[e.name] or 0) + 1
+    end
+  end
+  if #order == 0 then return status(frame, "No assembling machines with a recipe in that area.") end
+  local t = find(frame, "bpgen_products")
+  t.clear()
+  for _, r in ipairs(order) do
+    t.add({ type = "choose-elem-button", elem_type = "recipe", tags = { bpgen_product = true },
+      elem_filters = { { filter = "hidden", invert = true } } }).elem_value = r
+  end
+  t.add({ type = "choose-elem-button", elem_type = "recipe", tags = { bpgen_product = true },
+    elem_filters = { { filter = "hidden", invert = true } } })
+  M.restrict(player)
+  local req, err = request(player, frame)
+  if not req then return status(frame, err) end
+  -- (the area's own machine first, when it makes every product)
+  local most
+  for name, n in pairs(machines) do if not most or n > machines[most] then most = name end end
+  local try = req.params.machines_try or {}
+  for i, m in ipairs(try) do
+    if m == most then table.remove(try, i) table.insert(try, 1, m) break end
+  end
+  req.params.machine = try[1] or req.params.machine
+  local a = area
+  req.params.refit = { area = { a.left_top.x, a.left_top.y, a.right_bottom.x, a.right_bottom.y },
+                       add = find(frame, "bpgen_refit_add").state }
+  local ok, why = ctx.start(player, req)
+  status(frame, ok and "Planning the refit..." or ("Can't plan in game: " .. tostring(why)))
 end
 
 local function sig(name)
@@ -1560,6 +1680,11 @@ local function on_click(e)
     find(frame, "bpgen_machine").elem_value = m and { name = m, quality = "normal" } or nil
     find(frame, "bpgen_rate").text = tostring(math.ceil(el.tags.rate))
     M.plan(player)
+  elseif action == "refit" then
+    if player.clear_cursor() then
+      player.cursor_stack.set_stack({ name = "bpgen-refit" })
+      status(frame, "Drag over the area to refit with the refit tool.")
+    end
   elseif action == "snapshot" then
     if player.clear_cursor() then
       player.cursor_stack.set_stack({ name = "bpgen-snapshot" })

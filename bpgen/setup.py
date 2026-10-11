@@ -17,7 +17,8 @@ def main():
     RUN.mkdir(exist_ok=True)
     ini = RUN / "config.ini"
     if not ini.exists():
-        ini.write_text(f"[path]\nread-data={PATHS['game_data'].as_posix()}\nwrite-data={RUN.as_posix()}\n",
+        # (without the version line the game calls the file invalid and asks, over the main menu, to reset it)
+        ini.write_text(f"; version=13\n[path]\nread-data={PATHS['game_data'].as_posix()}\nwrite-data={RUN.as_posix()}\n",
                        encoding="utf-8")
         print("wrote", ini)
     (ROOT / "data").mkdir(exist_ok=True)

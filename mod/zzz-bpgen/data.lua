@@ -27,6 +27,18 @@ data:extend({
     alt_select = { border_color = { 1, 0.6, 0.1 }, cursor_box_type = "entity", mode = { "any-entity" },
       entity_type_filters = { "resource" } },
   },
+  -- drag over a messy part of the base: the bpgen window rebuilds its machines as a compact mall in its place
+  {
+    type = "selection-tool",
+    name = "bpgen-refit",
+    icon = "__base__/graphics/icons/assembling-machine-2.png",
+    icon_size = 64,
+    flags = { "only-in-cursor", "not-stackable", "spawnable" },
+    hidden = true,
+    stack_size = 1,
+    select = { border_color = { 1, 0.4, 0.8 }, cursor_box_type = "copy", mode = { "any-entity" } },
+    alt_select = { border_color = { 1, 0.4, 0.8 }, cursor_box_type = "copy", mode = { "any-entity" } },
+  },
   { type = "custom-input", name = "bpgen-snapshot", key_sequence = "CONTROL + SHIFT + N", action = "spawn-item",
     item_to_spawn = "bpgen-snapshot", consuming = "game-only" },
   {

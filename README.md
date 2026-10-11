@@ -28,7 +28,20 @@ places the same (no desyncs). The window's mouse-dragged preview works with its 
   **Keep** (10), so the machines down a column get plates soon (every product of the starter mall in 9 minutes).
   **Fed by: my main bus** takes the parts your bus carries from it, makes the rest, and places the mall
   beside the bus with taps. **Fed by: the base in my hand** puts it beside a base on your bus design, on the
-  lanes that base passes on (each split into up to three of the mall's inputs). The older layout (rows on a 4-lane bus) and robots are still there.
+  lanes that base passes on (each split into up to three of the mall's inputs). **Fed by: a belt loop** is for
+  products that don't share their inputs (a modded mall: Krastorio's beams, automation cores, inserter parts...),
+  where mixed belts run out of lanes: between the columns run pairs of belts, a plate belt (the two busiest inputs,
+  iron and copper, a lane each) and one belt loop snaking through all of them that carries every part made there and
+  the other inputs, mixed. Each part (and input) goes onto the loop only while it holds fewer than its share, read
+  off the loop by circuit, so it never jams. Products needing a fluid (express belts: lubricant; concrete: water)
+  sit at the top, piped in. A product the machine can't craft gets another recipe that it can (a mod's pipe from
+  steel). **A belt loop, from my bus**: the same beside your bus. The older layout (rows on a 4-lane bus) and robots are still there.
+- **Refit an area** (in game, Mall tab): a part of your base that grew all over the place (a mall started by hand,
+  machines and belts everywhere): drag over it with the refit tool. Its assembling machines' recipes fill the
+  products and it plans them as a compact grid mall in the area's place, fed from your main bus when there is one.
+  **Place it** marks the old entities for removal (the bus's belts and machines the mall doesn't make stay) and
+  pastes the mall. **Add machines** off: only the area's products (what none of them makes comes in on the belts);
+  on: the mall makes the parts it needs too.
 - **Starter bases**: science per minute up to labs, with a mall. Laid out compact (blocks in columns, belts routed
   between them) or as a **main bus**: one column of blocks beside a bus of belts, each block taking what it needs and
   putting back what it makes, the mall taking from the same bus.
@@ -189,11 +202,11 @@ one machine per product.
 
 ## Tests
 
-`mod	estun_mp.py` (multiplayer: a headless server and a client; a line planned in the client's Python placed
+`mod\test\run_mp.py` (multiplayer: a headless server and a client; a line planned in the client's Python placed
 the same on both peers, no desync), `mod\test\run.py`, `extend_test.py` (headless game with the mod; `bus` as its fourth argument: a main bus),
 `bus_extend_test.py` (placement beside a bus, no game), `harness\botmall_test.py` (a robot-fed mall built and
 run), `mod\test\bus_feed_test.py` (a line fed from the bus, no game), `mod\test\mall_bus_test.py` (a grid mall fed
-from the bus, no game), `harness\grid_mall_run.py [minutes]` (the starter grid mall built and run: every product
+from the bus, no game), `mod\test\refit_test.py` (a messy area refit as a grid mall, no game), `mod\test\mall_loop_test.py` (the belt-loop mall, no game), `harness\grid_mall_run.py [minutes] [--sushi | --pack]` (the starter grid mall built and run: every product
 made), `mod\test\tiers_test.py` then
 `harness\tiers_paste_test.py` (starter base tiers, then pasted in a game: C on C), `mod\test\fit_bus_test.py`
 then `harness\fit_place_test.py` and `harness\fit_bus_run.py [direction] [minutes]` (a base fitted to a bus design:

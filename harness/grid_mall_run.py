@@ -1,7 +1,10 @@
 """Headless run of a grid mall (bpgen/mall_grid.py): the starter mall's products planned, built, powered, its input
 lanes kept fed at the top; after a while every product must be in its chest (parts made inside, components handed
-down). python harness/grid_mall_run.py [minutes]"""
+down). --pack: the loop mall of a Krastorio-style list with your own mod pack (bpgen's pack data; a game with your
+enabled mods linked in, and your mod settings; bpgen and fse left out). --sushi: the loop mall (bpgen/mall_sushi.py) instead, with products needing lubricant and water
+(infinity pipes on its fluid inputs). python harness/grid_mall_run.py [minutes] [--sushi]"""
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -15,6 +18,17 @@ from bpgen.service import Service  # noqa: E402
 
 RUN = ROOT / "run"
 OUT = RUN / "script-output" / "bpgen" / "gridmall.txt"
+SUSHI = "--sushi" in sys.argv
+PACK = "--pack" in sys.argv  # (the loop mall of PACK_MALL with your own mod pack: its data, its game)
+sys.argv = [a for a in sys.argv if a not in ("--sushi", "--pack")]
+SUSHI = SUSHI or PACK
+PACK_MALL = ["transport-belt", "fast-transport-belt", "express-transport-belt", "underground-belt",
+             "fast-underground-belt", "express-underground-belt", "splitter", "fast-splitter", "express-splitter",
+             "burner-inserter", "inserter", "long-handed-inserter", "fast-inserter", "burner-mining-drill",
+             "electric-mining-drill", "assembling-machine-1", "assembling-machine-2", "gun-turret", "small-electric-pole",
+             "medium-electric-pole", "pipe", "pipe-to-ground", "stone-furnace", "steel-furnace", "solar-panel",
+             "wooden-chest", "iron-chest", "steel-chest", "boiler", "steam-engine", "offshore-pump", "lab", "concrete",
+             "stone-wall", "repair-pack"]
 MINUTES = float(sys.argv[1]) if len(sys.argv) > 1 else 12  # (every product made: about 9 min)
 
 CONTROL = r'''
@@ -65,7 +79,12 @@ script.on_event(defines.events.on_tick, function(e)
       end
     end
     for _, src in ipairs(spec.sources) do
-      feeds[#feeds + 1] = { belt = s.find_entity("transport-belt", src.position), lanes = src.lanes }
+      if src.kind == "fluid" then  -- (a pipe of it, as from the base's)
+        local p = s.create_entity({ name = "infinity-pipe", position = src.position, force = force })
+        p.set_infinity_pipe_filter({ name = src.fluid, percentage = 1 })
+      else
+        feeds[#feeds + 1] = { belt = s.find_entity("transport-belt", src.position), lanes = src.lanes }
+      end
     end
     helpers.write_file("bpgen/gridmall.txt", "not built " .. missing .. "\nlimited " .. limited .. "\n", false)
   elseif e.tick > 2 then  -- (the input lanes kept full, as a bus lane would)
@@ -81,7 +100,60 @@ script.on_event(defines.events.on_tick, function(e)
       end
     end
   end
+  if e.tick == spec.ticks - 60 then  -- (where each item on a belt is: a second later, which haven't moved)
+    storage.seen = {}
+    for _, b in pairs(s.find_entities_filtered({ type = "transport-belt" })) do
+      for l = 1, 2 do
+        for _, it in pairs(b.get_transport_line(l).get_detailed_contents()) do storage.seen[it.unique_id] = it.position end
+      end
+    end
+  end
   if e.tick == spec.ticks then
+    local stuck = {}
+    for _, b in pairs(s.find_entities_filtered({ type = "transport-belt" })) do
+      for l = 1, 2 do
+        for _, it in pairs(b.get_transport_line(l).get_detailed_contents()) do
+          if storage.seen and storage.seen[it.unique_id] == it.position and b.belt_neighbours.outputs[1] then
+            local k = it.stack.name
+            stuck[k] = (stuck[k] or 0) + 1
+          end
+        end
+      end
+    end
+    for _, b in pairs(s.find_entities_filtered({ type = "transport-belt" })) do  -- (a loop mall: what its reader sees)
+      local cb = b.get_control_behavior()
+      local net = cb and cb.read_contents and b.get_circuit_network(defines.wire_connector_id.circuit_red)
+      if net then
+        local sig = {}
+        for _, x in pairs(net.signals or {}) do sig[#sig + 1] = x.signal.name .. "=" .. x.count end
+        table.sort(sig)
+        helpers.write_file("bpgen/gridmall.txt", "status reader " .. table.concat(sig, " ") .. "\n", true)
+      end
+    end
+    local held, cols = {}, {}  -- (items in machines' inputs; gears by belt column)
+    for _, m in pairs(s.find_entities_filtered({ type = "assembling-machine" })) do
+      for _, it in pairs(m.get_inventory(defines.inventory.assembling_machine_input).get_contents()) do
+        held[it.name] = (held[it.name] or 0) + it.count
+      end
+    end
+    for _, b in pairs(s.find_entities_filtered({ type = "transport-belt" })) do
+      local n = b.get_item_count("iron-gear-wheel")
+      if n > 0 then
+        local k = math.floor(b.position.x) .. (b.direction == 0 and "N" or b.direction == 8 and "S" or "x")
+        cols[k] = (cols[k] or 0) + n
+      end
+    end
+    local hs, cs = {}, {}
+    for k, v in pairs(held) do hs[#hs + 1] = k .. "=" .. v end
+    for k, v in pairs(cols) do cs[#cs + 1] = k .. "=" .. v end
+    table.sort(hs)
+    table.sort(cs)
+    helpers.write_file("bpgen/gridmall.txt", "status held " .. table.concat(hs, " ") .. "\nstatus gears " ..
+      table.concat(cs, " ") .. "\n", true)
+    local st = {}
+    for k, v in pairs(stuck) do st[#st + 1] = k .. "=" .. v end
+    table.sort(st)
+    helpers.write_file("bpgen/gridmall.txt", "status stuck " .. #st .. " " .. table.concat(st, " ", 1, math.min(#st, 40)) .. "\n", true)
     local got = {}
     for _, c in pairs(s.find_entities_filtered({ type = "container" })) do
       for _, it in pairs(c.get_inventory(defines.inventory.chest).get_contents()) do
@@ -115,6 +187,16 @@ script.on_event(defines.events.on_tick, function(e)
         out[#out + 1] = "status probe " .. en.name .. " @" .. en.position.x .. "," .. en.position.y .. " " .. what
       end
     end
+    local carried = {}  -- (what all the belts hold: a loop mall's mix)
+    for _, b in pairs(s.find_entities_filtered({ type = "transport-belt" })) do
+      for l = 1, 2 do
+        for _, it in pairs(b.get_transport_line(l).get_contents()) do carried[it.name] = (carried[it.name] or 0) + it.count end
+      end
+    end
+    local cs = {}
+    for k, v in pairs(carried) do cs[#cs + 1] = k .. "=" .. v end
+    table.sort(cs)
+    out[#out + 1] = "status on belts " .. table.concat(cs, " ")
     local onbelts = 0
     for _, f in ipairs(feeds) do if f.belt and f.belt.valid then onbelts = onbelts + f.belt.get_transport_line(1).get_item_count() + f.belt.get_transport_line(2).get_item_count() end end
     out[#out + 1] = "status feeds " .. #feeds .. " items at their heads " .. onbelts
@@ -125,10 +207,12 @@ end)
 
 
 def main():
-    s = Service("vanilla")
+    s = Service("pack" if PACK else "vanilla")
     planner.configure(s.data)
-    prods = base.mall_products(s.data, "assembling-machine-2")
-    o = s.plan({"mode": "mall", "layout": "grid", "products": prods, "machine": "assembling-machine-2",
+    prods = PACK_MALL if PACK else base.mall_products(s.data, "assembling-machine-2")
+    if SUSHI and not PACK:
+        prods = prods + ["express-transport-belt", "concrete"]
+    o = s.plan({"mode": "mall", "layout": "sushi" if SUSHI else "grid", "products": prods, "machine": "assembling-machine-2",
                 "belt": "transport-belt", "chest_limit": 1})
     print("\n".join(o["summary"]["notes"]))
     ents = o["entities"]
@@ -136,21 +220,43 @@ def main():
     xs = [e["position"]["x"] for e in ents]
     ys = [e["position"]["y"] for e in ents]
     box = [int(min(xs)) - 30, int(min(ys)) - 30, int(max(xs)) + 30, int(max(ys)) + 30]
-    products = [base._only_result(s.data, r) if hasattr(base, "_only_result") else r for r in o["summary"]["products"]]
+    from bpgen.mall_grid import _result
+    products = [_result(s.data, r) or r for r in o["summary"]["products"]]
     ticks = int(MINUTES * 3600)
-    limited = sum(1 for e in ents if e.get("circuit_to"))
+    limited = sum(1 for e in ents if e.get("circuit_to") and "inserter" in e["name"])
     spec = {"bp": bp, "at": [x0 + w / 2, y0 + h / 2], "sources": o["sources"], "products": products, "box": box, "ticks": ticks,
             "probe": [float(a) for a in sys.argv[2].split(",")] if len(sys.argv) > 2 else None}
-    mods = RUN / "gridmall-mods"
+    mods = RUN / ("gridmall-pack-mods" if PACK else "gridmall-mods")
     shutil.rmtree(mods, ignore_errors=True)
+    enabled = ["base"]
+    if PACK:  # (your enabled mods, linked: nothing copied, nothing of yours changed)
+        mine = PATHS["user_mods"]
+        mods.mkdir(parents=True)
+        listed = json.loads((mine / "mod-list.json").read_text(encoding="utf-8"))["mods"]
+        enabled = []
+        for m in listed:
+            n = m["name"]
+            if not m.get("enabled") or n == "zzz-bpgen" or n.startswith("fse"):
+                continue
+            enabled.append(n)
+            if n in ("base", "elevated-rails", "quality", "space-age", "core"):
+                continue
+            pat = re.compile(rf"^{re.escape(n)}_(\d+)\.(\d+)\.(\d+)\.zip$")
+            found = sorted((f for f in mine.iterdir() if pat.match(f.name)),
+                           key=lambda f: tuple(int(v) for v in pat.match(f.name).groups()))
+            found += [mine / n] if (mine / n).is_dir() else []
+            if found:
+                (mods / found[-1].name).symlink_to(found[-1], target_is_directory=found[-1].is_dir())
+        if (mine / "mod-settings.dat").exists():
+            shutil.copy(mine / "mod-settings.dat", mods / "mod-settings.dat")
     mod = mods / "gridmall-test"
     mod.mkdir(parents=True)
     (mod / "info.json").write_text(json.dumps({"name": "gridmall-test", "version": "0.0.1", "title": "t",
                                                "author": "mtopfox", "factorio_version": "2.0", "dependencies": ["base"]}))
     (mod / "control.lua").write_text(CONTROL, encoding="utf-8")
     (mod / "spec.lua").write_text("return " + harness.to_lua(spec), encoding="utf-8")
-    (mods / "mod-list.json").write_text(json.dumps({"mods": [{"name": "base", "enabled": True},
-                                                             {"name": "gridmall-test", "enabled": True}]}))
+    (mods / "mod-list.json").write_text(json.dumps({"mods": [{"name": n, "enabled": True}
+                                                             for n in enabled + ["gridmall-test"]]}))
     OUT.unlink(missing_ok=True)
     save = RUN / "gridmall.zip"
     save.unlink(missing_ok=True)
