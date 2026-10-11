@@ -27,17 +27,22 @@ except ImportError:
     _fast = None
 
 
-def route(blocked, starts, goal_tile, goal_dir, bounds, max_underground, underground_spans=None, forbidden_gaps=None):
+def route(blocked, starts, goal_tile, goal_dir, bounds, max_underground, underground_spans=None, forbidden_gaps=None,
+          max_expansions=None):
+    """max_expansions: give up after searching this many (default MAX_EXPANSIONS; a goal it can't reach costs all
+    of them, about 4 us each)"""
     if _fast is not None:
         try:
             return _fast.route(blocked, [(t, list(d) if d else None) for t, d in starts], goal_tile, goal_dir, bounds,
-                               max_underground, underground_spans, forbidden_gaps, MAX_EXPANSIONS)
+                               max_underground, underground_spans, forbidden_gaps, max_expansions or MAX_EXPANSIONS)
         except LookupError as e:
             raise RouteError(str(e)) from None
-    return route_py(blocked, starts, goal_tile, goal_dir, bounds, max_underground, underground_spans, forbidden_gaps)
+    return route_py(blocked, starts, goal_tile, goal_dir, bounds, max_underground, underground_spans, forbidden_gaps,
+                    max_expansions)
 
 
-def route_py(blocked, starts, goal_tile, goal_dir, bounds, max_underground, underground_spans=None, forbidden_gaps=None):
+def route_py(blocked, starts, goal_tile, goal_dir, bounds, max_underground, underground_spans=None, forbidden_gaps=None,
+             max_expansions=None):
     """blocked: set of tiles nothing may occupy; starts: [(tile, allowed first directions or None)].
     Returns [(tile, kind, direction)] with kind 'belt' | 'ug-in' | 'ug-out'.
     underground_spans: set of (axis, fixed, tile-along) already used by other undergrounds (updated in place)."""
@@ -69,8 +74,9 @@ def route_py(blocked, starts, goal_tile, goal_dir, bounds, max_underground, unde
         # (a route that can't be found would search every state of a big area, each looking back along its path:
         # minutes. Past this budget it's given up like any route that isn't there.)
         expanded += 1
-        if expanded > MAX_EXPANSIONS:
-            raise RouteError(f"no belt route found to {goal_tile} (gave up after {MAX_EXPANSIONS} steps)")
+        if expanded > (max_expansions or MAX_EXPANSIONS):
+            raise RouteError(f"no belt route found to {goal_tile} (gave up after {max_expansions or MAX_EXPANSIONS} "
+                             "steps)")
         if g > best.get(state, 1e18):
             continue
         tile, d, kind = state

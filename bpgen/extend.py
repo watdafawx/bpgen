@@ -206,12 +206,26 @@ def tap_candidates(ground, want):
 # a tap gives up after this many routes in a row that don't get there: when one can, the first few do (a goal no tap
 # reaches - walled in, or too far - fails every one of hundreds of candidates, half a second each)
 MAX_FAILS = 16
+# and searches at most this far for each (a tap's route that gets there takes a few thousand)
+TAP_EXPANSIONS = 25_000
 
 
 def tap(ground, blocked, spans, want, goal_tile, goal_dir, names, prefer=None, rate=0):
     """a splitter on an existing belt carrying `want` (set of items), and a routed belt from its free side to the
     goal ("enter goal_tile moving goal_dir"); prefer: (main bus, side of it the build is on) to branch off the bus
     first (bus_tap), then tap any belt, the bus's first. -> (new entities, tapped belt) or None"""
+    # (a tap that failed with fewer tiles taken fails again: feed's merge variants ask for the same goals)
+    key = (goal_tile, goal_dir, frozenset(want))
+    failed = ground.__dict__.setdefault("no_tap", {}).setdefault(key, [])
+    if any(b <= blocked and t <= ground.tapped and sp <= spans for b, t, sp in failed):
+        return None
+    got = _tap(ground, blocked, spans, want, goal_tile, goal_dir, names, prefer, rate)
+    if not got:
+        failed.append((frozenset(blocked), frozenset(ground.tapped), frozenset(spans)))
+    return got
+
+
+def _tap(ground, blocked, spans, want, goal_tile, goal_dir, names, prefer=None, rate=0):
     if prefer:
         got = bus_tap(ground, blocked, spans, prefer, want, goal_tile, goal_dir, names, rate)
         if got:
@@ -238,7 +252,7 @@ def tap(ground, blocked, spans, want, goal_tile, goal_dir, names, prefer=None, r
             try:
                 # (the splitter's own tiles too: a route under them would put an underground on its half)
                 path = router.route(blocked | {t, s_tile}, [(start, [d])], goal_tile, goal_dir, ground.bounds,
-                                    max_ug, underground_spans=set(spans))
+                                    max_ug, underground_spans=set(spans), max_expansions=TAP_EXPANSIONS)
             except router.RouteError:
                 fails += 1
                 continue
@@ -303,7 +317,7 @@ def bus_tap(ground, blocked, spans, bus_side, want, goal, goal_dir, names, rate=
         try:
             path = router.route(blocked | {bus_xy(main, a, ln["at"]), spare} | {bus_xy(main, r, c) for c in row},
                                 [(end, [sd] if row else [d, sd])], goal, goal_dir, ground.bounds,
-                                max_ug, underground_spans=set(spans))
+                                max_ug, underground_spans=set(spans), max_expansions=TAP_EXPANSIONS)
         except router.RouteError:
             fails += 1
             continue
