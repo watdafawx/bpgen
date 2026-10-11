@@ -18,8 +18,9 @@ no oxide crusher, and the collectors only take metallic and carbonic chunks.
 What goes into the hub runs only while the hub holds less than its share (wired to the hub when built: the mod reads
 the "bpgen_hub" tag), so no item crowds out the others; the collectors take only the chunks the hub is short of (a
 decider reading the hub sets their filters). Fuel and oxidizer run in pipes to the thrusters at the back (fuel into
-each one's left side, oxidizer into its right; their headers cross with pipes-to-ground). Solar panels
-behind, enough for the machines at the orbit's sunlight; foundation under all of it.
+each one's left side, oxidizer into its right; their headers cross with pipes-to-ground). Each thruster's way in has
+a pump a clock opens one tick in so many: they burn what the fuel plant makes, never running dry. Solar panels behind,
+enough for the machines at the orbit's sunlight; foundation under all of it.
 """
 import math
 
@@ -75,7 +76,7 @@ def _usage_w(proto):
 
 
 def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-inserter", belt="transport-belt",
-              foundation=None, collectors=4):
+              foundation=None, collectors=4, throttle=None):
     """-> dict(entities (world positions round the hub at 0,0), tiles (foundation), notes, power)"""
     raw = data.raw
     need = {"asteroid-collector": "asteroid-collector", "thruster": "thruster", "electric-furnace": "furnace",
@@ -144,7 +145,7 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
     # chunk that never comes this way (promethium) keeps the filter from going empty, which would take everything
     want = [{"index": i + 1, "name": c, "quality": "normal", "comparator": "=", "count": -HUB_CAPS["chunk"]}
             for i, c in enumerate(chunks)]
-    if "promethium-asteroid-chunk" in raw.get("asteroid-chunk", {}) or "promethium-asteroid-chunk" in raw.get("item", {}):
+    if any("promethium-asteroid-chunk" in raw.get(t, {}) for t in ("asteroid-chunk", "item")):
         want.append({"index": len(want) + 1, "name": "promethium-asteroid-chunk", "quality": "normal",
                      "comparator": "=", "count": -1})
     put("constant-combinator", 0.5, -6.5, wire_id="chunk_want",
@@ -199,7 +200,7 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
     ins(-5, 3, WEST, "carbon", HUB_CAPS["carbon"])
     # thrusters at the back: fuel header (row fy) into each one's left, oxidizer header (row oy) into its right
     sh = 4 if gas else 0  # (below the condensers)
-    oy, fy, ty = 10 + sh, 12 + sh, 16 + sh
+    oy, fy, ty = 10 + sh, 12 + sh, 17 + sh
     fx = -7 if gas else -5  # (the fuel's way down: clear of the condensers' west pipes)
     cxs = [-2 + PITCH * i for i in range(thrusters)]
     for cx in cxs:
@@ -209,7 +210,7 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
         # (-5, -2), down the hub's edge, west above the carbonic crusher, down)
         pipes |= {(-4, 4), (-5, 4), (-6, 4)} | {(fx, y) for y in range(4, fy + 1)}
         pipes |= {(-5, y) for y in range(-2, 2)} | {(x, 1) for x in range(-9, -5)} | {(-9, y) for y in range(1, oy + 1)}
-    else:  # (fuel: down from the fuel plant's outputs at (-5, 5), (-5, 7); oxidizer: out of its plant's top, west, down)
+    else:  # (fuel: down from its plant's outputs at (-5, 5), (-5, 7); oxidizer: out of its plant's top, west, down)
         pipes |= {(fx, y) for y in range(5, fy + 1)}
         pipes |= {(x, -5) for x in range(-8, -5)} | {(-9, y) for y in range(-5, oy + 1)}
     ugs = []  # (x, y, direction of its plain side)
@@ -230,6 +231,44 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
             pipes.add((x, oy))
     pipes.add((fx, oy))  # (the fuel column itself)
     ugs += [(fx - 1, oy, WEST), (fx + 1, oy, EAST)]
+    # throttle: a pump on each thruster's fuel and oxidizer way in (the two rows above its last pipe), all let through
+    # one tick in every `period` by a clock, so each thruster burns at most what they pass: at throttle 0 its least
+    # (full efficiency), at 1 its most (half of it). None: what the one fuel plant makes, shared (where the plant
+    # makes less, short of its inputs, the thrusters run emptier, and so more efficiently, anyway)
+    pump = raw.get("pump", {}).get("pump")
+    period = None
+    if pump:
+        perf = raw["thruster"]["thruster"]
+        lo = (perf.get("min_performance") or {}).get("fluid_usage", 0.1)
+        hi = (perf.get("max_performance") or {}).get("fluid_usage", 2)
+        if throttle is None:
+            r = raw["recipe"][fuel]
+            made = sum(x.get("amount", 0) for x in r.get("results") or [] if x.get("name") == "thruster-fuel")
+            speed = (raw["assembling-machine"].get("chemical-plant") or {}).get("crafting_speed", 1)
+            throttle = (made / (r.get("energy_required") or 0.5) * speed / 60 / thrusters - lo) / (hi - lo)
+        throttle = max(0.0, min(1.0, throttle))
+        use = lo + throttle * (hi - lo)  # (a tick, each fluid, each thruster)
+        period = max(2, round((pump.get("pumping_speed") or 20) / use))
+        pumps = sorted([cx + 2 for cx in cxs] + [cx - 3 for cx in cxs], reverse=True)  # (east to west: the
+        # clock's wire runs along them)
+        for k, x in enumerate(pumps):
+            pipes -= {(x, ty - 4), (x, ty - 3)}
+            put("pump", x + 0.5, ty - 3, SOUTH, wire_id=f"pump{k}",
+                wires_to=[(f"pump{k + 1}", 2, 2)] if k + 1 < len(pumps) else [],
+                control_behavior={"circuit_enabled": True, "circuit_condition": {
+                    "first_signal": {"type": "virtual", "name": "signal-T"}, "constant": 1, "comparator": "="}})
+        # the clock: T counts 1..period (a constant 1 plus the decider's own output, fed back)
+        clock_x = cxs[-1] + 3
+        put("constant-combinator", clock_x + 1.5, ty - 3.5, wire_id="clock_one",
+            bp_extra={"control_behavior": {"sections": {"sections": [{"index": 1, "filters": [
+                {"index": 1, "type": "virtual", "name": "signal-T", "quality": "normal", "comparator": "=",
+                 "count": 1}]}]}}})
+        t = {"type": "virtual", "name": "signal-T"}
+        put("decider-combinator", clock_x + 0.5, ty - 3, NORTH, wire_id="clock",
+            wires_to=[("clock_one", 2, 2), ("clock", 4, 2), ("pump0", 4, 2)],
+            bp_extra={"control_behavior": {"decider_conditions": {
+                "conditions": [{"first_signal": t, "constant": period, "comparator": "<"}],
+                "outputs": [{"signal": t, "copy_count_from_input": True}]}}})
     for x, y in sorted(pipes):
         put(PIPE, x + 0.5, y + 0.5)
     for x, y, d in ugs:
@@ -265,7 +304,8 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
         put("solar-panel", x + 1.5, y + 1.5)
     # poles: on free tiles of a grid, wherever something powered is out of reach
     taken = set()
-    sizes = {"asteroid-collector": (3, 3), "crusher": (2, 3), "chemical-plant": (3, 3), "electric-furnace": (3, 3),
+    sizes = {"pump": (1, 2),
+             "asteroid-collector": (3, 3), "crusher": (2, 3), "chemical-plant": (3, 3), "electric-furnace": (3, 3),
              "assembling-machine-2": (3, 3), "thruster": (4, 5), "gun-turret": (2, 2), "solar-panel": (3, 3),
              "decider-combinator": (1, 2)}
     if gas:
@@ -354,6 +394,8 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
              f"({draw / 1e6:.1f} MW at "
              f"{sun:.0%} sunlight in {location}'s orbit), {len(tiles)} foundation tiles",
              "paste it centred on the hub: everything feeding the hub is wired to it as it's built"]
+    if period:
+        notes.append(f"thrusters throttled to {throttle:.0%}: their pumps let fluid through one tick in {period}")
     if gas:
         notes.append(f"fuel from {gas['fuel'][1]}, oxidizer from {gas['oxidizer'][1]} ({gas['fuel'][0]}s): no ice")
     if uncovered:

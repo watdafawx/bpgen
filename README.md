@@ -47,16 +47,19 @@ places the same (no desyncs). The window's mouse-dragged preview works with its 
   builds it there, marks the old one for removal and runs its belts in and out to your bus again.
 - **Refit as a base on a bus**: the refit tool's **Refit as** choice rebuilds the area for the science it makes (its
   labs and what feeds them) as a main-bus base in its place, plates taken off your bus.
-- **Ship** (Space Age, in game: Ship tab): an inner-planet shuttle round a space platform's hub, self-sufficient.
-  Four asteroid collectors in a row out front (a belt brings their chunks to the hub), crushers, ice melted for
-  thruster fuel and oxidizer, iron into gun-turret ammo, solar panels for the orbit's sunlight, foundation under it all; the hub is the store, and what goes
-  into it runs only while it holds little of that item (bpgen's mod wires those inserters to the hub as they're
-  built), and the collectors only take the chunks the hub is short of (a decider reading the hub sets their
-  filters, so one kind can't fill them and starve the others). Pick thrusters, turrets and the orbit; stand on the
-  platform and Place it. In a game: fuel and oxidizer full within 10 minutes in Nauvis orbit, turrets stocked, and it flies (`harness\ship_run.py`). With Krastorio 2 (fuel
-  from hydrogen, oxidizer from oxygen) atmospheric condensers stand in for the melters: two for hydrogen under the
-  fuel plant, one for oxygen above the oxidizer plant, no ice and no oxide crusher, the collectors set to metallic and
-  carbonic chunks only (`harness\ship_run.py 10 2 --pack`: full tanks, flies).
+- **Ship** (Space Age, in game: Ship tab): an inner-planet shuttle round a space platform's hub, self-sufficient. Four
+  asteroid collectors in a row out front (a belt brings their chunks to the hub), crushers, ice melted for thruster
+  fuel and oxidizer, iron into gun-turret ammo, solar panels for the orbit's sunlight, foundation under it all. The
+  hub is the store: what goes into it runs only while it holds little of that item (bpgen's mod wires those inserters
+  to the hub as they're built), and the collectors only take the chunks the hub is short of (a decider reading the hub
+  sets their filters, so one kind can't fill them and starve the others). The thrusters are throttled to what the fuel
+  plant makes (a pump on each one's way in, opened one tick in so many by a clock), so they never run dry, and run
+  emptier, so more efficiently, when supply is short. Pick thrusters, turrets and the orbit; stand on the platform and
+  Place it. With Krastorio 2 (fuel from hydrogen, oxidizer from oxygen) atmospheric condensers stand in for the
+  melters: two for hydrogen under the fuel plant, one for oxygen west of the oxidizer plant; no ice, no oxide crusher,
+  and the collectors leave oxide chunks be. In a game (`harness\ship_run.py`, `--pack` with your own mods): fuel and
+  oxidizer full within 10 minutes in Nauvis orbit, turrets stocked, and it keeps flying (0.3 vanilla, where ice is
+  scarce; 0.67 with Krastorio).
 - **Starter bases**: science per minute up to labs, with a mall. Laid out compact (blocks in columns, belts routed
   between them) or as a **main bus**: one column of blocks beside a bus of belts, each block taking what it needs and
   putting back what it makes, the mall taking from the same bus.

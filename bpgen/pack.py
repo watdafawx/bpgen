@@ -92,7 +92,8 @@ KEEP = ["recipe", "assembling-machine", "furnace", "rocket-silo", "inserter", "t
         "mining-drill",
         # space platforms (the ship generator): what a ship is built of, and the asteroids it collects
         "thruster", "asteroid-collector", "space-platform-hub", "cargo-bay", "ammo-turret", "electric-turret",
-        "solar-panel", "accumulator", "asteroid-chunk", "space-location", "space-connection"]
+        "solar-panel", "accumulator", "asteroid-chunk", "space-location", "space-connection", "pump",
+        "decider-combinator"]
 # icon paths are kept (tiny) for the web preview
 DROP_KEYS = {"graphics_set", "animation", "picture", "pictures", "working_sound", "sprites",
              "structure", "belt_animation_set", "hand_base_picture", "hand_closed_picture", "hand_open_picture",
@@ -120,7 +121,7 @@ def trim():
                        "splitter", "loader", "loader-1x1", "electric-pole", "beacon", "pipe", "pipe-to-ground",
                        "container", "logistic-container", "roboport", "constant-combinator", "lab", "thruster",
                        "asteroid-collector", "space-platform-hub", "cargo-bay", "ammo-turret", "electric-turret",
-                       "solar-panel", "accumulator")
+                       "solar-panel", "accumulator", "pump", "decider-combinator")
         # hidden entities are script helpers (e.g. thousands of crafting entities from the "Fixed" mods)
         small[t] = {n: clean(p) for n, p in raw.get(t, {}).items() if not (entity and p.get("hidden"))}
     # tiles: only which fluid they give (water from an offshore pump is raw too)

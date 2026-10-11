@@ -24,7 +24,7 @@ REQUEST = PATHS["script_output"] / "bpgen" / "request.json"
 SAVE_STATE = PATHS["script_output"] / "bpgen" / "state.json"  # the mod: research and production of the save
 SNAPSHOT = PATHS["script_output"] / "bpgen" / "snapshot.json"  # the mod: an area of the base
 VANILLA_MODS = ("base", "core", "space-age", "quality", "elevated-rails")
-ENTITY_TYPES = ["assembling-machine", "furnace", "beacon", "constant-combinator", "decider-combinator", "arithmetic-combinator", "underground-belt", "splitter", "container", "inserter", "transport-belt", "electric-pole", "pipe", "pipe-to-ground", "logistic-container", "roboport", "lab", "mining-drill", "asteroid-collector", "thruster", "ammo-turret", "electric-turret", "solar-panel", "accumulator", "cargo-bay"]
+ENTITY_TYPES = ["assembling-machine", "furnace", "beacon", "constant-combinator", "decider-combinator", "pump", "arithmetic-combinator", "underground-belt", "splitter", "container", "inserter", "transport-belt", "electric-pole", "pipe", "pipe-to-ground", "logistic-container", "roboport", "lab", "mining-drill", "asteroid-collector", "thruster", "ammo-turret", "electric-turret", "solar-panel", "accumulator", "cargo-bay"]
 # (sizes of what the bus design places when bpgen's copy of the mods' data has no mining drills yet)
 KNOWN_SIZES = {"electric-mining-drill": ("mining-drill", 3), "pumpjack": ("mining-drill", 3),
                "burner-mining-drill": ("mining-drill", 2)}
