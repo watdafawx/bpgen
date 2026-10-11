@@ -611,6 +611,7 @@ def warmup_ticks(data, p: Plan):
 POLE_COPPER = 5  # defines.wire_connector_id.pole_copper
 CIRCUIT_RED = 1  # defines.wire_connector_id.circuit_red
 POLE_REACH = 9
+WIRE_REACH = {POLE: POLE_REACH, "small-electric-pole": 7.5, "substation": 18, "big-electric-pole": 32}  # (vanilla)
 PIPE_UG_MAX = 10  # tiles a pipe-to-ground pair may span
 
 
@@ -645,10 +646,11 @@ def pole_wires(entities):
     Poles built from a blueprint only get the wires the blueprint lists (unlike hand/script placement,
     which auto-connects), so without these most of the line has no power.
     """
-    poles = [(i, e["position"]["x"], e["position"]["y"]) for i, e in enumerate(entities, 1) if e["name"] == POLE]
-    edges = sorted(((x1 - x2) ** 2 + (y1 - y2) ** 2, i, j) for n, (i, x1, y1) in enumerate(poles)
-                   for (j, x2, y2) in poles[n + 1:] if (x1 - x2) ** 2 + (y1 - y2) ** 2 <= POLE_REACH ** 2)
-    parent = {i: i for i, _, _ in poles}
+    poles = [(i, e["position"]["x"], e["position"]["y"], WIRE_REACH[e["name"]]) for i, e in enumerate(entities, 1)
+             if e["name"] in WIRE_REACH]
+    edges = sorted(((x1 - x2) ** 2 + (y1 - y2) ** 2, i, j) for n, (i, x1, y1, r1) in enumerate(poles)
+                   for (j, x2, y2, r2) in poles[n + 1:] if (x1 - x2) ** 2 + (y1 - y2) ** 2 <= min(r1, r2) ** 2)
+    parent = {i: i for i, _, _, _ in poles}
 
     def find(i):
         while parent[i] != i:
@@ -674,7 +676,7 @@ def insert_plans(modules, inventory):
     return plans
 
 
-def blueprint_string(entities, label, game_version=(2, 0, 77), description=None):
+def blueprint_string(entities, label, game_version=(2, 0, 77), description=None, tiles=None):
     bp_entities = []
     for i, e in enumerate(entities, 1):
         be = {"entity_number": i, "name": e["name"], "position": e["position"]}
@@ -690,21 +692,28 @@ def blueprint_string(entities, label, game_version=(2, 0, 77), description=None)
             be["type"] = e["ug_type"]  # underground belt entrance/exit
         # label combinators, chest limits, splitter filters
         for key in ("control_behavior", "player_description", "bar", "filter", "output_priority", "input_priority",
-                    "request_filters"):  # requester chests
+                    "request_filters",  # requester chests
+                    "use_filters", "filters", "tags"):  # (inserter filters; tags a mod reads when it's built)
             if e.get(key):
                 be[key] = e[key]
+        be.update(e.get("bp_extra") or {})  # (an entity moved as it was: its own blueprint fields, as the game wrote them)
         bp_entities.append(be)
     # circuit wires (red): an entity's "circuit_to" names others by their "wire_id" (a mall's chest and the inserters
     # that only run while it's short)
     number = {e["wire_id"]: i for i, e in enumerate(entities, 1) if e.get("wire_id") is not None}
     circuit = [[i, CIRCUIT_RED, number[w], CIRCUIT_RED] for i, e in enumerate(entities, 1)
                for w in e.get("circuit_to") or [] if w in number]
+    # (any wire, between connectors: [other's wire_id, this one's connector, the other's] - a moved section's own)
+    circuit += [[i, a, number[w], b] for i, e in enumerate(entities, 1) for w, a, b in e.get("wires_to") or []
+                if w in number]
     major, minor, patch = game_version
     bp = {"blueprint": {"item": "blueprint", "label": label, "entities": bp_entities,
                         "wires": pole_wires(entities) + circuit,
                         "version": (major << 48) | (minor << 32) | (patch << 16)}}
     if description:
         bp["blueprint"]["description"] = description
+    if tiles:  # ({"name", "position": {x, y}}: a space platform's foundation)
+        bp["blueprint"]["tiles"] = tiles
     raw = json.dumps(bp, separators=(",", ":")).encode()
     return "0" + base64.b64encode(zlib.compress(raw, 9)).decode()
 

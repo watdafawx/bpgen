@@ -188,15 +188,15 @@ VEC_DIR = {v: d for d, v in DIR.items()}
 
 
 def tap_candidates(ground, want):
-    """(tile, direction, belt entity, score) for straight belts carrying only items in `want` (a set); lower score
-    is better: carries everything wanted, then on both lanes"""
+    """(tile, direction, belt entity, score) for straight belts carrying exactly `want` (a set: a belt with only part
+    of it would leave the rest out, one with more would clog the new build); lower score is better: on both lanes"""
     out = []
     for e in ground.snap["entities"]:
         if e["type"] != "transport-belt" or e.get("ghost"):
             continue
         lanes = [i for i in (e.get("lanes") or []) if i]
         have = set(lanes)
-        if not have or not have <= want:  # anything else on it would clog the new build
+        if have != want:
             continue
         t = (math.floor(e["position"]["x"]), math.floor(e["position"]["y"]))
         out.append((t, e.get("direction", 0), e, (have != want, -len(lanes))))
@@ -213,6 +213,7 @@ def tap(ground, blocked, spans, want, goal_tile, goal_dir, names, prefer=None, r
             return got
         prefer = prefer[0]["tiles"]
     belt_name, ug_name, splitter_name, max_ug = names
+    end = (goal_tile[0] - DIR[goal_dir][0], goal_tile[1] - DIR[goal_dir][1])
     cands = tap_candidates(ground, want)
     cands.sort(key=lambda c: (bool(prefer) and c[0] not in prefer, c[3],
                               abs(c[0][0] - goal_tile[0]) + abs(c[0][1] - goal_tile[1])))
@@ -224,11 +225,12 @@ def tap(ground, blocked, spans, want, goal_tile, goal_dir, names, prefer=None, r
         for side in (-1, 1):  # the splitter's second half on the left or right of the belt
             s_tile = (t[0] - dy * side, t[1] + dx * side)
             start = (s_tile[0] + dx, s_tile[1] + dy)
-            if s_tile in blocked or start in blocked:
+            if s_tile in blocked or start in blocked or s_tile == end:  # (not on the tile its route must end on)
                 continue
             try:
-                path = router.route(blocked, [(start, [d])], goal_tile, goal_dir, ground.bounds, max_ug,
-                                    underground_spans=set(spans))
+                # (the splitter's own tiles too: a route under them would put an underground on its half)
+                path = router.route(blocked | {t, s_tile}, [(start, [d])], goal_tile, goal_dir, ground.bounds,
+                                    max_ug, underground_spans=set(spans))
             except router.RouteError:
                 continue
             cx = (t[0] + s_tile[0]) / 2 + 0.5
@@ -269,7 +271,7 @@ def bus_tap(ground, blocked, spans, bus_side, want, goal, goal_dir, names, rate=
 
     cands = [(ln["items"] != want, load.get(ln["at"], 0) + ln.get("used", 0) + rate > ln.get("cap", math.inf) + 1e-9,
               load.get(ln["at"], 0) + ln.get("used", 0), abs(a + f - goal_a), a, ln)
-             for ln in lanes if ln["items"] and ln["items"] <= want for a in range(ln["lo"] + 1, ln["hi"] - 1)]
+             for ln in lanes if ln["items"] == want for a in range(ln["lo"] + 1, ln["hi"] - 1)]
     cands.sort(key=lambda c: c[:5])
     for *_, a, ln in cands[:300]:
         lb, lug, lspl, _ = ln.get("names") or names  # (on the bus: the lane's own tier; routed on: the plan's)
@@ -280,14 +282,15 @@ def bus_tap(ground, blocked, spans, bus_side, want, goal, goal_dir, names, rate=
         spare = bus_xy(main, a, ln["at"] + side)
         tight = ln["at"] + side in cross  # a lane right beside it: that one dives a row early, under the spare half
         dive = {c: a - f if tight and c == ln["at"] + side else a for c in cross}  # where each crossed lane dives
-        if not (plain(a, ln["at"]) and plain(r, ln["at"])) or (spare in blocked and not tight) or end in blocked:
+        if not (plain(a, ln["at"]) and plain(r, ln["at"])) or (spare in blocked and not tight) or end in blocked                 or spare == (goal[0] - DIR[goal_dir][0], goal[1] - DIR[goal_dir][1]):  # (not on its route's end)
             continue
         if not all(plain(aa, c) for c in cross for aa in range(dive[c], r + 2 * f, f)):
             continue
         if any(bus_xy(main, r, c) in blocked for c in row if c not in cross):
             continue
         try:
-            path = router.route(blocked, [(end, [sd] if row else [d, sd])], goal, goal_dir, ground.bounds,
+            path = router.route(blocked | {bus_xy(main, a, ln["at"]), spare} | {bus_xy(main, r, c) for c in row},
+                                [(end, [sd] if row else [d, sd])], goal, goal_dir, ground.bounds,
                                 max_ug, underground_spans=set(spans))
         except router.RouteError:
             continue
@@ -334,21 +337,39 @@ def feed(ground, blocked, spans, lanes, goal, goal_dir, names, prefer=None, rate
     if len(want) < 2:
         return [], [], f"{' + '.join(want)}: no belt carrying only that could be reached"
     gx, gy = DIR[goal_dir]
-    p = (goal[0] - gx, goal[1] - gy)  # the belt feeding the input; the two items come in from its sides
     left = (gy, -gx)
-    if p in blocked:
-        return [], [], f"{' + '.join(sorted(want))}: no room to merge them in front of the input"
-    blocked.add(p)
-    ents = [{"name": names[0], "position": {"x": p[0] + 0.5, "y": p[1] + 0.5}, "direction": goal_dir}]
-    taps = []
-    for item, side in ((lanes[0], left), (lanes[1], (-left[0], -left[1]))):
-        into = VEC_DIR[(-side[0], -side[1])]  # moving from that side onto the belt: fills that side's lane
-        got = tap(ground, blocked, spans, {item}, p, into, names, prefer, rates.get(item, 0))
-        if not got:
-            return ents, taps, f"{item}: no belt carrying only that could be reached"
-        ents += got[0]
-        taps.append((item, got[1]))
-    return ents, taps, None
+    # a short straight belt into the input (one to three tiles), both items side-loading onto its first tile from
+    # either side (a T: each fills its side's lane; one side alone would make it a curve, the item on both lanes),
+    # nearest first, both orders (the first route may cut off the second's way in)
+    chain = [(goal[0] - gx * n, goal[1] - gy * n) for n in (1, 2, 3)]
+    sides = ((lanes[0], left), (lanes[1], (-left[0], -left[1])))
+    tries = [(k, k) for k in range(3)]
+    problem = f"{' + '.join(sorted(want))}: no room to merge them in front of the input"
+    for i, j in tries:
+        used = chain[:max(i, j) + 1]
+        if any(t in blocked for t in used):
+            continue
+        for order in ((0, i), (1, j)), ((1, j), (0, i)):
+            trial, tapped = set(blocked) | set(used), set(ground.tapped)
+            ents = [{"name": names[0], "position": {"x": t[0] + 0.5, "y": t[1] + 0.5}, "direction": goal_dir}
+                    for t in used]
+            taps, failed = [], None
+            for k, at in order:
+                item, side = sides[k]
+                into = VEC_DIR[(-side[0], -side[1])]
+                got = tap(ground, trial, spans, {item}, chain[at], into, names, prefer, rates.get(item, 0))
+                if not got:
+                    failed = f"{item}: no belt carrying only that could be reached"
+                    break
+                ents += got[0]
+                taps.append((item, got[1]))
+            if not failed:
+                blocked |= trial
+                return ents, taps, None
+            problem = failed
+            ground.tapped.clear()
+            ground.tapped.update(tapped)
+    return [], [], problem
 
 
 def link_power(ground, blocked, new_ents, pole, reach):
@@ -383,14 +404,18 @@ def link_power(ground, blocked, new_ents, pole, reach):
     return out
 
 
-def absolute_blueprint(entities, label, description=None):
-    """blueprint string that snaps to the world grid where these (world-coordinate) entities are"""
-    tiles = plan_tiles(entities)
+def absolute_blueprint(entities, label, description=None, floor=None):
+    """blueprint string that snaps to the world grid where these (world-coordinate) entities are; floor: tiles
+    ({"name", "position"}, world) it lays too (a space platform's foundation)"""
+    tiles = plan_tiles(entities) | {(t["position"]["x"], t["position"]["y"]) for t in floor or []}
     x0, y0 = min(t[0] for t in tiles), min(t[1] for t in tiles)
     w, h = max(t[0] for t in tiles) - x0 + 1, max(t[1] for t in tiles) - y0 + 1
     local = shifted(entities, -x0, -y0)
     s = planner.blueprint_string([{k: v for k, v in e.items() if k not in ("type", "w", "h", "fluid", "new")}
-                                  for e in local], label, description=description)
+                                  for e in local], label, description=description,
+                                 tiles=[{"name": t["name"], "position": {"x": t["position"]["x"] - x0,
+                                                                         "y": t["position"]["y"] - y0}}
+                                        for t in floor or []])
     from bpgen import base
     bp = base._decode(s)
     bp["blueprint"]["snap-to-grid"] = {"x": w, "y": h}
@@ -784,7 +809,8 @@ def path_entities(path, belt_name, ug_name):
 def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt="transport-belt", connect=True,
           sinks=None, bus="auto", needs=None, extend_bus=True):
     """bus: "auto" (build beside a main bus when the snapshot has one), "on" (the same, saying so when there is
-    none) or "off" (free ground nearest the seed, taps from any belt). needs: {item: items/s the build really takes}
+    none), "here" (at the seed - a refit, in the area it replaces - its inputs still taken off the bus's lanes) or
+    "off" (free ground nearest the seed, taps from any belt). needs: {item: items/s the build really takes}
     (a source's "rates" are what its belt is sized for, more than that): the sources' rates scaled to it, for the
     bus lanes' load. extend_bus: a bus that ends before the build's far edge (or its new lanes') gets its lanes
     continued that far, the ones ending in the open (BUS_PAST at most).
@@ -800,11 +826,13 @@ def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt=
         want = (-side, 0) if main["axis"] == 0 else (0, -side)  # (inputs toward the bus)
         k = next((n for n in range(4) if f and turned(f[0], f[1], n) == want), 0)
         plan_entities, sources, sinks = turn_plan(plan_entities, sources, sinks, k)
-        seed, keep_clear = bus_spot(main, plan_entities, side, seed)
+        if bus != "here":
+            seed, keep_clear = bus_spot(main, plan_entities, side, seed)
         np_ = sum(1 for ln in main["lanes"] if ln.get("pipe"))
         notes.append(f"main bus: {len(main['lanes']) - np_} lanes flowing {FLOW_NAME[main['dir']]}"
-                     + (f" and {np_} pipe{'s' if np_ > 1 else ''} beside them" if np_ else "") + "; built beside it on the "
-                     f"{FLOW_NAME[(main['axis'] + 4 + (0 if side > 0 else 8)) % 16]} side, taking from its lanes"
+                     + (f" and {np_} pipe{'s' if np_ > 1 else ''} beside them" if np_ else "")
+                     + ("; built where you asked, taking from its lanes" if bus == "here" else "; built beside it on the "
+                        f"{FLOW_NAME[(main['axis'] + 4 + (0 if side > 0 else 8)) % 16]} side, taking from its lanes")
                      + (f" (turned to face it)" if k else ""))
     elif bus == "on":
         notes.append("no main bus found in the snapshot (3+ long straight belts side by side, flowing the same way); "
@@ -891,6 +919,17 @@ def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt=
                 blocked.update(lane)
                 at += 2 * side
     if connect:
+        def front(s):  # (the input belt's tile, its direction, and the tile before it: where its route ends)
+            goal = (math.floor(s["position"]["x"] + dx), math.floor(s["position"]["y"] + dy))
+            goal_dir = (4 + 4 * turn) % 16
+            for e in new:
+                if footprint(e) == [goal] and e.get("direction") is not None:
+                    goal_dir = e.get("direction", 4)
+            return goal, goal_dir, (goal[0] - DIR[goal_dir][0], goal[1] - DIR[goal_dir][1])
+        # every input's route end kept clear of the others' routes (a route passing through it left that input
+        # nothing to end on: the next route then ended on top of it)
+        blocked |= {front(s)[2] for s in sources if s.get("kind") == "belt"}
+        routed = set()
         for s in sources:
             if s.get("kind") == "fluid":
                 if foreign is None:
@@ -908,16 +947,15 @@ def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt=
             if s.get("kind") != "belt":
                 continue
             lanes = list(s.get("lanes") or [None, None]) + [None, None]
-            goal = (math.floor(s["position"]["x"] + dx), math.floor(s["position"]["y"] + dy))
-            goal_dir = (4 + 4 * turn) % 16
-            for e in new:
-                if footprint(e) == [goal] and e.get("direction") is not None:
-                    goal_dir = e.get("direction", 4)
+            goal, goal_dir, end = front(s)
             # the tile before the input belt is the route's end; it must not be part of the plan
-            blocked.discard((goal[0] - DIR[goal_dir][0], goal[1] - DIR[goal_dir][1]))
+            if end not in routed:
+                blocked.discard(end)
             ents, got, problem = feed(ground, blocked, spans, lanes[:2], goal, goal_dir, names, prefer,
                                       {it: r * scale.get(it, 1) for it, r in (s.get("rates") or {}).items()})
             new += ents
+            routed.update(t for e in ents for t in footprint(e))
+            blocked.update(routed)
             for items, belt_e in got:
                 taps.append({"items": items, "from": belt_e["position"], "belts": len(ents)})
             if problem:

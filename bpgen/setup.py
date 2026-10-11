@@ -7,6 +7,7 @@ Headless runs use run/ as their own write-data folder, so they never touch your 
 import shutil
 import subprocess
 
+from bpgen import config
 from bpgen.config import PATHS
 from bpgen.harness import FACTORIO, ROOT, RUN
 
@@ -28,7 +29,7 @@ def main():
         out = RUN / "script-output" / "data-raw-dump.json"
         out.unlink(missing_ok=True)
         subprocess.run([str(FACTORIO), "--config", str(ini), "--mod-directory", str(ROOT / "mods" / "vanilla"),
-                        "--dump-data"], capture_output=True, timeout=900)
+                        "--dump-data"], capture_output=True, timeout=900, env=config.plain_env())
         if not out.exists():
             raise SystemExit("the dump failed: see run/factorio-current.log")
         shutil.move(out, dump)

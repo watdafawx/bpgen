@@ -280,10 +280,10 @@ end
 ---------------------------------------------------------------------------------------------------------------------
 -- the window
 
-local MODES = { "line", "mall", "base", "extend", "busdesign" }
+local MODES = { "line", "mall", "base", "extend", "busdesign", "ship" }
 -- (the tabs along the top: short, so all five fit a narrow window; the full name as their tooltip)
-local MODE_NAMES = { "Line", "Mall", "Base", "Extend", "Bus" }
-local MODE_TIPS = { "Production line", "Mall", "Starter base", "Extend my base", "Bus design" }
+local MODE_NAMES = { "Line", "Mall", "Base", "Extend", "Bus", "Ship" }
+local MODE_TIPS = { "Production line", "Mall", "Starter base", "Extend my base", "Bus design", "Space platform (Space Age)" }
 local BUS_DIRS = { "north", "east", "south", "west" }
 local patch_areas = safe.stored("patch_areas")  -- player index -> {{area, counts = {resource = tiles}}}: the ore patches picked for a bus design
 local bus_shift = safe.stored("bus_shift")  -- player index -> tiles the bus head is moved sideways from the player (the ◀ ▶ arrows)
@@ -313,6 +313,13 @@ local function field(parent, caption, tooltip)
   l.style.font = "default-small"
   l.style.font_color = { 0.7, 0.7, 0.7 }
   return f
+end
+
+--- the left panel's controls shrink to its width instead of being cut off at its edge (a drop-down is as wide as
+--- its longest item: flows and drop-downs may be squashed, the drop-down then shortens its caption)
+local function fit_panel(el)
+  if el.type == "flow" or el.type == "drop-down" then el.style.horizontally_squashable = true end
+  for _, c in pairs(el.children) do fit_panel(c) end
 end
 
 --- fields side by side
@@ -491,6 +498,7 @@ local function set_mode(frame, mode)
   find(frame, "bpgen_base_box").visible = mode == "base"
   find(frame, "bpgen_extend_box").visible = mode == "extend"
   find(frame, "bpgen_bus_box").visible = mode == "busdesign"
+  find(frame, "bpgen_ship_box").visible = mode == "ship"
 end
 
 --- the picked ore patches, listed under the button
@@ -624,6 +632,7 @@ function M.open(player, prefill)
     name = "bpgen_mall_machine", elem_filters = { { filter = "crafting-machine" } } })
   field(fs, "Chest").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_chest",
     elem_filters = { { filter = "type", type = { "container", "logistic-container" } } } })
+  fs = fields(sec)  -- (its own row: its longest item is wide)
   field(fs, "Fed by", "mixed belts: columns of machines between mixed belts, gears, cable, circuits... made at the top, only plates come in. My main bus: the same, the parts your bus carries taken from it, placed beside it. A belt loop: plate belts and one mixed loop carrying every part, for products that don't share their inputs (modded malls; fluids piped in too); from my bus: the same beside your bus. Rows: the older layout, its own 4-lane bus").add({
     type = "drop-down", name = "bpgen_mall_feed", items = { "rows on a 4-lane bus", "robots", "mixed belts", "my main bus",
       "the base in my hand", "a belt loop", "a belt loop, from my bus" },
@@ -639,6 +648,10 @@ function M.open(player, prefill)
   fs = fields(sec)
   fs.add({ type = "button", caption = "Pick the area", tags = { bpgen = "refit" },
     tooltip = "Gives you the refit tool: drag over the area. Its products fill the list above, and it plans" })
+  fs = fields(sec)
+  field(fs, "Refit as", "a mall: the area's products, compact. A base on a bus: the science the area makes (its labs and what feeds them), rebuilt as a main-bus base").add({
+    type = "drop-down", name = "bpgen_refit_as", items = { "a mall", "a base on a bus" }, selected_index = 1 })
+  fs = fields(sec)
   fs.add({ type = "checkbox", name = "bpgen_refit_add", caption = "Add machines", state = false,
     tooltip = "Off: the area's machines only (what none of them makes comes in on the belts). On: the mall makes the parts it needs, more machines" })
 
@@ -681,6 +694,9 @@ function M.open(player, prefill)
   field(fs, "Item").add({ type = "choose-elem-button", elem_type = "item", name = "bpgen_ext_item" })
   field(fs, "Per minute").add({ type = "textfield", name = "bpgen_ext_rate", text = "30", numeric = true,
     allow_decimal = true, lose_focus_on_confirm = true }).style.width = 60
+  sec = section(ext, "Move a section", "Drag over a part of your base: it's previewed near you (the arrows move it), Place it builds it there, marks the old one for removal and runs its belts in and out to your base again")
+  sec.add({ type = "button", caption = "Pick the section", tags = { bpgen = "move" },
+    tooltip = "Gives you the move tool: drag over the section to move. Stand where it should go first" })
   sec = section(ext, "Your base")
   sec.add({ type = "button", caption = "Pick my base area", tags = { bpgen = "snapshot" },
     tooltip = "Optional: gives you the snapshot tool, to drag over the part of your base to build next to (its belts feed the new part). Without it, bpgen looks around you" })
@@ -689,6 +705,23 @@ function M.open(player, prefill)
   snap_note.style.maximal_width = 260
 
   -- a bus design: ore patches -> drills -> smelter columns -> balancers -> a main bus
+  -- a ship: a space platform round its hub, self-sufficient (asteroids to fuel and ammo)
+  local shipb = left.add({ type = "flow", name = "bpgen_ship_box", direction = "vertical", visible = false })
+  sec = section(shipb, "Inner-planet shuttle", "Collectors, crushers, fuel and oxidizer, ammo and solar power round the platform's hub: plan it, stand on the platform and Place it (it lands on the hub)")
+  fs = fields(sec)
+  field(fs, "Thrusters").add({ type = "textfield", name = "bpgen_ship_thrusters", text = "2", numeric = true,
+    lose_focus_on_confirm = true }).style.width = 60
+  field(fs, "Gun turrets").add({ type = "textfield", name = "bpgen_ship_turrets", text = "6", numeric = true,
+    lose_focus_on_confirm = true }).style.width = 60
+  fs = fields(sec)
+  local orbits = {}
+  for name, loc in pairs(prototypes.space_location or {}) do
+    if loc.type == "planet" then orbits[#orbits + 1] = name end
+  end
+  table.sort(orbits)
+  field(fs, "Solar sized for", "the orbit with the least sunlight it will be in (solar power in space differs)").add({
+    type = "drop-down", name = "bpgen_ship_orbit", items = orbits,
+    selected_index = math.max(1, (function() for i, n in ipairs(orbits) do if n == "nauvis" then return i end end end)() or 1) })
   local bus = left.add({ type = "flow", name = "bpgen_bus_box", direction = "vertical", visible = false })
   sec = section(bus, "Ore patches", "drills cover each patch; their ore runs on belts to smelters at the bus head")
   local pf = sec.add({ type = "flow", direction = "horizontal" })
@@ -820,6 +853,8 @@ function M.open(player, prefill)
     frame.force_auto_center()
   end
 
+  fit_panel(left)
+
   -- filled in (a hovered machine; tests: a mode, mall products, science per minute, options shown)
   set_mode(frame, prefill.mode or "line")
   for _, r in ipairs(prefill.products or {}) do
@@ -935,6 +970,12 @@ local function request(player, frame)
     req.params = { mode = "extend", item = item, rate_per_min = tonumber(find(frame, "bpgen_ext_rate").text) or 30,
       assembler = best_of_type(player, "assembling-machine", "crafting"), furnace = best_of_type(player, "furnace", "smelting"),
       belt = req.belt or u.belts[#u.belts], bus = find(frame, "bpgen_ext_bus").state and "auto" or "off" }
+    return req
+  elseif mode == "ship" then
+    local dd = find(frame, "bpgen_ship_orbit")
+    req.params = { mode = "ship", thrusters = tonumber(find(frame, "bpgen_ship_thrusters").text) or 2,
+      turrets = tonumber(find(frame, "bpgen_ship_turrets").text) or 6,
+      location = dd.items[dd.selected_index] or "nauvis", belt = req.belt or u.belts[1] }
     return req
   elseif mode == "busdesign" then
     local list = {}
@@ -1054,6 +1095,9 @@ function M.place_absolute(player)
   local frame = player.gui.screen[NAME]
   local r = results[player.index]
   if not (frame and r and r.res.absolute) then return end
+  if r.res.mode == "ship" and not player.surface.platform then
+    return status(frame, "Stand on the space platform first: the ship is built round its hub.")
+  end
   local cleared = {}  -- (a refit: the area's old entities go, the mall's ghosts on their spot; Undo unmarks them)
   for _, c in ipairs(r.res.absolute.clear or {}) do
     local e = player.surface.find_entity(c.name, c.position)
@@ -1151,11 +1195,67 @@ function M.plan(player)
   status(frame, ok and "Planning..." or ("Can't plan in game: " .. tostring(why)))
 end
 
+--- a section of the base to move (the move tool): its blueprint (settings, wires) and where it is, to bpgen, which
+--- places it near the player with its belts in and out run to the base again (see ingame.move)
+function M.move(player, area)
+  if not player.gui.screen[NAME] then M.open(player, { mode = "extend" }) end
+  local frame = player.gui.screen[NAME]
+  set_mode(frame, "extend")
+  local inv = game.create_inventory(1)
+  local stack = inv[1]
+  stack.set_stack({ name = "blueprint" })
+  local map = stack.create_blueprint({ surface = player.surface, force = player.force, area = area,
+    include_modules = true, include_station_names = true })
+  if not stack.is_blueprint_setup() then
+    inv.destroy()
+    return status(frame, "Nothing to move there.")
+  end
+  local offset
+  for _, be in pairs(stack.get_blueprint_entities() or {}) do  -- (a blueprint position plus offset: the world's)
+    local ent = map[be.entity_number]
+    if ent and ent.valid then
+      offset = { ent.position.x - be.position.x, ent.position.y - be.position.y }
+      break
+    end
+  end
+  local bp = stack.export_stack()
+  inv.destroy()
+  if not offset then return status(frame, "Nothing to move there.") end
+  local a = area
+  local ok, why = ctx.start(player, { tick = game.tick, surface = player.surface.name, params = { mode = "move",
+    move = { area = { math.floor(a.left_top.x), math.floor(a.left_top.y), math.ceil(a.right_bottom.x),
+                      math.ceil(a.right_bottom.y) }, blueprint = bp, offset = offset },
+    seed = { x = player.position.x, y = player.position.y } } })
+  status(frame, ok and "Moving the section..." or ("Can't plan in game: " .. tostring(why)))
+end
+
 --- an area picked with the refit tool: its assembling machines' recipes fill the mall's products, then it plans
 --- them as a compact mall in the area's place (see ingame._refit)
+--- the area as a blueprint string (nil: nothing in it)
+local function area_blueprint(player, area)
+  local inv = game.create_inventory(1)
+  inv[1].set_stack({ name = "blueprint" })
+  inv[1].create_blueprint({ surface = player.surface, force = player.force, area = area, include_modules = true })
+  local bp = inv[1].is_blueprint_setup() and inv[1].export_stack() or nil
+  inv.destroy()
+  return bp
+end
+
 function M.refit(player, area)
   if not player.gui.screen[NAME] then M.open(player, { mode = "mall" }) end
   local frame = player.gui.screen[NAME]
+  if find(frame, "bpgen_refit_as").selected_index == 2 then  -- (a base on a bus: the science the area makes)
+    local bp = area_blueprint(player, area)
+    if not bp then return status(frame, "Nothing to refit there.") end
+    local u = unlocked(player)
+    local a = area
+    local ok, why = ctx.start(player, { tick = game.tick, surface = player.surface.name,
+      seed = player.surface.map_gen_settings.seed, bonuses = ctx.bonuses(player.force), inserters = u.inserters,
+      belts = u.belts, poles = u.poles, belt = u.belts[#u.belts],
+      params = { mode = "base", import = bp, layout = "bus", belt = u.belts[#u.belts], productivity = 0,
+        refit = { area = { a.left_top.x, a.left_top.y, a.right_bottom.x, a.right_bottom.y } } } })
+    return status(frame, ok and "Planning the refit as a base..." or ("Can't plan in game: " .. tostring(why)))
+  end
   set_mode(frame, "mall")
   local count, machines, order = {}, {}, {}
   for _, e in pairs(player.surface.find_entities_filtered({ area = area, type = "assembling-machine", force = player.force })) do
@@ -1680,6 +1780,11 @@ local function on_click(e)
     find(frame, "bpgen_machine").elem_value = m and { name = m, quality = "normal" } or nil
     find(frame, "bpgen_rate").text = tostring(math.ceil(el.tags.rate))
     M.plan(player)
+  elseif action == "move" then
+    if player.clear_cursor() then
+      player.cursor_stack.set_stack({ name = "bpgen-move" })
+      status(frame, "Stand where the section should go, then drag over it with the move tool.")
+    end
   elseif action == "refit" then
     if player.clear_cursor() then
       player.cursor_stack.set_stack({ name = "bpgen-refit" })

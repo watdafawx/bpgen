@@ -12,7 +12,15 @@ import os
 import re
 from pathlib import Path
 
-os.environ.setdefault("FSE_OFF", "1")  # (games started from here run plain even with the fse loader installed)
+# games started from here run plain even with the fse loader installed. Not set in a game's own process (bpgen
+# planning inside the game, with fse): a game that one starts - fse-hotreload's restart - would come back without fse.
+if "FSE_HOME" not in os.environ:
+    os.environ.setdefault("FSE_OFF", "1")
+
+
+def plain_env():
+    """the environment for a game bpgen starts itself (a headless check, a data dump): without fse"""
+    return dict(os.environ, FSE_OFF="1")
 
 ROOT = Path(__file__).resolve().parent.parent
 FILE = ROOT / "bpgen.json"

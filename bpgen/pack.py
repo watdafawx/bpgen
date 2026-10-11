@@ -14,6 +14,7 @@ from pathlib import Path
 from bpgen import settings_dat
 from bpgen.harness import FACTORIO, ROOT, RUN
 
+from bpgen import config
 from bpgen.config import PATHS
 USER_MODS = PATHS["user_mods"]
 PACK = ROOT / "mods" / "pack"
@@ -32,7 +33,9 @@ def _stamp():
     except (OSError, ValueError, struct.error):  # unreadable: fall back to the whole file
         startup = hashlib.sha1((USER_MODS / "mod-settings.dat").read_bytes()).hexdigest()
     versions = sorted(p.name for p in USER_MODS.iterdir() if p.suffix == ".zip")  # updated mods have new zip names
-    return hashlib.sha1(json.dumps([enabled, startup, versions], sort_keys=True, default=str).encode()).hexdigest()
+    # (and what bpgen keeps: a type it starts reading is dumped at the next game start)
+    return hashlib.sha1(json.dumps([enabled, startup, versions, sorted(KEEP)], sort_keys=True,
+                                   default=str).encode()).hexdigest()
 
 
 def mirror():
@@ -64,7 +67,8 @@ def _dump():
     out = RUN / "script-output" / "data-raw-dump.json"
     out.unlink(missing_ok=True)
     p = subprocess.run([str(FACTORIO), "--config", str(RUN / "config.ini"), "--mod-directory", str(PACK), "--dump-data"],
-                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
+                       env=config.plain_env())
     (RUN / "dump.out").write_text(p.stdout + p.stderr, encoding="utf-8")
     if not out.exists():
         raise RuntimeError("pack dump failed, see run/dump.out:\n" + (p.stdout + p.stderr)[-2000:])
@@ -85,7 +89,10 @@ KEEP = ["recipe", "assembling-machine", "furnace", "rocket-silo", "inserter", "t
         # starter base: labs to place, resources and the start planet's map settings to know what is mined there
         "lab", "resource", "planet",
         # the bus design: drills on the ore patches
-        "mining-drill"]
+        "mining-drill",
+        # space platforms (the ship generator): what a ship is built of, and the asteroids it collects
+        "thruster", "asteroid-collector", "space-platform-hub", "cargo-bay", "ammo-turret", "electric-turret",
+        "solar-panel", "accumulator", "asteroid-chunk", "space-location", "space-connection"]
 # icon paths are kept (tiny) for the web preview
 DROP_KEYS = {"graphics_set", "animation", "picture", "pictures", "working_sound", "sprites",
              "structure", "belt_animation_set", "hand_base_picture", "hand_closed_picture", "hand_open_picture",
@@ -111,11 +118,15 @@ def trim():
     for t in KEEP:
         entity = t in ("assembling-machine", "furnace", "rocket-silo", "inserter", "transport-belt", "underground-belt",
                        "splitter", "loader", "loader-1x1", "electric-pole", "beacon", "pipe", "pipe-to-ground",
-                       "container", "logistic-container", "roboport", "constant-combinator", "lab")
+                       "container", "logistic-container", "roboport", "constant-combinator", "lab", "thruster",
+                       "asteroid-collector", "space-platform-hub", "cargo-bay", "ammo-turret", "electric-turret",
+                       "solar-panel", "accumulator")
         # hidden entities are script helpers (e.g. thousands of crafting entities from the "Fixed" mods)
         small[t] = {n: clean(p) for n, p in raw.get(t, {}).items() if not (entity and p.get("hidden"))}
     # tiles: only which fluid they give (water from an offshore pump is raw too)
-    small["tile"] = {n: {"fluid": p["fluid"]} for n, p in raw.get("tile", {}).items() if p.get("fluid")}
+    # (and which are foundations: a space platform's floor)
+    small["tile"] = {n: {k: p[k] for k in ("fluid", "is_foundation") if p.get(k)} for n, p in raw.get("tile", {}).items()
+                     if p.get("fluid") or p.get("is_foundation")}
     DATA.write_text(json.dumps(small), encoding="utf-8")
     # top-down entity sprites for the preview (graphics are dropped above)
     from bpgen import sprites

@@ -39,6 +39,18 @@ data:extend({
     select = { border_color = { 1, 0.4, 0.8 }, cursor_box_type = "copy", mode = { "any-entity" } },
     alt_select = { border_color = { 1, 0.4, 0.8 }, cursor_box_type = "copy", mode = { "any-entity" } },
   },
+  -- drag over a section of the base: the bpgen window moves it near you, its belts run to the base again
+  {
+    type = "selection-tool",
+    name = "bpgen-move",
+    icon = "__base__/graphics/icons/deconstruction-planner.png",
+    icon_size = 64,
+    flags = { "only-in-cursor", "not-stackable", "spawnable" },
+    hidden = true,
+    stack_size = 1,
+    select = { border_color = { 0.4, 1, 0.5 }, cursor_box_type = "copy", mode = { "any-entity" } },
+    alt_select = { border_color = { 0.4, 1, 0.5 }, cursor_box_type = "copy", mode = { "any-entity" } },
+  },
   { type = "custom-input", name = "bpgen-snapshot", key_sequence = "CONTROL + SHIFT + N", action = "spawn-item",
     item_to_spawn = "bpgen-snapshot", consuming = "game-only" },
   {

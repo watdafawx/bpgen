@@ -278,8 +278,9 @@ def _refit(s, params):
         x, y = e["position"]["x"], e["position"]["y"]
         inside = x1 <= x <= x2 and y1 <= y <= y2
         machine = e["type"] in ("assembling-machine", "furnace", "rocket-silo", "lab")
-        if not inside or (math.floor(x), math.floor(y)) in bus_tiles or (
-                machine and not (e["type"] == "assembling-machine" and e.get("recipe") in products)):
+        if not inside or (math.floor(x), math.floor(y)) in bus_tiles or (machine and not params["refit"].get("all")
+                                                                          and not (e["type"] == "assembling-machine"
+                                                                                   and e.get("recipe") in products)):
             keep.append(e)
             if inside and machine and not e.get("ghost"):
                 kept.add(e.get("recipe") or e["name"])
@@ -313,6 +314,97 @@ def _refit_inputs(s, params):
     params["inputs"] = sorted(set(inputs) | (need - made))
 
 
+BELTISH = ("transport-belt", "underground-belt", "splitter")
+DIRS = {0: (0, -1), 4: (1, 0), 8: (0, 1), 12: (-1, 0)}
+
+
+def _section(s, params):
+    """a section of the base to move: params["move"] = {"area": [x1, y1, x2, y2], "blueprint": the area as the game
+    blueprints it, "offset": [dx, dy] (a blueprint position plus it is the world's)}, params["snapshot"] (the area and
+    round it). -> (plan entities in world coordinates, sources: belts coming in over the area's edge, sinks: belts
+    going out, what to deconstruct, notes)"""
+    from bpgen import base
+    mv = params["move"]
+    x1, y1, x2, y2 = mv["area"]
+    ox, oy = mv["offset"]
+    bp = base._decode(mv["blueprint"])["blueprint"]
+    keep = {"name", "position", "direction", "entity_number"}
+    ents, by_number = [], {}
+    for be in bp.get("entities") or []:
+        e = {"name": be["name"], "position": {"x": be["position"]["x"] + ox, "y": be["position"]["y"] + oy},
+             "bp_extra": {k: v for k, v in be.items() if k not in keep}, "wire_id": f"m{be['entity_number']}"}
+        if be.get("direction"):
+            e["direction"] = be["direction"]
+        if be.get("recipe"):
+            e["recipe"] = be["recipe"]
+        ents.append(e)
+        by_number[be["entity_number"]] = e
+    for a, ca, b, cb in bp.get("wires") or []:  # (each wire once, from its first end)
+        if a in by_number and b in by_number:
+            by_number[a].setdefault("wires_to", []).append((f"m{b}", ca, cb))
+    # what comes in and goes out: belts on the area's edge whose neighbour outside runs into / takes from them
+    snap = s.snapshot_view(params.get("snapshot"))
+    inside = lambda x, y: x1 <= x < x2 and y1 <= y < y2  # noqa: E731
+    belts = {(math.floor(e["position"]["x"]), math.floor(e["position"]["y"])): e for e in snap["entities"]
+             if e["type"] in BELTISH and not e.get("ghost")}
+    sources, sinks, notes = [], [], []
+    for (x, y), e in belts.items():
+        if not inside(x, y) or e["type"] == "splitter":
+            continue
+        dx, dy = DIRS.get(e.get("direction", 0), (0, -1))
+        up, down = belts.get((x - dx, y - dy)), belts.get((x + dx, y + dy))
+        items = [i for i in e.get("lanes") or [] if i]
+        if up and not inside(x - dx, y - dy) and up.get("direction") == e.get("direction") and items:
+            sources.append({"kind": "belt", "position": {"x": x + 0.5, "y": y + 0.5},
+                            "lanes": [items[0], items[-1]], "rates": {i: 1 for i in items}})
+        if down and not inside(x + dx, y + dy) and items:
+            sinks.append({"kind": "belt", "position": {"x": x + 0.5, "y": y + 0.5}, "item": items[0]})
+    if any(e["type"] in ("pipe", "pipe-to-ground") and not inside(math.floor(e["position"]["x"]),
+                                                                  math.floor(e["position"]["y"]))
+           and any(abs(e["position"]["x"] - p["position"]["x"]) + abs(e["position"]["y"] - p["position"]["y"]) <= 1
+                   for p in ents if p["name"] in ("pipe", "pipe-to-ground")) for e in snap["entities"]):
+        notes.append("pipes run over the section's edge: connect them again where it lands")
+    clear = [{"name": e["name"], "position": e["position"]} for e in snap["entities"]
+             if inside(math.floor(e["position"]["x"]), math.floor(e["position"]["y"])) and not e.get("ghost")
+             and e["type"] not in ("resource",)]
+    params["snapshot"] = dict(snap, entities=[e for e in snap["entities"] if not inside(
+        math.floor(e["position"]["x"]), math.floor(e["position"]["y"]))])
+    notes.insert(0, f"moving {len(ents)} entities: {len(sources)} belts in, {len(sinks)} out, reconnected where "
+                    f"it lands")
+    return ents, sources, sinks, clear, notes
+
+
+def move(request: str) -> str:
+    """a section of the base moved: {"params": {"move": ..., "snapshot": ..., "seed": {x, y}}} (see _section) ->
+    as plan(): an absolute blueprint (its belts in and out routed to the base), "absolute.clear": the old one"""
+    global _last
+    from bpgen import planner
+    t = time.perf_counter()
+    try:
+        req = json.loads(request)
+        params = req.get("params") or {}
+        with _lock:
+            s = _svc()
+            ents, sources, sinks, clear, notes = _section(s, params)
+            x1, y1 = params["move"]["area"][:2]
+            plan = [dict(e, position={"x": e["position"]["x"] - x1, "y": e["position"]["y"] - y1}) for e in ents]
+            shift = lambda p: {"x": p["x"] - x1, "y": p["y"] - y1}  # noqa: E731
+            _last = {"entities": [s.decorate(e) for e in plan],
+                     "sources": [dict(k, position=shift(k["position"])) for k in sources],
+                     "sinks": [dict(k, position=shift(k["position"])) for k in sinks],
+                     "belt": "transport-belt", "mode": "move", "label": "bpgen: a section moved",
+                     "prune": params["move"]["area"], "clear": clear}
+            placed = s.extend(dict(_last, bus="here", seed=params.get("seed"), snapshot=params["snapshot"]))
+            absolute = dict(_absolute(placed), clear=clear)
+        return json.dumps({"blueprint": placed["blueprint"], "label": "a section moved", "mode": "move",
+                           "absolute": absolute, "notes": notes + list(placed.get("notes") or []), "summary": {},
+                           "seconds": round(time.perf_counter() - t, 3)})
+    except planner.PlanError as e:
+        return json.dumps({"error": str(e), "seconds": round(time.perf_counter() - t, 3)})
+    except Exception as e:  # noqa: BLE001 - shown in game
+        return _crash(e, request)
+
+
 def place(request: str) -> str:
     """the last plan next to the player's base: {"bus": "auto"|"on"|"off", "seed": {x, y}, "snapshot": the area
     around the player, as the snapshot tool takes it} -> as plan(), an absolute blueprint with taps on the base's
@@ -330,12 +422,20 @@ def place(request: str) -> str:
                      "label": f"bpgen: {sec['name']} next to the base", "needs": _section_needs(_svc().data, sec, {})}
         if not _last or not _last.get("entities"):
             return json.dumps({"error": "plan something first"})
+        snap = req.get("snapshot")
+        if _last.get("prune") and snap:  # (a section being moved: its old place is free ground)
+            x1, y1, x2, y2 = _last["prune"]
+            snap = dict(snap, entities=[e for e in snap.get("entities") or [] if not (
+                x1 <= e["position"]["x"] < x2 and y1 <= e["position"]["y"] < y2)])
         with _lock:
-            placed = _svc().extend(dict(_last, bus=req.get("bus") or "auto", seed=req.get("seed"),
-                                        snapshot=req.get("snapshot")))
+            placed = _svc().extend(dict(_last, bus="here" if _last.get("mode") == "move" else req.get("bus") or "auto",
+                                        seed=req.get("seed"), snapshot=snap))
+        absolute = _absolute(placed)
+        if _last.get("clear"):
+            absolute["clear"] = _last["clear"]
         return json.dumps({
             "blueprint": placed["blueprint"], "label": _last["label"], "mode": _last["mode"],
-            "absolute": _absolute(placed),
+            "absolute": absolute,
             "notes": placed.get("notes") or [], "summary": {}, "seconds": round(time.perf_counter() - t, 3)})
     except Exception as e:  # noqa: BLE001 - shown in game
         return _crash(e, request)
@@ -453,17 +553,24 @@ def plan(request: str) -> str:
                                "machines": sorted({m["machine"] for m in a.get("machines") or []}),
                                "before": {"size": a.get("size"), "entities": a.get("entities")}})
             bus, bus_notes = None, []
-            refit = params.get("refit") if params.get("mode") == "mall" else None
-            if refit:  # (an area rebuilt as a grid mall: always fed from the bus when there is one)
-                params.update(layout="sushi" if params.get("layout") == "sushi" else "grid", bus_feed=True,
-                              feed="belt", origin={
-                    "x": (refit["area"][0] + refit["area"][2]) / 2, "y": (refit["area"][1] + refit["area"][3]) / 2})
+            refit = params.get("refit") if params.get("mode") in ("mall", "base") else None
+            if refit:
+                params["origin"] = {"x": (refit["area"][0] + refit["area"][2]) / 2,
+                                    "y": (refit["area"][1] + refit["area"][3]) / 2}
+            if refit and params["mode"] == "base":  # (an area rebuilt as a base on a main bus, for the science it
+                refit["all"] = True  # made: everything in it goes but the main bus's own belts)
+                params.update(layout="bus", fit_bus=None, add_to=None, plates=True)  # (plates off the bus)
+                clear, had, refit_notes = _refit(s, params)
+            elif refit:  # (an area rebuilt as a mall, on a belt loop: any recipes, and its inputs an item each, which
+                # always tap - the grid's two-item input belts sit side by side, nowhere to merge their items)
+                params.update(layout="sushi", bus_feed=True, feed="belt")
                 clear, had, refit_notes = _refit(s, params)
             if params.get("bus_feed") and params.get("recipe"):
                 bus, bus_notes = _bus_feed(s, params)
             elif params.get("bus_feed") and params.get("mode") == "mall":
                 bus, bus_notes = _mall_bus_feed(s, params)
-            if refit:
+            if refit and params["mode"] == "mall":
+                params["extra"] = bool(refit.get("add"))  # (off: no machine the area didn't have)
                 if not refit.get("add"):
                     _refit_inputs(s, params)
                 bus_notes = refit_notes + [n for n in bus_notes if not n.startswith("no main bus")]
@@ -480,11 +587,35 @@ def plan(request: str) -> str:
                     except planner.PlanError:
                         if i == len(tries[:4]) - 1 or not tries:
                             raise
-                if params.get("mode") == "extend":
+                if refit and params.get("mode") == "base":
+                    # (the base's connected print, where the area was - beside the bus if it doesn't fit there -
+                    # its inputs taken off the bus)
+                    whole = next((x for x in out.get("sections") or [] if x["kind"] == "routed"), None)
+                    if not whole:
+                        raise planner.PlanError(out.get("route_note") or "the base didn't come out as one connected build")
+                    res = whole["result"]
+                    _last = {"entities": res["entities"], "sources": res.get("sources") or [],
+                             "sinks": res.get("sinks") or [], "belt": params.get("belt"), "mode": "base",
+                             "label": "bpgen: the area refit as a base", "clear": clear}
+                    o = params["origin"]
+                    placed = s.extend(dict(_last, bus="here", seed=o, snapshot=params.get("snapshot")))
+                    if placed.get("inputs"):
+                        placed = s.extend(dict(_last, bus="auto", seed=o, snapshot=params.get("snapshot")))
+                    n = sum(1 for e in placed["entities"] if e.get("recipe"))
+                    out = {"blueprint": placed["blueprint"], "absolute": dict(_absolute(placed), clear=clear),
+                           "summary": {"mode": "base", "packs": out.get("packs"), "spm": out.get("spm"),
+                                       "bring_in": out.get("bring_in"),
+                                       "notes": refit_notes + [f"{n} machines (the area had {had})"]
+                                       + list(out.get("notes") or []) + placed["notes"]}}
+                elif params.get("mode") == "extend":
                     # (next to the base: plan_extension already placed the chain into the snapshot, taps on its
                     # belts, power: an absolute blueprint that lands where it belongs)
                     _last = dict(out["plan"], belt=params.get("belt"), mode="extend",
                                  label=f"bpgen: {params.get('item')} next to the base")
+                    out = {"blueprint": out["blueprint"], "summary": {"notes": out.get("notes") or []},
+                           "absolute": _absolute(out)}
+                elif params.get("mode") == "ship":  # (absolute too: it lands on the platform's hub, at 0,0)
+                    _last = None
                     out = {"blueprint": out["blueprint"], "summary": {"notes": out.get("notes") or []},
                            "absolute": _absolute(out)}
                 elif params.get("mode") == "busdesign":  # (absolute, like extend: it lands on the patches)
@@ -506,8 +637,17 @@ def plan(request: str) -> str:
                     if bus or refit:  # (fed from the bus: placed beside it straight away, its inputs tapped from
                         o = params.get("origin") or {}  # the lanes; a refit: where the area was)
                         try:
-                            placed = s.extend(dict(_last, bus="on" if bus else "off", seed=o if o else None,
-                                                   snapshot=params.get("snapshot")))
+                            placed = None
+                            if refit:  # (in the area's own place when it fits there, its belts tapped nearby)
+                                placed = s.extend(dict(_last, bus="here", seed=o, snapshot=params.get("snapshot")))
+                                bx, by, bw, bh = placed["box"][:4]
+                                ax1, ay1, ax2, ay2 = refit["area"]
+                                if not (ax1 <= bx + bw / 2 <= ax2 and ay1 <= by + bh / 2 <= ay2) or placed.get("inputs"):
+                                    placed = None  # (it doesn't fit, or not every input could be tapped there:
+                                    # beside the bus, as a mall from it goes)
+                            if placed is None:
+                                placed = s.extend(dict(_last, bus="on" if bus else "off", seed=o if o else None,
+                                                       snapshot=params.get("snapshot")))
                             absolute = _absolute(placed)
                             if refit:
                                 n = sum(1 for e in placed["entities"] if e.get("recipe"))

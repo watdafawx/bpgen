@@ -65,3 +65,27 @@ assert any("the area had 7" in n for n in notes), notes
 more = plan(True)
 print("with Add machines:", [n for n in more["notes"] if "the area had" in n])
 print("ok")
+
+# refit as a base on a bus: an area with a lab and two red science assemblers (and their gear maker), beside the bus
+base_area = [30, 90, 60, 115]
+lab_ents = [
+    {"name": "lab", "position": {"x": 40.5, "y": 100.5}},
+    {"name": "assembling-machine-2", "position": {"x": 34.5, "y": 95.5}, "recipe": "automation-science-pack"},
+    {"name": "assembling-machine-2", "position": {"x": 34.5, "y": 105.5}, "recipe": "automation-science-pack"},
+    {"name": "assembling-machine-2", "position": {"x": 46.5, "y": 95.5}, "recipe": "iron-gear-wheel"},
+    {"name": "inserter", "position": {"x": 37.5, "y": 100.5}, "direction": 12},
+]
+base_snap = {"area": [0, 0, 140, 140], "entities": [e for e in ents if not (30 <= e["position"]["x"] <= 90
+                                                                            and 20 <= e["position"]["y"] <= 80)]
+             + [dict(e, type=s.decorate(e)["type"]) for e in lab_ents]}
+bp_area = planner.blueprint_string([dict(e, position={"x": e["position"]["x"] - 45, "y": e["position"]["y"] - 100})
+                                    for e in lab_ents], "area")
+req = {"belts": ["transport-belt"], "inserters": ["inserter", "long-handed-inserter", "fast-inserter"],
+       "params": {"mode": "base", "import": bp_area, "layout": "bus", "belt": "transport-belt", "productivity": 0,
+                  "snapshot": json.loads(json.dumps(base_snap)), "refit": {"area": base_area}}}
+out = json.loads(ingame.plan(json.dumps(req)))
+assert "error" not in out, out
+print("as a base:", [n for n in out["notes"] if "machines" in n or "bus" in n][:3])
+assert out["absolute"]["clear"], "the old area cleared"
+assert out["absolute"]["taps"] >= 1, "fed from the bus"
+print("ok (base)")

@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+from bpgen import config
 from bpgen.config import PATHS
 FACTORIO = PATHS["factorio_exe"]
 RUN = ROOT / "run"
@@ -66,7 +67,7 @@ def _stream(cmd, stage, total_mods, progress, cancel, timeout, log_path):
     """run factorio, turning its log into progress messages; kill it on cancel/timeout"""
     progress = progress or (lambda msg: None)
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                         errors="replace", bufsize=1)
+                         errors="replace", bufsize=1, env=config.plain_env())
     lines, counts, start = [], {}, time.time()
     phases = {"(settings": "reading mod settings", "(data.lua)": "loading prototypes",
               "(data-updates.lua)": "updating prototypes", "(data-final-fixes.lua)": "final fixes"}

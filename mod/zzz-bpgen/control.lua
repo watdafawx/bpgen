@@ -224,6 +224,13 @@ window.setup({
       request.params.snapshot = snapshot(player,
         { left_top = { x = x1 - m, y = y1 - m }, right_bottom = { x = x2 + m, y = y2 + m } }, true)
     end
+    if request.params and request.params.move then
+      -- (the section and where it goes, round both: the ground it lands on, the belts it's run to)
+      local a, p, m = request.params.move.area, player.position, 48
+      measure(player, { left_top = { x = math.min(a[1], p.x) - m, y = math.min(a[2], p.y) - m },
+        right_bottom = { x = math.max(a[3], p.x) + m, y = math.max(a[4], p.y) + m } }, "move", request)
+      return true
+    end
     if request.params and request.params.refit then
       -- (the area to refit and round it: the ground the mall goes on, the bus it is fed from)
       local a, m = request.params.refit.area, 48
@@ -815,6 +822,9 @@ end
 after.plan = function(player, snap, request)
   plan_with(player, snap, request, "bpgen.ingame:plan", { player = player.index, recipe = request.recipe, window = true })
 end
+after.move = function(player, snap, request)
+  plan_with(player, snap, request, "bpgen.ingame:move", { player = player.index, recipe = "", window = true })
+end
 after.plan_line = function(player, snap, req)
   plan_with(player, snap, req, "bpgen.ingame:plan", { player = player.index, auto = true })
 end
@@ -854,10 +864,29 @@ end
 local function on_selected(e)
   if e.item == "bpgen-patches" then return window.add_patch(game.get_player(e.player_index), e.area) end
   if e.item == "bpgen-refit" then return window.refit(game.get_player(e.player_index), e.area) end
+  if e.item == "bpgen-move" then return window.move(game.get_player(e.player_index), e.area) end
   if e.item ~= "bpgen-snapshot" then return end
   measure(game.get_player(e.player_index), e.area, "snapshot_tool", e.area)
 end
 on_event(defines.events.on_player_selected_area, on_selected)
+
+-- a bpgen ship's inserters that feed the hub run only while it holds few of their item: a blueprint can't hold the
+-- hub, so each one tagged "bpgen_hub" is wired to its platform's hub as it's built (and the hub reads its contents)
+local function hub_wire(e)
+  local ent, tags = e.entity, e.tags
+  if not (ent and ent.valid and tags and tags.bpgen_hub) then return end
+  local platform = ent.surface.platform
+  local hub = platform and platform.hub
+  if not (hub and hub.valid) then return end
+  hub.get_or_create_control_behavior().read_contents = true
+  local red = defines.wire_connector_id.circuit_red
+  ent.get_wire_connector(red, true).connect_to(hub.get_wire_connector(red, true), false)
+end
+for _, ev in pairs({ defines.events.on_space_platform_built_entity, defines.events.on_built_entity,
+                     defines.events.on_robot_built_entity, defines.events.script_raised_revive,
+                     defines.events.script_raised_built }) do
+  on_event(ev, hub_wire)
+end
 on_event(defines.events.on_player_alt_selected_area, on_selected)
 
 -- for automated tests (no player to press the hotkey in a headless run)

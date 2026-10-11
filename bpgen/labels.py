@@ -32,9 +32,16 @@ def add_labels(data, entities, sources, sinks, output, output_rate):
     fluids = set(data.raw.get("fluid", {}))
     # connection points: the tile just outside each input (where your belt/pipe comes in) and past the output
     approach = set()
+    facing = {(math.floor(e["position"]["x"]), math.floor(e["position"]["y"])): e.get("direction", 0)
+              for e in entities if "belt" in e["name"]}
+    back = {0: (0, 1), 4: (-1, 0), 8: (0, -1), 12: (1, 0)}  # (the tile behind a belt going that way)
     for s in sources:
         x, y = math.floor(s["position"]["x"]), math.floor(s["position"]["y"])
-        approach.add((x, y - 1) if s.get("from") == "north" else (x - 1, y) if s["kind"] == "belt" else (x, y))
+        if s["kind"] == "belt" and (x, y) in facing:  # (behind the input belt, whichever way it runs)
+            bx, by = back.get(facing[(x, y)], (-1, 0))
+            approach.add((x + bx, y + by))
+        else:
+            approach.add((x, y - 1) if s.get("from") == "north" else (x - 1, y) if s["kind"] == "belt" else (x, y))
     for k in sinks:
         approach.add((math.floor(k["position"]["x"]) + 1, math.floor(k["position"]["y"])))
 

@@ -325,6 +325,18 @@ class Service:
             "blueprint": blueprint,
         }
 
+    def plan_ship(self, params):
+        """a space platform round its hub (see ship.py): an absolute blueprint, the hub at 0,0"""
+        from bpgen import extend, ship
+        r = ship.plan_ship(self.data, thrusters=int(params.get("thrusters") or 2),
+                           turrets=int(params.get("turrets") or 6), location=params.get("location") or "nauvis",
+                           belt=params.get("belt") or "transport-belt")
+        ents = [self.decorate(e) for e in r["entities"]]
+        bp, box = extend.absolute_blueprint(ents, "bpgen shuttle", floor=r["tiles"],
+                                            description="Paste it on the platform, on its hub: Ctrl+Shift.")
+        return {"mode": "ship", "blueprint": bp, "box": box, "entities": ents, "notes": r["notes"],
+                "taps": [], "deliveries": [], "summary": {"mode": "ship", "notes": r["notes"]}}
+
     def plan_grid_mall(self, params):
         """a mall in columns between mixed belts, parts made at the top (see mall_grid.py); layout "sushi": on one
         mixed belt loop (see mall_sushi.py)"""
@@ -333,6 +345,7 @@ class Service:
                       chest=params.get("chest") or "wooden-chest", chest_limit=int(params.get("chest_limit") or 2))
         if params.get("layout") == "sushi":
             g = mall_sushi.plan_sushi(self.data, params.get("products") or [], params["machine"], params["belt"],
+                                      extra=params.get("extra", True),
                                       stock=int(params["stock"]) if params.get("stock") is not None else mall_grid.STOCK,
                                       **common)
         else:
@@ -517,6 +530,8 @@ class Service:
         if params.get("mode") == "busdesign":
             from bpgen import busdesign
             return busdesign.plan(self, params)
+        if params.get("mode") == "ship":
+            return self.plan_ship(params)
         if params.get("feed") == "robots":
             return self.plan_bot_line(params)
         if progress:

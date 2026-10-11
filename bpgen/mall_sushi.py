@@ -50,10 +50,11 @@ def _entries(runs, yb):
 
 
 def plan_sushi(data, products, machine, belt, inputs=None, allowed=None, chest="wooden-chest", chest_limit=2,
-               keep=None, stock=mall_grid.STOCK):
+               keep=None, stock=mall_grid.STOCK, extra=True):
     """products: recipes, one machine and chest each; the parts they need (and those parts' parts) made here, once.
     inputs: items brought in (default: the plates and what's mined). keep: the most of an item on the loop (default:
-    its share of half the loop, by what's taken of it). stock: see the module. -> dict as mall_grid.plan_grid"""
+    its share of half the loop, by what's taken of it). stock: see the module. extra: busy parts and products may
+    get more machines (off: one each, a refit that adds none). -> dict as mall_grid.plan_grid"""
     recipes = data.raw["recipe"]
     allowed = set(allowed or [])
     m, cats, machine_for, products, inputs, notes = mall_grid.resolve(
@@ -96,16 +97,17 @@ def plan_sushi(data, products, machine, belt, inputs=None, allowed=None, chest="
     for it in reversed(order):  # (users first: a part's users are counted with their extra machines)
         want = sum((1 if u in part_makers else 0.25) * per_s(u, it) * count.get(_result(data, u), 1)
                    for u in users if it in _ings(data, u))
-        count[it] = max(1, min(4, math.ceil(want / per_s(makers[it]) - 0.05)))
+        count[it] = max(1, min(4, math.ceil(want / per_s(makers[it]) - 0.05))) if extra else 1
     # a product others take too (belts for splitters, and for faster belts: 12 a craft) gets more machines as busy
     # parts do, the others only making it for the loop
     of = {_result(data, r): r for r in products}
-    extra = {}
+    more = {}
     for it in shared:
         want = sum((1 if u in part_makers else 0.25) * per_s(u, it) for u in users if it in _ings(data, u))
-        extra[it] = 0 if mall_grid._fluids(data, of[it]) else max(0, min(3, math.ceil(want / per_s(of[it]) - 0.05) - 1))
+        more[it] = 0 if not extra or mall_grid._fluids(data, of[it]) else (
+            max(0, min(3, math.ceil(want / per_s(of[it]) - 0.05) - 1)))
     cells = [(makers[it], it, False) for it in order for _ in range(count[it])] + [
-        (of[it], it, False) for it in sorted(shared) for _ in range(extra[it])] + [
+        (of[it], it, False) for it in sorted(shared) for _ in range(more[it])] + [
         (r, _result(data, r) if _result(data, r) in shared else None, True) for r in products]
     feeds = sorted({it for r, _, _ in cells for it in _ings(data, r) if it not in makers} - made)
     use = {it: sum(per_s(r, it) * (0.25 if product else 1) for r, _, product in cells)
@@ -163,17 +165,30 @@ def plan_sushi(data, products, machine, belt, inputs=None, allowed=None, chest="
                 for xx in range(x, 0, -1):
                     loop.append(put(belt, xx, -2, WEST))
                 loop.append(put(belt, 0, -2, SOUTH))
-    # the plate belts: in from the north under the loop's top rows, down to above its bottom turns
+    # the plate belts: one input, a row east along the top with a splitter for each plate belt (its other half
+    # turns down into it), under the loop's top rows, down to above its bottom turns; one tap feeds them all
+    splitter = chain.related_splitter(data, belt)
+    put(belt, -1, -8, EAST)
+    # (two items: one in from the north, one from the south, side-loading onto a lane each; a single-item input is
+    # one tap, where one belt carrying both is rarely there to tap)
     sources = []
+    for p_, y0_, flow in ((plates[0], -10, SOUTH), (plates[-1], -6, NORTH)) if len(set(plates)) == 2 else (
+            (plates[0], -10, SOUTH),):
+        put(belt, -1, y0_, flow)
+        put(belt, -1, y0_ + (1 if flow == SOUTH else -1), flow)
+        sources.append({"kind": "belt", "position": {"x": -0.5, "y": y0_ + 0.5}, "lanes": [p_, p_], "rates": {p_: 1}})
     for k in range(runs):
         x = PX * k + 1
-        put(belt, x, -4, SOUTH)
+        put(splitter, x - 1, -7.5, EAST)  # (tiles (x - 1, -8) and (x - 1, -7))
+        if k < runs - 1:
+            for xx in range(x, x + PX - 1):
+                put(belt, xx, -8, EAST)
+        for y in (-7, -6, -5, -4):
+            put(belt, x, y, SOUTH)
         put(ug, x, -3, SOUTH, ug_type="input")
         put(ug, x, 0, SOUTH, ug_type="output")
         for y in range(1, yb - 1):
             put(belt, x, y, SOUTH)
-        sources.append({"kind": "belt", "position": {"x": x + 0.5, "y": -3.5}, "lanes": [plates[0], plates[-1]],
-                        "rates": {p: 1 for p in plates}})
     # how many of each item the loop may hold: what it takes of each in one lap of the loop (a part far from its
     # makers waits that long), all together at most about 60% of what the loop carries (it never fills up).
     on_loop = sorted(set(loop_feeds) | set(makers) | shared)
