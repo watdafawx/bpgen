@@ -10,9 +10,15 @@ an inserter between each and the hub (the ring of tiles touching it):
     south:  fuel chemical plant, an ice melter feeding it water directly, the oxide chunk crusher (ice)
     west:   oxidizer chemical plant, a second melter feeding it, the carbonic chunk crusher (carbon)
 
+Where the fuel and oxidizer take a gas made from nothing (Krastorio 2: hydrogen and oxygen out of an atmospheric
+condenser, which works in space), the condensers stand in for the melters: two for hydrogen under the fuel plant (it
+lies with its outputs to the hub, its inputs down), one for oxygen above the oxidizer plant. No ice is needed then, so
+no oxide crusher, and the collectors only take metallic and carbonic chunks.
+
 What goes into the hub runs only while the hub holds less than its share (wired to the hub when built: the mod reads
-the "bpgen_hub" tag), so no item crowds out the others. Fuel and oxidizer run in pipes to the thrusters at the back
-(fuel into each one's left side, oxidizer into its right; their headers cross with pipes-to-ground). Solar panels
+the "bpgen_hub" tag), so no item crowds out the others; the collectors take only the chunks the hub is short of (a
+decider reading the hub sets their filters). Fuel and oxidizer run in pipes to the thrusters at the back (fuel into
+each one's left side, oxidizer into its right; their headers cross with pipes-to-ground). Solar panels
 behind, enough for the machines at the orbit's sunlight; foundation under all of it.
 """
 import math
@@ -40,6 +46,27 @@ def _recipe_for(data, product, category=None, ingredient=None):
     return best[1] if best else None
 
 
+def _condenser(data, fluids):
+    """(machine, recipe) making the one fluid in `fluids` from nothing, in a 5x5 machine with pipes either side of
+    each edge's middle (Krastorio 2's atmospheric condenser), or None"""
+    if len(fluids) != 1:
+        return None
+    raw = data.raw
+    found = []
+    for rn, r in sorted(raw["recipe"].items()):
+        if r.get("hidden") or r.get("ingredients") or not any(
+                x.get("name") == fluids[0] for x in r.get("results") or []):
+            continue
+        for mn, m in sorted(raw.get("assembling-machine", {}).items()):
+            box = m.get("collision_box") or [[0, 0], [0, 0]]
+            if r.get("category", "crafting") not in (m.get("crafting_categories") or []) or round(box[1][0] * 2) != 5:
+                continue
+            at = {tuple(c.get("position") or ()) for fb in m.get("fluid_boxes") or []
+                  for c in fb.get("pipe_connections") or []}
+            if {(-1, -2), (1, -2), (-1, 2), (1, 2), (2, -1), (2, 1)} <= at:  # (a powered one, the plain name, first)
+                found.append(((m.get("energy_source") or {}).get("type") != "electric", len(mn), mn, rn))
+    return min(found)[2:] if found else None
+
 def _usage_w(proto):
     """an entity's power draw in watts (its energy_usage, e.g. "540kW")"""
     v = str(proto.get("energy_usage") or "0W")
@@ -54,7 +81,7 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
     need = {"asteroid-collector": "asteroid-collector", "thruster": "thruster", "electric-furnace": "furnace",
             "chemical-plant": "assembling-machine", "crusher": "assembling-machine",
             "assembling-machine-2": "assembling-machine", "gun-turret": "ammo-turret", "solar-panel": "solar-panel"}
-    missing = [n for n, t in need.items() if n not in raw.get(t, {})]
+    missing = [n for n, t in need.items() if n not in raw.get(t, {}) and n not in raw.get("assembling-machine", {})]
     if missing:
         raise PlanError(f"this game has no {', '.join(missing)}: the ship needs Space Age")
     crush = {k: _recipe_for(data, item, "crushing", chunk) for k, item, chunk in (
@@ -64,14 +91,19 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
     fuel = _recipe_for(data, "thruster-fuel")
     ox = _recipe_for(data, "thruster-oxidizer")
     ammo = _recipe_for(data, "firearm-magazine")
-    for k, r in {**crush, "melt": melt, "fuel": fuel, "oxidizer": ox, "ammo": ammo}.items():
-        if not r:
+    for k, r in {**crush, "fuel": fuel, "oxidizer": ox, "ammo": ammo}.items():
+        if not r and k != "oxide":
             raise PlanError(f"no recipe for the ship's {k}")
     fluids = {rn: [i["name"] for i in raw["recipe"][rn].get("ingredients") or [] if i.get("type") == "fluid"]
               for rn in (fuel, ox)}
+    gas = None  # {fuel: (machine, recipe), oxidizer: ...} when both are condensed out of nothing
     if fluids[fuel] != ["water"] or fluids[ox] != ["water"]:
-        raise PlanError(f"thruster fuel here takes {', '.join(fluids[fuel])}, oxidizer {', '.join(fluids[ox])}: "
-                        "only the plain chain (water from ice) is laid out yet")
+        gas = {k: _condenser(data, fluids[rn]) for k, rn in (("fuel", fuel), ("oxidizer", ox))}
+        if not all(gas.values()):
+            raise PlanError(f"thruster fuel here takes {', '.join(fluids[fuel])}, oxidizer {', '.join(fluids[ox])}: "
+                            "only water from ice, or a gas a 5x5 machine makes from nothing, is laid out")
+    elif not melt or not crush["oxide"]:
+        raise PlanError("no recipe for the ship's " + ("ice melting" if not melt else "oxide crushing"))
     ents = []
 
     def put(name, x, y, d=None, **kw):
@@ -94,68 +126,103 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
 
     chunks = ("metallic-asteroid-chunk", "carbonic-asteroid-chunk", "oxide-asteroid-chunk")
     # north: two collectors, an inserter a chunk kind each; the metallic crusher
-    for x0 in (-4, -1):
-        put("asteroid-collector", x0 + 1.5, -6.5, NORTH)
+    if gas:
+        chunks = chunks[:2]  # (no ice wanted: the collectors leave oxide chunks be)
+    for i, x0 in enumerate((-4, -1)):
+        put("asteroid-collector", x0 + 1.5, -6.5, NORTH, wire_id=f"collector{i}",
+            bp_extra={"control_behavior": {"circuit_set_filters": True}})
         for dx, c in enumerate(chunks):
             ins(x0 + dx, -5, NORTH, c, HUB_CAPS["chunk"], only=c)
+    # the collectors take only the chunks the hub is short of (else one kind fills them and the others stop coming):
+    # a decider reading the hub (wired to it as it's built) plus a constant -cap a chunk sends each one short; a
+    # chunk that never comes this way (promethium) keeps the filter from going empty, which would take everything
+    want = [{"index": i + 1, "name": c, "quality": "normal", "comparator": "=", "count": -HUB_CAPS["chunk"]}
+            for i, c in enumerate(chunks)]
+    if "promethium-asteroid-chunk" in raw.get("asteroid-chunk", {}) or "promethium-asteroid-chunk" in raw.get("item", {}):
+        want.append({"index": len(want) + 1, "name": "promethium-asteroid-chunk", "quality": "normal",
+                     "comparator": "=", "count": -1})
+    put("constant-combinator", 5.5, -7.5, wire_id="chunk_want",
+        bp_extra={"control_behavior": {"sections": {"sections": [{"index": 1, "filters": want}]}}})
+    each = {"type": "virtual", "name": "signal-each"}
+    put("decider-combinator", 4.5, -7, NORTH, tags={"bpgen_hub": True},
+        wires_to=[("chunk_want", 2, 2), ("collector0", 4, 2), ("collector1", 4, 2)],
+        bp_extra={"control_behavior": {"decider_conditions": {
+            "conditions": [{"first_signal": each, "constant": 0, "comparator": "<"}],
+            "outputs": [{"signal": each, "copy_count_from_input": False, "constant": 1}]}}})
     put("crusher", 3, -6.5, NORTH, recipe=crush["metallic"])
     ins(2, -5, SOUTH)
     ins(3, -5, NORTH, "iron-ore", HUB_CAPS["ore"])
     # east: furnace, magazines, the magazines' way out
-    put("electric-furnace", 6.5, -2.5)
+    if "electric-furnace" in raw.get("furnace", {}):
+        put("electric-furnace", 6.5, -2.5)
+    else:  # (an assembler here, Krastorio 2: it wants its recipe set)
+        put("electric-furnace", 6.5, -2.5, recipe=_recipe_for(data, "iron-plate", ingredient="iron-ore"))
     ins(4, -4, WEST)
     ins(4, -2, EAST, "iron-plate", HUB_CAPS["plate"])
     put("assembling-machine-2", 6.5, 0.5, recipe=ammo)
     ins(4, -1, WEST)
     ins(4, 1, EAST, "firearm-magazine", HUB_CAPS["ammo"])
     ins(4, 3, WEST, only="firearm-magazine")  # (onto the turrets' belt)
-    # south: fuel plant with its melter (water straight across), the oxide crusher
-    put("chemical-plant", -2.5, 6.5, EAST, recipe=fuel)
-    ins(-3, 4, NORTH)
-    put("chemical-plant", 0.5, 6.5, EAST, recipe=melt)
-    ins(0, 4, NORTH)
-    put("crusher", 3, 6.5, NORTH, recipe=crush["oxide"])
-    ins(2, 4, NORTH)
-    ins(3, 4, SOUTH, "ice", HUB_CAPS["ice"])
-    # west: oxidizer plant with its melter below it, the carbonic crusher (lying down)
-    put("chemical-plant", -6.5, -2.5, SOUTH, recipe=ox)
-    ins(-5, -3, EAST)
-    put("chemical-plant", -6.5, 0.5, SOUTH, recipe=melt)
-    ins(-5, 0, EAST)
+    if gas:
+        # south: fuel plant with its outputs to the hub's edge, two hydrogen condensers under it (straight in)
+        put("chemical-plant", -2.5, 6.5, SOUTH, recipe=fuel)
+        ins(-3, 4, NORTH)
+        for cx in (-2.5, 2.5):
+            put(gas["fuel"][0], cx, 10.5, recipe=gas["fuel"][1])
+        # west: oxidizer plant, its oxygen condenser above it
+        put("chemical-plant", -6.5, -2.5, NORTH, recipe=ox)
+        ins(-5, -3, EAST)
+        put(gas["oxidizer"][0], -6.5, -6.5, recipe=gas["oxidizer"][1])
+    else:
+        # south: fuel plant with its melter (water straight across), the oxide crusher
+        put("chemical-plant", -2.5, 6.5, EAST, recipe=fuel)
+        ins(-3, 4, NORTH)
+        put("chemical-plant", 0.5, 6.5, EAST, recipe=melt)
+        ins(0, 4, NORTH)
+        put("crusher", 3, 6.5, NORTH, recipe=crush["oxide"])
+        ins(2, 4, NORTH)
+        ins(3, 4, SOUTH, "ice", HUB_CAPS["ice"])
+        # west: oxidizer plant with its melter below it
+        put("chemical-plant", -6.5, -2.5, SOUTH, recipe=ox)
+        ins(-5, -3, EAST)
+        put("chemical-plant", -6.5, 0.5, SOUTH, recipe=melt)
+        ins(-5, 0, EAST)
+    # (the carbonic crusher, lying down)
     put("crusher", -6.5, 3, EAST, recipe=crush["carbonic"])
     ins(-5, 2, EAST)
     ins(-5, 3, WEST, "carbon", HUB_CAPS["carbon"])
-    # thrusters at the back: fuel header (row 12) into each one's left, oxidizer header (row 10) into its right
-    ty = 16
+    # thrusters at the back: fuel header (row fy) into each one's left, oxidizer header (row oy) into its right
+    sh = 4 if gas else 0  # (below the condensers)
+    oy, fy, ty = 10 + sh, 12 + sh, 16 + sh
+    fx = -7 if gas else -5  # (the fuel's way down: clear of the condensers' west pipes)
     cxs = [-2 + PITCH * i for i in range(thrusters)]
     for cx in cxs:
         put("thruster", cx, ty + 0.5, NORTH)
     pipes = set()
-    for y in range(5, 13):  # (fuel: down from the fuel plant's outputs at (-5, 5), (-5, 7))
-        pipes.add((-5, y))
-    for x in range(-8, -5):  # (oxidizer: out of its plant's top, west, down)
-        pipes.add((x, -5))
-    for y in range(-5, 11):
-        pipes.add((-9, y))
+    if gas:  # (fuel: out of its plant's top at (-4, 4), west, down; oxidizer: out of its plant's bottom, west, down)
+        pipes |= {(-4, 4), (-5, 4), (-6, 4)} | {(fx, y) for y in range(4, fy + 1)}
+        pipes |= {(-8, -1)} | {(-9, y) for y in range(-1, oy + 1)}
+    else:  # (fuel: down from the fuel plant's outputs at (-5, 5), (-5, 7); oxidizer: out of its plant's top, west, down)
+        pipes |= {(fx, y) for y in range(5, fy + 1)}
+        pipes |= {(x, -5) for x in range(-8, -5)} | {(-9, y) for y in range(-5, oy + 1)}
     ugs = []  # (x, y, direction of its plain side)
     last_fuel = cxs[-1] - 3
-    for x in range(-5, last_fuel + 1):  # fuel header
-        pipes.add((x, 12))
+    for x in range(fx, last_fuel + 1):  # fuel header
+        pipes.add((x, fy))
     for i, cx in enumerate(cxs):
-        for y in (13, 14):
+        for y in range(fy + 1, ty - 1):
             pipes.add((cx - 3, y))
-        for y in range(10, 15):  # (the oxidizer's way down, over the fuel header)
+        for y in range(oy, ty - 1):  # (the oxidizer's way down, over the fuel header)
             pipes.add((cx + 2, y))
         if i < len(cxs) - 1:  # (the fuel header goes on under it)
-            pipes -= {(cx + 1, 12), (cx + 2, 12), (cx + 3, 12)}
-            pipes.add((cx + 2, 12))  # (the oxidizer's own)
-            ugs += [(cx + 1, 12, WEST), (cx + 3, 12, EAST)]
-    for x in range(-9, cxs[-1] + 3):  # oxidizer header, under the fuel's way down at x = -5
-        if x not in (-6, -5, -4):
-            pipes.add((x, 10))
-    pipes.discard((-5, 10))
-    pipes.add((-5, 10))  # (the fuel column itself)
-    ugs += [(-6, 10, WEST), (-4, 10, EAST)]
+            pipes -= {(cx + 1, fy), (cx + 2, fy), (cx + 3, fy)}
+            pipes.add((cx + 2, fy))  # (the oxidizer's own)
+            ugs += [(cx + 1, fy, WEST), (cx + 3, fy, EAST)]
+    for x in range(-9, cxs[-1] + 3):  # oxidizer header, under the fuel's way down
+        if x not in (fx - 1, fx, fx + 1):
+            pipes.add((x, oy))
+    pipes.add((fx, oy))  # (the fuel column itself)
+    ugs += [(fx - 1, oy, WEST), (fx + 1, oy, EAST)]
     for x, y in sorted(pipes):
         put(PIPE, x + 0.5, y + 0.5)
     for x, y, d in ugs:
@@ -192,7 +259,10 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
     # poles: on free tiles of a grid, wherever something powered is out of reach
     taken = set()
     sizes = {"asteroid-collector": (3, 3), "crusher": (2, 3), "chemical-plant": (3, 3), "electric-furnace": (3, 3),
-             "assembling-machine-2": (3, 3), "thruster": (4, 5), "gun-turret": (2, 2), "solar-panel": (3, 3)}
+             "assembling-machine-2": (3, 3), "thruster": (4, 5), "gun-turret": (2, 2), "solar-panel": (3, 3),
+             "decider-combinator": (1, 2)}
+    if gas:
+        sizes.update({m: (5, 5) for m, _ in gas.values()})
     for e in ents:
         w, h = sizes.get(e["name"], (1, 1))
         if e.get("direction") in (EAST, WEST) and e["name"] == "crusher":
@@ -276,6 +346,8 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
     notes = [f"{thrusters} thrusters, {turrets} gun turrets, {n_panels} solar panels ({draw / 1e6:.1f} MW at "
              f"{sun:.0%} sunlight in {location}'s orbit), {len(tiles)} foundation tiles",
              "paste it centred on the hub: everything feeding the hub is wired to it as it's built"]
+    if gas:
+        notes.append(f"fuel from {gas['fuel'][1]}, oxidizer from {gas['oxidizer'][1]} ({gas['fuel'][0]}s): no ice")
     if uncovered:
         notes.append("not reached by a pole: " + ", ".join(sorted(set(uncovered))))
     return {"entities": ents, "tiles": tiles, "notes": notes, "power": draw, "panels": n_panels}

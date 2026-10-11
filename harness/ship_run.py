@@ -1,7 +1,10 @@
 """Headless run of a generated ship (bpgen/ship.py) on a real space platform: created over Nauvis with the starter
 pack, the ship pasted round its hub (bpgen's mod wires the hub's inserters as they're built), left in orbit while
 asteroids come by, then sent to Vulcanus. Reports what the hub holds, the thrusters' fuel and oxidizer, the turrets'
-ammo and whether it moves. python harness/ship_run.py [minutes in orbit] [thrusters]"""
+ammo and whether it moves. python harness/ship_run.py [minutes in orbit] [thrusters] [--pack]
+
+--pack: with your own mod pack (bpgen's pack data; a game with your enabled mods linked in, and your mod settings),
+e.g. Krastorio 2's fuel from condensed hydrogen and oxygen."""
 import json
 import shutil
 import subprocess
@@ -14,6 +17,8 @@ from bpgen import extend, harness, planner, ship  # noqa: E402
 from bpgen.config import PATHS, plain_env  # noqa: E402
 from bpgen.service import Service  # noqa: E402
 
+PACK = "--pack" in sys.argv
+sys.argv = [a for a in sys.argv if a != "--pack"]
 RUN = ROOT / "run"
 OUT = RUN / "script-output" / "bpgen" / "ship.txt"
 MINUTES = float(sys.argv[1]) if len(sys.argv) > 1 else 10
@@ -42,6 +47,23 @@ local function report(p, what)
     ammo = ammo + t.get_inventory(defines.inventory.turret_ammo).get_item_count()
   end
   out(what .. " turret ammo " .. ammo)
+  local cf = {}
+  for _, c in pairs(p.surface.find_entities_filtered({ type = "asteroid-collector" })) do
+    local f = {}
+    for i = 1, 5 do
+      local ok, v = pcall(c.get_filter, i)
+      if ok and v then f[#f + 1] = (v.name or v):gsub("%-asteroid%-chunk", "") end
+    end
+    cf[#cf + 1] = "[" .. table.concat(f, ",") .. "]"
+  end
+  out(what .. " collectors " .. table.concat(cf, " "))
+  local st = game.forces.player.get_item_production_statistics(p.surface)
+  local made = {}
+  for _, n in ipairs({ "metallic-asteroid-chunk", "carbonic-asteroid-chunk", "oxide-asteroid-chunk", "ice", "iron-ore",
+                       "carbon" }) do
+    made[#made + 1] = n:gsub("%-asteroid%-chunk", "") .. "=" .. st.get_input_count(n) .. "/" .. st.get_output_count(n)
+  end
+  out(what .. " made/used " .. table.concat(made, " "))
   local names = {}
   for k, v in pairs(defines.entity_status) do names[v] = k end
   local st = {}
@@ -112,7 +134,7 @@ end)
 
 
 def main():
-    s = Service("vanilla")
+    s = Service("pack" if PACK else "vanilla")
     planner.configure(s.data)
     r = ship.plan_ship(s.data, thrusters=THRUSTERS)
     print("\n".join(r["notes"]))
@@ -121,8 +143,11 @@ def main():
     spec = {"bp": bp, "at": [x0 + w / 2, y0 + h / 2], "tiles": r["tiles"],
             "check": [[e["name"], e["position"]["x"], e["position"]["y"], e.get("direction", 0)] for e in r["entities"]],
             "orbit": int(MINUTES * 3600), "travel": 3600}
-    mods = RUN / "ship-mods"
+    mods = RUN / ("ship-pack-mods" if PACK else "ship-mods")
     shutil.rmtree(mods, ignore_errors=True)
+    names = ["base", "elevated-rails", "quality", "space-age"]
+    if PACK:
+        names = harness.link_user_mods(mods)
     mod = mods / "ship-test"
     mod.mkdir(parents=True)
     (mod / "info.json").write_text(json.dumps({"name": "ship-test", "version": "0.0.1", "title": "t", "author": "mtopfox",
@@ -130,7 +155,7 @@ def main():
     (mod / "control.lua").write_text(CONTROL, encoding="utf-8")
     (mod / "spec.lua").write_text("return " + harness.to_lua(spec), encoding="utf-8")
     shutil.copytree(ROOT / "mod" / "zzz-bpgen", mods / "zzz-bpgen")  # (wires the hub's inserters as they're built)
-    names = ["base", "elevated-rails", "quality", "space-age", "zzz-bpgen", "ship-test"]
+    names += ["zzz-bpgen", "ship-test"]
     (mods / "mod-list.json").write_text(json.dumps({"mods": [{"name": n, "enabled": True} for n in names]}))
     OUT.unlink(missing_ok=True)
     save = RUN / "ship.zip"

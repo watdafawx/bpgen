@@ -63,6 +63,31 @@ class _RunLock:
         self.f.close()
 
 
+def link_user_mods(mods):
+    """your enabled mods linked into `mods` (nothing copied, nothing of yours changed; bpgen and fse left out), with
+    your mod settings -> the names to enable"""
+    import re
+    mine = PATHS["user_mods"]
+    mods.mkdir(parents=True, exist_ok=True)
+    listed = json.loads((mine / "mod-list.json").read_text(encoding="utf-8"))["mods"]
+    enabled = []
+    for m in listed:
+        n = m["name"]
+        if not m.get("enabled") or n == "zzz-bpgen" or n.startswith("fse"):
+            continue
+        enabled.append(n)
+        if n in ("base", "elevated-rails", "quality", "space-age", "core"):
+            continue
+        pat = re.compile(rf"^{re.escape(n)}_(\d+)\.(\d+)\.(\d+)\.zip$")
+        found = sorted((f for f in mine.iterdir() if pat.match(f.name)),
+                       key=lambda f: tuple(int(v) for v in pat.match(f.name).groups()))
+        found += [mine / n] if (mine / n).is_dir() else []
+        if found:
+            (mods / found[-1].name).symlink_to(found[-1], target_is_directory=found[-1].is_dir())
+    if (mine / "mod-settings.dat").exists():
+        shutil.copy(mine / "mod-settings.dat", mods / "mod-settings.dat")
+    return enabled
+
 def _stream(cmd, stage, total_mods, progress, cancel, timeout, log_path):
     """run factorio, turning its log into progress messages; kill it on cancel/timeout"""
     progress = progress or (lambda msg: None)

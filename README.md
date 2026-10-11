@@ -51,9 +51,12 @@ places the same (no desyncs). The window's mouse-dragged preview works with its 
   Asteroid collectors (hanging over the front edge), crushers, ice melted for thruster fuel and oxidizer, iron into
   gun-turret ammo, solar panels for the orbit's sunlight, foundation under it all; the hub is the store, and what goes
   into it runs only while it holds little of that item (bpgen's mod wires those inserters to the hub as they're
-  built). Pick thrusters, turrets and the orbit; stand on the platform and Place it. In a game: fuel and oxidizer full
-  within 10 minutes in Nauvis orbit, turrets stocked, and it flies (`harness\ship_run.py`). Krastorio's own fuel
-  chain (hydrogen, oxygen) isn't laid out yet.
+  built), and the collectors only take the chunks the hub is short of (a decider reading the hub sets their
+  filters, so one kind can't fill them and starve the others). Pick thrusters, turrets and the orbit; stand on the
+  platform and Place it. In a game: fuel and oxidizer full within 10 minutes in Nauvis orbit, turrets stocked, and it flies (`harness\ship_run.py`). With Krastorio 2 (fuel
+  from hydrogen, oxidizer from oxygen) atmospheric condensers stand in for the melters: two for hydrogen under the
+  fuel plant, one for oxygen above the oxidizer plant, no ice and no oxide crusher, the collectors set to metallic and
+  carbonic chunks only (`harness\ship_run.py 10 2 --pack`: full tanks, flies).
 - **Starter bases**: science per minute up to labs, with a mall. Laid out compact (blocks in columns, belts routed
   between them) or as a **main bus**: one column of blocks beside a bus of belts, each block taking what it needs and
   putting back what it makes, the mall taking from the same bus.
@@ -218,7 +221,7 @@ one machine per product.
 the same on both peers, no desync), `mod\test\run.py`, `extend_test.py` (headless game with the mod; `bus` as its fourth argument: a main bus),
 `bus_extend_test.py` (placement beside a bus, no game), `harness\botmall_test.py` (a robot-fed mall built and
 run), `mod\test\bus_feed_test.py` (a line fed from the bus, no game), `mod\test\mall_bus_test.py` (a grid mall fed
-from the bus, no game), `mod\test\refit_test.py` (a messy area refit as a mall and as a base, no game), `mod\test\move_test.py` (a section moved, its belts reconnected, no game), `mod\test\ship_test.py` (the ship generator, no game) and `harness\ship_run.py [minutes] [thrusters]` (a ship on a real platform: fuel, ammo, flight), `mod\test\mall_loop_test.py` (the belt-loop mall, no game), `harness\grid_mall_run.py [minutes] [--sushi | --pack]` (the starter grid mall built and run: every product
+from the bus, no game), `mod\test\refit_test.py` (a messy area refit as a mall and as a base, no game), `mod\test\move_test.py` (a section moved, its belts reconnected, no game), `mod\test\ship_test.py` (the ship generator, no game) and `harness\ship_run.py [minutes] [thrusters] [--pack]` (a ship on a real platform: fuel, ammo, flight; `--pack` with your own mods), `mod\test\mall_loop_test.py` (the belt-loop mall, no game), `harness\grid_mall_run.py [minutes] [--sushi | --pack]` (the starter grid mall built and run: every product
 made), `mod\test\tiers_test.py` then
 `harness\tiers_paste_test.py` (starter base tiers, then pasted in a game: C on C), `mod\test\fit_bus_test.py`
 then `harness\fit_place_test.py` and `harness\fit_bus_run.py [direction] [minutes]` (a base fitted to a bus design:

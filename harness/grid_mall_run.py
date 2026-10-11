@@ -4,7 +4,6 @@ down). --pack: the loop mall of a Krastorio-style list with your own mod pack (b
 enabled mods linked in, and your mod settings; bpgen and fse left out). --sushi: the loop mall (bpgen/mall_sushi.py) instead, with products needing lubricant and water
 (infinity pipes on its fluid inputs). python harness/grid_mall_run.py [minutes] [--sushi]"""
 import json
-import re
 import shutil
 import subprocess
 import sys
@@ -230,25 +229,7 @@ def main():
     shutil.rmtree(mods, ignore_errors=True)
     enabled = ["base"]
     if PACK:  # (your enabled mods, linked: nothing copied, nothing of yours changed)
-        mine = PATHS["user_mods"]
-        mods.mkdir(parents=True)
-        listed = json.loads((mine / "mod-list.json").read_text(encoding="utf-8"))["mods"]
-        enabled = []
-        for m in listed:
-            n = m["name"]
-            if not m.get("enabled") or n == "zzz-bpgen" or n.startswith("fse"):
-                continue
-            enabled.append(n)
-            if n in ("base", "elevated-rails", "quality", "space-age", "core"):
-                continue
-            pat = re.compile(rf"^{re.escape(n)}_(\d+)\.(\d+)\.(\d+)\.zip$")
-            found = sorted((f for f in mine.iterdir() if pat.match(f.name)),
-                           key=lambda f: tuple(int(v) for v in pat.match(f.name).groups()))
-            found += [mine / n] if (mine / n).is_dir() else []
-            if found:
-                (mods / found[-1].name).symlink_to(found[-1], target_is_directory=found[-1].is_dir())
-        if (mine / "mod-settings.dat").exists():
-            shutil.copy(mine / "mod-settings.dat", mods / "mod-settings.dat")
+        enabled = harness.link_user_mods(mods)
     mod = mods / "gridmall-test"
     mod.mkdir(parents=True)
     (mod / "info.json").write_text(json.dumps({"name": "gridmall-test", "version": "0.0.1", "title": "t",
