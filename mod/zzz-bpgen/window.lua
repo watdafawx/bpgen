@@ -12,6 +12,7 @@ local PREVIEW = "bpgen-preview"
 -- with the fse-std library mod (optional): its window, resized by its corner grip like every fse window
 local stdwin = script.active_mods["fse-std"] and require("__fse-std__/window") or nil
 local stdinput = stdwin and require("__fse-std__/input") or nil
+local ui = require("ui")
 local FRAME_W, FRAME_H = 360, 366  -- (the window around the preview: the tabs, the left panel, the rows under it)
 local INFO_H = 170                   -- (the scroll area under the preview, at most)
 local LEFT_W = 324                   -- (the library window's width besides the preview: the left panel, borders)
@@ -280,10 +281,13 @@ end
 ---------------------------------------------------------------------------------------------------------------------
 -- the window
 
-local MODES = { "line", "mall", "base", "extend", "busdesign", "ship" }
+local MODES = { "line", "mall", "base", "extend", "busdesign", "refit", "move", "ship" }
 -- (the tabs along the top: short, so all five fit a narrow window; the full name as their tooltip)
-local MODE_NAMES = { "Line", "Mall", "Base", "Extend", "Bus", "Ship" }
-local MODE_TIPS = { "Production line", "Mall", "Starter base", "Extend my base", "Bus design", "Space platform (Space Age)" }
+local MODE_NAMES = { "Line", "Mall", "Base", "Extend", "Bus", "Refit", "Move", "Ship" }
+local MODE_TIPS = { "One recipe at a rate, on the belt you pick", "Many products, a chest each",
+  "Science per minute, up to the labs", "Make an item next to your base, fed by its belts",
+  "Ore patches to plates on a main bus", "Tidy a part of your base that grew all over the place",
+  "Move a section of your base, its belts reconnected", "A space platform round its hub (Space Age)" }
 local BUS_DIRS = { "north", "east", "south", "west" }
 local patch_areas = safe.stored("patch_areas")  -- player index -> {{area, counts = {resource = tiles}}}: the ore patches picked for a bus design
 local bus_shift = safe.stored("bus_shift")  -- player index -> tiles the bus head is moved sideways from the player (the ◀ ▶ arrows)
@@ -298,8 +302,8 @@ local function row(parent, caption, tooltip)
 end
 
 --- a framed section with its heading (as the web app's panels)
-local function section(parent, title, tooltip)
-  local f = parent.add({ type = "frame", style = "bordered_frame", direction = "vertical" })
+local function section(parent, title, tooltip, name)
+  local f = parent.add({ type = "frame", style = "bordered_frame", direction = "vertical", name = name })
   f.style.horizontally_stretchable = true
   f.add({ type = "label", caption = title, style = "caption_label", tooltip = tooltip })
   return f
@@ -499,6 +503,33 @@ local function set_mode(frame, mode)
   find(frame, "bpgen_extend_box").visible = mode == "extend"
   find(frame, "bpgen_bus_box").visible = mode == "busdesign"
   find(frame, "bpgen_ship_box").visible = mode == "ship"
+  find(frame, "bpgen_refit_box").visible = mode == "refit"
+  find(frame, "bpgen_move_box").visible = mode == "move"
+  -- ("Next to my base" and its buttons: for what can go next to the base)
+  find(frame, "bpgen_next_box").visible = mode == "line" or mode == "mall" or mode == "extend"
+  find(frame, "bpgen_base_tools").visible = mode ~= "ship"
+  for i, m in ipairs(MODES) do
+    if m == mode then find(frame, "bpgen_mode_tip").caption = MODE_TIPS[i] end
+  end
+  M.steps(frame)
+end
+
+--- the step bar: 1 What (a mode, always), 2 How (until there is a plan), 3 Where (a plan to place)
+function M.steps(frame)
+  local bar = find(frame, "bpgen_steps")
+  if not bar then return end
+  local r = results[frame.player_index]
+  local mode = find(frame, "bpgen_tabs").tags.mode
+  local made = r and r.res and r.res.mode
+  local planned = r ~= nil and r.blueprint ~= nil and (made == mode or (mode == "refit" and made == "mall")
+    or (made == "lane" and mode == "extend"))
+  local now = planned and 3 or 2
+  for i, el in ipairs(bar.children) do
+    if el.tags.step then
+      el.toggled = el.tags.step == now
+      el.enabled = el.tags.step <= now
+    end
+  end
 end
 
 --- the picked ore patches, listed under the button
@@ -536,7 +567,7 @@ function M.open(player, prefill)
   if stdwin then
     local cw, ch = cam_size(player)
     frame, holder = stdwin.create(player, { name = NAME, title = "bpgen", width = cw + LEFT_W, height = ch + FRAME_H,
-      min_width = 420 + LEFT_W, min_height = 300 + FRAME_H })
+      min_width = 420 + LEFT_W, min_height = 300 + FRAME_H, themed = ui.themed })
     holder.style.padding = 0
   else
     frame = screen.add({ type = "frame", name = NAME, direction = "vertical" })
@@ -550,21 +581,30 @@ function M.open(player, prefill)
     holder = frame
   end
 
-  -- what to make: tabs along the top
-  local top = holder.add({ type = "flow", direction = "horizontal" })  -- (the tabs, then "Only unlocked")
-  local tabs = top.add({ type = "flow", name = "bpgen_tabs", direction = "horizontal", tags = { mode = "line" } })
-  tabs.style.horizontal_spacing = 0
-  tabs.style.left_padding = 4
-  for i, m in ipairs(MODES) do
-    local tab = tabs.add({ type = "button", caption = MODE_NAMES[i], tooltip = MODE_TIPS[i], toggled = i == 1,
-      tags = { bpgen = "tab", mode = m } })
-    tab.style.minimal_width = 56
+  -- 1 What: a card for each thing bpgen makes; 2 How: its form, left; 3 Where: the plan, right, and where it goes
+  local steps = holder.add({ type = "flow", name = "bpgen_steps", direction = "horizontal" })
+  steps.style.vertical_align = "center"
+  steps.style.left_padding = 6
+  for i, name in ipairs({ "1  What", "2  How", "3  Where" }) do
+    if i > 1 then ui.add(steps, { type = "label", caption = "›" }, "dim") end
+    ui.add(steps, { type = "button", caption = name, tags = { step = i }, toggled = i == 2,
+      tooltip = ({ "Pick what to make", "Set it up, then Plan", "Look at the plan, then place it" })[i] }, "tab",
+      { minimal_width = 80, height = 26 })
   end
-  local spacer = top.add({ type = "empty-widget" })
-  spacer.style.horizontally_stretchable = true
-  top.add({ type = "checkbox", name = "bpgen_only_unlocked", caption = "Only unlocked",
+  steps.add({ type = "empty-widget" }).style.horizontally_stretchable = true
+  ui.add(steps, { type = "checkbox", name = "bpgen_only_unlocked", caption = "Only unlocked",
     state = only_unlocked[player.index] == true,
-    tooltip = "Pickers offer only recipes you can craft and what you can build now" })
+    tooltip = "Pickers offer only recipes you can craft and what you can build now" }, "check")
+  local top = holder.add({ type = "flow", direction = "vertical" })
+  top.style.left_padding = 6
+  top.style.right_padding = 6
+  local tabs = top.add({ type = "table", name = "bpgen_tabs", column_count = #MODES, tags = { mode = "line" } })
+  tabs.style.horizontal_spacing = 4
+  for i, m in ipairs(MODES) do
+    ui.add(tabs, { type = "button", caption = MODE_NAMES[i], tooltip = MODE_TIPS[i], toggled = i == 1,
+      tags = { bpgen = "tab", mode = m } }, "tab", { minimal_width = 70, height = 34 })
+  end
+  ui.add(top, { type = "label", name = "bpgen_mode_tip", caption = MODE_TIPS[1] }, "dim")
   local body = holder.add({ type = "flow", direction = "horizontal" })
   local outer = body.add({ type = "frame", style = "inside_shallow_frame", direction = "vertical" })
   outer.style.width = 300
@@ -644,10 +684,11 @@ function M.open(player, prefill)
     text = "4", numeric = true, lose_focus_on_confirm = true }).style.width = 60
   field(fs, "Keep", "mixed belts: each machine takes from the belts only while its chest has fewer than this (wired to the chest), so the ones down a column get plates soon; 0: no limit").add({
     type = "textfield", name = "bpgen_mall_stock", text = "10", numeric = true, lose_focus_on_confirm = true }).style.width = 60
-  sec = section(mall, "Refit an area", "A part of your base that grew all over the place: drag over it, and its machines are laid out again as a compact mall in its place (fed from your main bus when there is one). Place it marks the old ones for removal")
-  fs = fields(sec)
-  fs.add({ type = "button", caption = "Pick the area", tags = { bpgen = "refit" },
-    tooltip = "Gives you the refit tool: drag over the area. Its products fill the list above, and it plans" })
+  -- refit: an area of the base laid out again (its own mode: Plan gives the refit tool)
+  local refitb = left.add({ type = "flow", name = "bpgen_refit_box", direction = "vertical", visible = false })
+  sec = section(refitb, "Refit an area", "A part of your base that grew all over the place: drag over it, and its machines are laid out again, compact, in its place (fed from your main bus when there is one). Place it marks the old ones for removal")
+  ui.add(sec, { type = "label", caption = "Press Plan, then drag over the area with the refit tool." }, "dim",
+    { single_line = false, maximal_width = 260 })
   fs = fields(sec)
   field(fs, "Refit as", "a mall: the area's products, compact. A base on a bus: the science the area makes (its labs and what feeds them), rebuilt as a main-bus base").add({
     type = "drop-down", name = "bpgen_refit_as", items = { "a mall", "a base on a bus" }, selected_index = 1 })
@@ -694,9 +735,10 @@ function M.open(player, prefill)
   field(fs, "Item").add({ type = "choose-elem-button", elem_type = "item", name = "bpgen_ext_item" })
   field(fs, "Per minute").add({ type = "textfield", name = "bpgen_ext_rate", text = "30", numeric = true,
     allow_decimal = true, lose_focus_on_confirm = true }).style.width = 60
-  sec = section(ext, "Move a section", "Drag over a part of your base: it's previewed near you (the arrows move it), Place it builds it there, marks the old one for removal and runs its belts in and out to your base again")
-  sec.add({ type = "button", caption = "Pick the section", tags = { bpgen = "move" },
-    tooltip = "Gives you the move tool: drag over the section to move. Stand where it should go first" })
+  -- move: a section of the base somewhere else (its own mode: Plan gives the move tool)
+  local moveb = left.add({ type = "flow", name = "bpgen_move_box", direction = "vertical", visible = false })
+  sec = section(moveb, "Move a section", "Drag over a part of your base: it's previewed where you stand (the arrows move it), Place it builds it there, marks the old one for removal and runs its belts in and out to your base again")
+  ui.add(sec, { type = "label", caption = "Stand where it should go, press Plan, then drag over the section with the move tool. Its settings and wires go with it." }, "dim", { single_line = false, maximal_width = 260 })
   sec = section(ext, "Your base")
   sec.add({ type = "button", caption = "Pick my base area", tags = { bpgen = "snapshot" },
     tooltip = "Optional: gives you the snapshot tool, to drag over the part of your base to build next to (its belts feed the new part). Without it, bpgen looks around you" })
@@ -714,13 +756,14 @@ function M.open(player, prefill)
   field(fs, "Gun turrets").add({ type = "textfield", name = "bpgen_ship_turrets", text = "6", numeric = true,
     lose_focus_on_confirm = true }).style.width = 60
   fs = fields(sec)
-  local orbits = {}
+  local orbits, names = {}, {}
   for name, loc in pairs(prototypes.space_location or {}) do
     if loc.type == "planet" then orbits[#orbits + 1] = name end
   end
   table.sort(orbits)
+  for i, n in ipairs(orbits) do names[i] = { "", "[space-location=" .. n .. "] ", prototypes.space_location[n].localised_name } end
   field(fs, "Solar sized for", "the orbit with the least sunlight it will be in (solar power in space differs)").add({
-    type = "drop-down", name = "bpgen_ship_orbit", items = orbits,
+    type = "drop-down", name = "bpgen_ship_orbit", items = names, tags = { orbits = orbits },
     selected_index = math.max(1, (function() for i, n in ipairs(orbits) do if n == "nauvis" then return i end end end)() or 1) })
   local bus = left.add({ type = "flow", name = "bpgen_bus_box", direction = "vertical", visible = false })
   sec = section(bus, "Ore patches", "drills cover each patch; their ore runs on belts to smelters at the bus head")
@@ -758,13 +801,14 @@ function M.open(player, prefill)
     elem_filters = { { filter = "type", type = "transport-belt" } } })
   show_patches(frame, player)
 
-  sec = section(left, "Next to my base")
+  sec = section(left, "Next to my base", nil, "bpgen_next_box")
   sec.add({ type = "checkbox", name = "bpgen_ext_bus", caption = "Build from my main bus", state = true,
     tooltip = "Extend and \"Next to my base\": when your base has a main bus there (3+ long straight belts side by side, flowing the same way), build beside it, branching off its lanes, with a new lane for an output it doesn't carry yet, and the bus continued past the build when it ends before it. Unticked: free ground nearest the belts" })
   local go = left.add({ type = "flow", direction = "horizontal" })
   go.style.top_margin = 8
-  go.add({ type = "button", caption = "Plan", style = "confirm_button", tags = { bpgen = "plan" } })
-  go = left.add({ type = "flow", direction = "horizontal" })  -- (looking at the base: a row of their own)
+  ui.add(go, { type = "button", caption = "Plan", tags = { bpgen = "plan" } }, "ok",
+    { horizontally_stretchable = true, height = 36 })
+  go = left.add({ type = "flow", name = "bpgen_base_tools", direction = "horizontal" })  -- (looking at the base)
   go.add({ type = "button", caption = "What's short?", tags = { bpgen = "short" },
     tooltip = "What your factory uses faster than it makes (last 10 minutes): plan one of them" })
   go.add({ type = "button", caption = "Check my bus", tags = { bpgen = "check_bus" },
@@ -772,11 +816,22 @@ function M.open(player, prefill)
   local st = left.add({ type = "label", name = "bpgen_status" })
   st.style.single_line = false
   st.style.maximal_width = 270
+  -- planning: where it is (a bar, the current step) and what it did (the details, folded)
+  local prog = left.add({ type = "flow", name = "bpgen_progress", direction = "vertical", visible = false })
+  ui.progress(prog, 0, { caption = "Planning", text = "" }).name = "bpgen_progress_bar"
+  local details = ui.fold(prog, "Details", false, "bpgen_details")
+  local log_ = ui.add(details, { type = "label", name = "bpgen_log", caption = "" }, "dim",
+    { single_line = false, maximal_width = 260, font = "default-small" })
+  log_.style.single_line = false
 
   local right = body.add({ type = "frame", style = "inside_deep_frame", direction = "vertical" })
   local cam = right.add({ type = "camera", name = "bpgen_cam", position = { 0, 0 }, surface_index = player.surface.index, zoom = 1,
     raise_hover_events = true, tooltip = safe.has("std") and "Drag to move, mouse wheel to zoom" or nil })
   local CAM_W, CAM_H = cam_size(player)
+  -- what the plan comes to: a few numbers under the preview
+  local tiles = right.add({ type = "flow", name = "bpgen_tiles", direction = "horizontal", visible = false })
+  tiles.style.horizontal_spacing = 6
+  tiles.style.padding = 4
   local res, scale = player.display_resolution, player.display_scale  -- (a size kept from a bigger screen: fit it)
   CAM_W, CAM_H = math.min(CAM_W, res.width / scale - 380), math.min(CAM_H, res.height / scale - FRAME_H - 20)
   if not stdwin then
@@ -807,6 +862,8 @@ function M.open(player, prefill)
       or "Next size (small, medium, large)" })
   local push = tools.add({ type = "empty-widget" })
   push.style.horizontally_stretchable = true
+  tools.add({ type = "button", name = "bpgen_test_speed", caption = "×1", tags = { bpgen = "test_speed" }, visible = false,
+    tooltip = "Fast-forward the test run: the whole game runs this much faster until the test ends (single player)" })
   tools.add({ type = "button", name = "bpgen_test", caption = "Test run", tags = { bpgen = "test" }, enabled = false,
     tooltip = "Runs the line for real on the preview: inputs fed, output counted, starved machines marked" })
   tools = under.add({ type = "flow", direction = "horizontal" })
@@ -854,6 +911,7 @@ function M.open(player, prefill)
   end
 
   fit_panel(left)
+  ui.adopt(frame)  -- (the game's styles it was built with: each player's theme)
 
   -- filled in (a hovered machine; tests: a mode, mall products, science per minute, options shown)
   set_mode(frame, prefill.mode or "line")
@@ -975,7 +1033,7 @@ local function request(player, frame)
     local dd = find(frame, "bpgen_ship_orbit")
     req.params = { mode = "ship", thrusters = tonumber(find(frame, "bpgen_ship_thrusters").text) or 2,
       turrets = tonumber(find(frame, "bpgen_ship_turrets").text) or 6,
-      location = dd.items[dd.selected_index] or "nauvis", belt = req.belt or u.belts[1] }
+      location = (dd.tags.orbits or {})[dd.selected_index] or "nauvis", belt = req.belt or u.belts[1] }
     return req
   elseif mode == "busdesign" then
     local list = {}
@@ -1106,10 +1164,7 @@ function M.place_absolute(player)
   local ghosts, _, area, marks = place.place(player, r.blueprint, nil, r.res.absolute.box)
   for _, e in ipairs(cleared) do marks[#marks + 1] = e end
   placed[player.index], unmark[player.index] = ghosts, marks
-  if area then
-    rendering.draw_rectangle({ color = { 0.2, 0.8, 1 }, width = 4, filled = false, left_top = area[1],
-      right_bottom = area[2], surface = player.surface, players = { player }, time_to_live = 60 * 120 })
-  end
+  if area then place.outline(player, area, r.res.label or "placed by bpgen") end
   local a = r.res.absolute
   if a.head then  -- (a new bus lane: where to feed it)
     rendering.draw_text({ text = { "", "feed [item=" .. a.item .. "] here" }, surface = player.surface, target = a.head,
@@ -1189,18 +1244,23 @@ end
 function M.plan(player)
   local frame = player.gui.screen[NAME]
   if not frame then return end
+  local mode = mode_of(frame)
+  if mode == "refit" or mode == "move" then  -- (what to plan comes from the area dragged over)
+    return M.click(player.index, { bpgen = mode })
+  end
   local req, err = request(player, frame)
   if not req then return status(frame, err) end
   local ok, why = ctx.start(player, req)
-  status(frame, ok and "Planning..." or ("Can't plan in game: " .. tostring(why)))
+  status(frame, ok and "" or ("Can't plan in game: " .. tostring(why)))
+  if ok then M.on_progress(player, { fraction = 0, step = "starting" }) end
 end
 
 --- a section of the base to move (the move tool): its blueprint (settings, wires) and where it is, to bpgen, which
 --- places it near the player with its belts in and out run to the base again (see ingame.move)
 function M.move(player, area)
-  if not player.gui.screen[NAME] then M.open(player, { mode = "extend" }) end
+  if not player.gui.screen[NAME] then M.open(player, { mode = "move" }) end
   local frame = player.gui.screen[NAME]
-  set_mode(frame, "extend")
+  set_mode(frame, "move")
   local inv = game.create_inventory(1)
   local stack = inv[1]
   stack.set_stack({ name = "blueprint" })
@@ -1315,9 +1375,51 @@ local function row_note(row, caption, name)
 end
 
 --- a plan's answer (from control.lua's job loop)
+--- the plan getting on: {fraction 0..1, step = what it does now, lines = what it did} (from bpgen.ingame:progress)
+function M.on_progress(player, p)
+  local frame = player.gui.screen[NAME]
+  local box = frame and find(frame, "bpgen_progress")
+  if not box then return end
+  box.visible = true
+  local bar = find(box, "bpgen_progress_bar")
+  if bar then ui.set_progress(bar, p.fraction or 0, p.step or "") end
+  local log_ = find(box, "bpgen_log")
+  if log_ and p.lines and #p.lines > 0 then
+    local all = {}
+    for line in tostring(log_.caption):gmatch("[^\n]+") do all[#all + 1] = line end
+    for _, line in ipairs(p.lines) do all[#all + 1] = line end
+    while #all > 14 do table.remove(all, 1) end
+    log_.caption = table.concat(all, "\n")
+  end
+end
+
+--- a few numbers about the plan under the preview
+local function show_tiles(frame, res, w, h)
+  local row = find(frame, "bpgen_tiles")
+  if not row then return end
+  row.clear()
+  local a, sm = res.absolute or {}, res.summary or {}
+  local function tile(v, caption)
+    if v then ui.stat(row, tostring(v), caption, { horizontally_stretchable = false, minimal_width = 96 }) end
+  end
+  if a.box then tile(a.box[3] .. " × " .. a.box[4], "size")
+  elseif type(w) == "number" then tile(math.floor(w) .. " × " .. math.floor(h), "size") end
+  tile(sm.machines or (res.mall and res.mall.machines), "machines")
+  if a.taps then tile(a.taps, "taps on your belts") end
+  if a.inputs and #a.inputs > 0 then tile(#a.inputs, "to feed by hand") end
+  if res.expected then tile(string.format("%.1f/min", res.expected * 60), "made") end
+  row.visible = #row.children > 0
+end
+
 function M.on_result(player, res)
   local frame = player.gui.screen[NAME]
   if not frame then return false end
+  local prog = find(frame, "bpgen_progress")
+  if prog and not res.measure then
+    prog.visible = false
+    local log_ = find(prog, "bpgen_log")
+    if log_ then log_.caption = "" end
+  end
   if not res.blueprint then
     if res.measure and not M.measuring(player) then
       -- (inserter setups bpgen hasn't measured: measured here and now, live, then planned again)
@@ -1332,6 +1434,9 @@ function M.on_result(player, res)
   end
   local old = bench.find("test", player.index)
   if old then bench.stop(old.id) end
+  if storage.bpgen_speed_was then  -- (a test run's fast-forward: off with it)
+    game.speed, storage.bpgen_speed_was = storage.bpgen_speed_was, nil
+  end
   find(frame, "bpgen_test_status").caption = ""
   local center, w, h, where = build_preview(player, res.blueprint, res.absolute and res.absolute.box)
   local sec = find(frame, "bpgen_section")
@@ -1351,6 +1456,9 @@ function M.on_result(player, res)
     cam.visible, empty.visible = false, true
     empty.caption = "No preview: " .. tostring(w)
   end
+  show_tiles(frame, res, w, h)
+  M.steps(frame)
+  ui.adopt(frame)
   find(frame, "bpgen_cursor").enabled = true
   find(frame, "bpgen_copy").enabled = safe.has("std")
   find(frame, "bpgen_place").enabled = where ~= nil
@@ -1601,11 +1709,18 @@ local function on_api(player, tag, out)
     local box = find(frame, "bpgen_also")
     box.clear()
     local function add_row(parent, sib)
+      -- (its name and icon: the item's, else the recipe's - bpgen's data may name an item the game calls otherwise)
+      local rp = prototypes.recipe[sib.recipe or ""]
+      local caption = (prototypes.item[sib.item] or prototypes.fluid[sib.item]) and named(sib.item)
+        or rp and { "", "[recipe=" .. rp.name .. "] ", rp.localised_name }
+      if not caption then return end  -- (not in this game: bpgen's copy of the mods is behind it)
       local f = parent.add({ type = "flow", direction = "horizontal" })
       f.style.vertical_align = "center"
       f.style.horizontally_stretchable = true
-      f.add({ type = "checkbox", state = false, caption = named(sib.item), tags = { item = sib.item, recipe = sib.recipe } })
-      row_note(f, "")
+      local cb = f.add({ type = "checkbox", state = false, caption = caption, tags = { item = sib.item, recipe = sib.recipe } })
+      cb.style.maximal_width = 200  -- (a long name shortens: the rate boxes stay in one column)
+      cb.style.horizontally_squashable = true
+      f.add({ type = "empty-widget" }).style.horizontally_stretchable = true
       f.add({ type = "textfield", numeric = true, allow_decimal = true, tooltip = "a minute (empty: what fits)" }).style.width = 44
     end
     local near = {}
@@ -1622,6 +1737,8 @@ local function on_api(player, tag, out)
       end
     end
     if #r == 0 then box.add({ type = "label", caption = "(nothing else is made from the same inputs)" }) end
+    fit_panel(box)
+    ui.adopt(box)
   elseif tag == "tree" and r then
     local box = find(frame, "bpgen_make")
     box.clear()
@@ -1656,6 +1773,16 @@ local function mark(player, boxes)
     rendering.draw_rectangle({ color = { 1, 0.25, 0.1 }, width = 3, filled = false, left_top = b.left_top,
       right_bottom = b.right_bottom, surface = PREVIEW, players = { player }, time_to_live = 62 })
   end
+end
+
+--- the test run's fast-forward off: the game's speed as it was
+local function test_speed_off(frame)
+  if storage.bpgen_speed_was then
+    game.speed = storage.bpgen_speed_was
+    storage.bpgen_speed_was = nil
+  end
+  local b = frame and find(frame, "bpgen_test_speed")
+  if b then b.caption, b.visible = "×1", false end
 end
 
 local function describe_test(run, final)
@@ -1715,6 +1842,7 @@ bench.on_done = function(run, cases)
   find(frame, "bpgen_test_status").caption = text
   mark(player, starved)
   find(frame, "bpgen_test").caption = "Test run"
+  test_speed_off(frame)
 end
 
 local function to_cursor(player)
@@ -1756,11 +1884,20 @@ local function on_click(e)
       bench.stop(run.id)
       find(frame, "bpgen_test").caption = "Test run"
       find(frame, "bpgen_test_status").caption = "Test stopped."
+      test_speed_off(frame)
     else
       bench.test(player.index, r.res.test, r.where.origin, r.where.area, PREVIEW)
       find(frame, "bpgen_test").caption = "Stop test"
       find(frame, "bpgen_test_status").caption = "Starting..."
+      find(frame, "bpgen_test_speed").visible = not game.is_multiplayer()
     end
+  elseif action == "test_speed" and not game.is_multiplayer() then
+    local b = find(frame, "bpgen_test_speed")
+    local next_ = ({ ["×1"] = 5, ["×5"] = 10, ["×10"] = 1 })[tostring(b.caption)] or 1
+    storage.bpgen_speed_was = storage.bpgen_speed_was or game.speed
+    game.speed = next_ == 1 and storage.bpgen_speed_was or next_
+    if next_ == 1 then storage.bpgen_speed_was = nil end
+    b.caption = "×" .. next_
   elseif action == "cursor" and r then
     ctx.api(player, "history", { add = r.blueprint, mode = r.res.mode }, "history_add")
     to_cursor(player)
@@ -1843,7 +1980,8 @@ local function on_click(e)
       local ghosts, origin, area, marks = place.place(player, r.blueprint, c)
       placed[player.index], unmark[player.index] = ghosts, marks
       if origin then
-        local found, missing = place.guide(player, area, origin, r.res.test and r.res.test.case.sources or {})
+        local found, missing = place.guide(player, area, origin, r.res.test and r.res.test.case.sources or {},
+          r.res.label)
         status(frame, string.format("Placed %d ghosts next to you (outlined). %s", #ghosts,
           #missing > 0 and ("Nothing of yours nearby carries " .. table.concat(missing, " ")) or
           (found > 0 and "Dashed lines: where each input can come from." or "")))
@@ -1851,6 +1989,7 @@ local function on_click(e)
       ctx.api(player, "history", { add = r.blueprint, mode = r.res.mode }, "history_add")
     end
   elseif action == "unplace" then
+    place.clear_outline(player)
     local n = 0
     for _, g in pairs(placed[player.index] or {}) do
       if g.valid and (g.type == "entity-ghost" or g.type == "tile-ghost") then g.destroy() n = n + 1 end

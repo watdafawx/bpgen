@@ -20,6 +20,32 @@ _lock = threading.Lock()  # (plans share one Service: one at a time)
 _taking = None  # the thread writing data the game sent (planning waits for it)
 _last = None  # the last plan that isn't placed yet (entities, sources, sinks...): what place() puts next to the base
 _sections = {}  # a starter base's prints by name (place() can put one of them next to the base)
+# what the job running now has done, for the window's progress bar (read by progress(), without _lock: the job holds
+# it while it works). Appending to a list is atomic in CPython.
+STAGES = ("reading your request", "planning", "placing it next to your base", "finishing")
+_prog = {"stage": 0, "lines": [], "seen": 0, "in_stage": 0}
+
+
+def _note(text, stage=None):
+    """a line for the window's details; a stage (index into STAGES) moves the bar on"""
+    if stage is not None and stage != _prog["stage"]:
+        _prog["stage"], _prog["in_stage"] = stage, 0
+    _prog["in_stage"] += 1
+    _prog["lines"].append(str(text))
+
+
+def _begin():
+    _prog.update(stage=0, lines=[], seen=0, in_stage=0)
+
+
+def progress(_: str = "") -> str:
+    """the running job's progress: {"fraction", "step", "lines": new ones since the last call}"""
+    lines = _prog["lines"]
+    new = lines[_prog["seen"]:]
+    _prog["seen"] = len(lines)
+    st = _prog["stage"]
+    frac = min(0.98, (st + min(0.9, 0.12 * _prog["in_stage"])) / len(STAGES))
+    return json.dumps({"fraction": frac, "step": STAGES[st], "lines": new})
 
 
 def _crash(e, request):
@@ -383,9 +409,13 @@ def move(request: str) -> str:
     try:
         req = json.loads(request)
         params = req.get("params") or {}
+        _begin()
+        _note("reading the section", 0)
         with _lock:
             s = _svc()
+            s.progress = lambda text: _note(text, 2)
             ents, sources, sinks, clear, notes = _section(s, params)
+            _note(f"{len(ents)} entities, {len(sources)} belts in, {len(sinks)} out", 1)
             x1, y1 = params["move"]["area"][:2]
             plan = [dict(e, position={"x": e["position"]["x"] - x1, "y": e["position"]["y"] - y1}) for e in ents]
             shift = lambda p: {"x": p["x"] - x1, "y": p["y"] - y1}  # noqa: E731
@@ -427,7 +457,10 @@ def place(request: str) -> str:
             x1, y1, x2, y2 = _last["prune"]
             snap = dict(snap, entities=[e for e in snap.get("entities") or [] if not (
                 x1 <= e["position"]["x"] < x2 and y1 <= e["position"]["y"] < y2)])
+        _begin()
+        _note("placing the last plan where you asked", 2)
         with _lock:
+            _svc().progress = lambda text: _note(text, 2)
             placed = _svc().extend(dict(_last, bus="here" if _last.get("mode") == "move" else req.get("bus") or "auto",
                                         seed=req.get("seed"), snapshot=snap))
         absolute = _absolute(placed)
@@ -523,10 +556,14 @@ def plan(request: str) -> str:
     global _last, _sections
     from bpgen import calibrate, pack, planner
     t = time.perf_counter()
+    _begin()
+    _note("request received", 0)
     try:
         req = json.loads(request)
         with _lock:
             s = _svc()
+            s.progress = lambda text: _note(text, 2)  # (placing next to the base: each input routed)
+            _note("bpgen's data loaded")
             if req.get("recipe") and req.get("machine"):
                 params = s.params_from_request(req)
             else:  # (a mall or a starter base: no one recipe)
@@ -582,7 +619,9 @@ def plan(request: str) -> str:
                     if tries:
                         params["machine"] = m
                     try:
-                        out = s.plan(params)
+                        _note(f"planning {params.get('mode') or 'a line'}"
+                              + (f" with {params.get('machine')}" if params.get("machine") else ""), 1)
+                        out = s.plan(params, progress=_note)
                         break
                     except planner.PlanError:
                         if i == len(tries[:4]) - 1 or not tries:

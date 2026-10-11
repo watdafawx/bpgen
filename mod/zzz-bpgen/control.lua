@@ -399,6 +399,12 @@ on_nth(6, function()
     if status ~= "pending" then
       running[id] = nil
       deliver(n, status, out)
+    elseif game.tick % 30 == 0 and not game.is_multiplayer() then
+      -- (the plan getting on, in the window: single player only, a GUI only one peer changed would desync)
+      local job = storage.bpgen_jobs and storage.bpgen_jobs[n]
+      local player = job and job.window and game.get_player(job.player)
+      local p = player and native.call("py", "bpgen.ingame:progress", "")
+      if p then window.on_progress(player, helpers.json_to_table(p) or {}) end
     end
   end
   if game.tick % 600 == 0 and storage.bpgen_jobs then -- (a job whose peer left, or never answered)
@@ -945,5 +951,6 @@ on_nth(compat.RESCAN, function()
 end)
 -- (with the fse-std library: its window and input handlers, for the bpgen window's corner grip)
 if script.active_mods["fse-std"] then
-  safe.chain("bpgen", { require("__fse-std__/input").handlers, require("__fse-std__/window").handlers })
+  safe.chain("bpgen", { require("__fse-std__/input").handlers, require("__fse-std__/window").handlers,
+    require("ui").handlers })  -- (the theme: restyled when a player picks another, folds, toasts)
 end

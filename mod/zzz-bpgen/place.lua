@@ -1,6 +1,7 @@
 -- "Place near me": the planned blueprint as ghosts on the player's own map, at a free spot near them, with each
 -- input pointed at the nearest belt of theirs already carrying that item. "Remove placed" takes the ghosts away.
 
+local safe = require("safe")
 local M = {}
 
 local function free(s, force, area)
@@ -125,11 +126,30 @@ local function nearest_belt(player, item, pos, skip)
   return best
 end
 
---- the outline, and each input's item with a line to where it can come from (shown to the player for 2 minutes)
-function M.guide(player, area, origin, sources)
+local outlines = safe.stored("outlines")  -- player index -> the outline drawn round their last placement
+
+--- what was just placed, outlined and named above its top-left corner (2 minutes; a new placement or Undo takes it
+--- away)
+function M.outline(player, area, label)
+  M.clear_outline(player)
   local ttl = 60 * 120
-  rendering.draw_rectangle({ color = { 0.2, 0.8, 1 }, width = 4, filled = false, left_top = area[1], right_bottom = area[2],
-    surface = player.surface, players = { player }, time_to_live = ttl })
+  local box = rendering.draw_rectangle({ color = { 0.2, 0.8, 1 }, width = 4, filled = false, left_top = area[1],
+    right_bottom = area[2], surface = player.surface, players = { player }, time_to_live = ttl })
+  local text = rendering.draw_text({ text = { "", "[img=item/blueprint] ", label or "placed by bpgen" },
+    surface = player.surface, target = { area[1][1] or area[1].x, (area[1][2] or area[1].y) - 1.2 },
+    color = { 0.6, 0.9, 1 }, scale = 1.5, players = { player }, time_to_live = ttl, use_rich_text = true })
+  outlines[player.index] = { box, text }
+end
+
+function M.clear_outline(player)
+  for _, o in pairs(outlines[player.index] or {}) do if o.valid then o.destroy() end end
+  outlines[player.index] = nil
+end
+
+--- the outline, and each input's item with a line to where it can come from (shown to the player for 2 minutes)
+function M.guide(player, area, origin, sources, label)
+  local ttl = 60 * 120
+  M.outline(player, area, label)
   local found, missing, named = 0, {}, {}
   for _, src in ipairs(sources or {}) do
     local pos = { x = origin.x + src.position.x, y = origin.y + src.position.y }

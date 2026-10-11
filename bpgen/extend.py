@@ -807,7 +807,7 @@ def path_entities(path, belt_name, ug_name):
 
 
 def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt="transport-belt", connect=True,
-          sinks=None, bus="auto", needs=None, extend_bus=True):
+          sinks=None, bus="auto", needs=None, extend_bus=True, progress=None):
     """bus: "auto" (build beside a main bus when the snapshot has one), "on" (the same, saying so when there is
     none), "here" (at the seed - a refit, in the area it replaces - its inputs still taken off the bus's lanes) or
     "off" (free ground nearest the seed, taps from any belt). needs: {item: items/s the build really takes}
@@ -947,6 +947,8 @@ def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt=
             if s.get("kind") != "belt":
                 continue
             lanes = list(s.get("lanes") or [None, None]) + [None, None]
+            if progress:
+                progress("routing " + " + ".join(sorted({x for x in lanes[:2] if x})) + " in from your base")
             goal, goal_dir, end = front(s)
             # the tile before the input belt is the route's end; it must not be part of the plan
             if end not in routed:
