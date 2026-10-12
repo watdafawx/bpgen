@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bpgen window mock</title>
+<!-- The bpgen window rearranged on fse-std's components, in its themes (theme tokens copied from fse/docs/themes-preview.html). -->
+<style>
+/* ---------- themes ---------- */
+.t-vanilla {
+  --win: #313031; --win-edge: #1a1a1a; --win-shadow: 0 0 0 1px #000, 0 6px 18px rgba(0,0,0,.6);
+  --title: #ffe6c0; --title-font: 600 17px/1.2 "Titillium Web", "Segoe UI", sans-serif;
+  --drag: repeating-linear-gradient(0deg, #4a4a4a 0 2px, transparent 2px 5px);
+  --inset: #242324; --inset-edge: inset 0 2px 3px rgba(0,0,0,.7), inset 0 -1px 0 #3d3d3d;
+  --deep: #0e0e0e; --section: #3a393a; --section-edge: 1px solid #222;
+  --caption: #ffe6c0; --ink: #e8e8e8; --ink-dim: #a8a8a8;
+  --btn: linear-gradient(#8e8e8e, #6c6c6c); --btn-ink: #000; --btn-edge: 0 1px 0 #b4b4b4 inset, 0 -2px 0 #444 inset, 0 0 0 1px #111;
+  --btn-on: linear-gradient(#f4b04a, #d9862a); --btn-on-ink: #000;
+  --ok: linear-gradient(#6fc75a, #3f9a2f); --ok-ink: #000;
+  --slot: linear-gradient(#a5a5a5, #828282); --slot-edge: 0 0 0 1px #111, inset 0 -2px 0 #555;
+  --field: #8e8e8e; --field-ink: #000; --field-edge: inset 0 2px 2px rgba(0,0,0,.45);
+  --check: #8e8e8e; --check-on: #f4b04a;
+  --radius: 0; --pad: 12px; --gap: 8px; --font: 14px/1.35 "Titillium Web", "Segoe UI", sans-serif;
+}
+.t-compact {
+  --win: #2b2b2b; --win-edge: #141414; --win-shadow: 0 0 0 1px #000;
+  --title: #ffe6c0; --title-font: 600 14px/1.2 "Segoe UI", sans-serif;
+  --drag: repeating-linear-gradient(0deg, #444 0 1px, transparent 1px 4px);
+  --inset: #222; --inset-edge: inset 0 1px 2px rgba(0,0,0,.7);
+  --deep: #0e0e0e; --section: #333; --section-edge: 1px solid #1d1d1d;
+  --caption: #ffe6c0; --ink: #ddd; --ink-dim: #999;
+  --btn: linear-gradient(#858585, #6a6a6a); --btn-ink: #000; --btn-edge: 0 0 0 1px #111;
+  --btn-on: #e39827; --btn-on-ink: #000;
+  --ok: #4fae3c; --ok-ink: #000;
+  --slot: #8d8d8d; --slot-edge: 0 0 0 1px #111;
+  --field: #8a8a8a; --field-ink: #000; --field-edge: none;
+  --check: #8a8a8a; --check-on: #e39827;
+  --radius: 0; --pad: 6px; --gap: 4px; --font: 12px/1.25 "Segoe UI", sans-serif;
+}
+.t-flat {
+  --win: #1e2127; --win-edge: #2c313a; --win-shadow: 0 10px 30px rgba(0,0,0,.5);
+  --title: #e6edf3; --title-font: 600 15px/1.2 "Segoe UI", sans-serif;
+  --drag: transparent;
+  --inset: #181b20; --inset-edge: inset 0 0 0 1px #2c313a;
+  --deep: #0f1115; --section: #22262d; --section-edge: 1px solid #2c313a;
+  --caption: #7cc7ff; --ink: #d6dde5; --ink-dim: #8b95a1;
+  --btn: #2d333c; --btn-ink: #d6dde5; --btn-edge: inset 0 0 0 1px #3a414c;
+  --btn-on: #2f6fa8; --btn-on-ink: #fff;
+  --ok: #2f9e6b; --ok-ink: #fff;
+  --slot: #2a2f37; --slot-edge: inset 0 0 0 1px #3a414c;
+  --field: #14171b; --field-ink: #d6dde5; --field-edge: inset 0 0 0 1px #3a414c;
+  --check: #14171b; --check-on: #2f6fa8;
+  --radius: 6px; --pad: 12px; --gap: 8px; --font: 13px/1.4 "Segoe UI", sans-serif;
+}
+.t-blueprint {
+  --win: #123a6b; --win-edge: #8fc1ff; --win-shadow: 0 0 0 1px #8fc1ff, 0 8px 24px rgba(0,0,0,.5);
+  --title: #ffffff; --title-font: 600 16px/1.2 Consolas, "Cascadia Mono", monospace;
+  --drag: repeating-linear-gradient(90deg, rgba(143,193,255,.5) 0 1px, transparent 1px 6px);
+  --inset: #0f3260 linear-gradient(rgba(143,193,255,.08) 1px, transparent 1px) 0 0/12px 12px; --inset-edge: inset 0 0 0 1px rgba(143,193,255,.45);
+  --deep: #0a2547; --section: transparent; --section-edge: 1px dashed rgba(143,193,255,.6);
+  --caption: #bfe0ff; --ink: #e3f0ff; --ink-dim: #8fb5e0;
+  --btn: transparent; --btn-ink: #e3f0ff; --btn-edge: inset 0 0 0 1px #8fc1ff;
+  --btn-on: #8fc1ff; --btn-on-ink: #0a2547;
+  --ok: #ffffff; --ok-ink: #0a2547;
+  --slot: rgba(143,193,255,.12); --slot-edge: inset 0 0 0 1px #8fc1ff;
+  --field: transparent; --field-ink: #fff; --field-edge: inset 0 -1px 0 #8fc1ff;
+  --check: transparent; --check-on: #8fc1ff;
+  --radius: 2px; --pad: 12px; --gap: 8px; --font: 13px/1.4 Consolas, "Cascadia Mono", monospace;
+}
+
+.t-platform {
+  --win: #2a3138; --win-edge: #56636f; --win-shadow: 0 0 0 1px #0d1114, 0 8px 22px rgba(0,0,0,.55);
+  --title: #e9f1f7; --title-font: 600 16px/1.2 "Segoe UI", sans-serif;
+  --drag: repeating-linear-gradient(45deg, #f2c230 0 6px, #1c1c1c 6px 12px);
+  --inset: #20262c; --inset-edge: inset 0 0 0 1px #3d4852, inset 0 2px 4px rgba(0,0,0,.5);
+  --deep: #0b0f13; --section: #2e363e; --section-edge: 1px solid #47535e;
+  --caption: #9fd3f0; --ink: #dfe7ee; --ink-dim: #8fa0ae;
+  --btn: linear-gradient(#4b5763, #38424c); --btn-ink: #e9f1f7; --btn-edge: inset 0 1px 0 #66737f, 0 0 0 1px #12171b;
+  --btn-on: linear-gradient(#3d93c4, #2a6f99); --btn-on-ink: #fff;
+  --ok: linear-gradient(#f2c230, #cf9e14); --ok-ink: #1c1c1c;
+  --slot: #3a444e; --slot-edge: inset 0 0 0 1px #5c6975;
+  --field: #161b20; --field-ink: #dfe7ee; --field-edge: inset 0 0 0 1px #47535e;
+  --check: #161b20; --check-on: #3d93c4;
+  --radius: 3px; --pad: 12px; --gap: 8px; --font: 13px/1.4 "Segoe UI", sans-serif;
+}
+.t-vulcanus {
+  --win: #1c1614; --win-edge: #4a2a1c; --win-shadow: 0 0 0 1px #000, 0 0 24px rgba(255,90,20,.25);
+  --title: #ffb070; --title-font: 700 16px/1.2 "Segoe UI", sans-serif;
+  --drag: linear-gradient(90deg, transparent, rgba(255,110,30,.35), transparent);
+  --inset: #140f0d; --inset-edge: inset 0 0 0 1px #3a2218, inset 0 -8px 16px rgba(255,80,0,.08);
+  --deep: #0a0706; --section: #231a17; --section-edge: 1px solid #45281b;
+  --caption: #ff8a3d; --ink: #f0e2d8; --ink-dim: #a88c7c;
+  --btn: linear-gradient(#3b2e29, #2a201c); --btn-ink: #f0e2d8; --btn-edge: inset 0 0 0 1px #5a3a2a;
+  --btn-on: linear-gradient(#ff8a3d, #d9531a); --btn-on-ink: #1a0d06;
+  --ok: linear-gradient(#ffcf5a, #ff8a3d); --ok-ink: #1a0d06;
+  --slot: #2a201c; --slot-edge: inset 0 0 0 1px #6a3a22;
+  --field: #0e0a08; --field-ink: #f0e2d8; --field-edge: inset 0 0 0 1px #5a3a2a;
+  --check: #0e0a08; --check-on: #ff8a3d;
+  --radius: 2px; --pad: 12px; --gap: 8px; --font: 13px/1.4 "Segoe UI", sans-serif;
+}
+.t-gleba {
+  --win: #1f2a1e; --win-edge: #3d5a33; --win-shadow: 0 8px 24px rgba(0,0,0,.5);
+  --title: #e8f5c8; --title-font: 600 16px/1.2 Georgia, serif;
+  --drag: radial-gradient(circle, rgba(200,120,180,.45) 1.5px, transparent 2px) 0 0/8px 8px;
+  --inset: #18211a; --inset-edge: inset 0 0 0 1px #2f4429;
+  --deep: #0e140e; --section: #233023; --section-edge: 1px solid #3a5232;
+  --caption: #e58bc4; --ink: #dfeccf; --ink-dim: #93a886;
+  --btn: #2f412b; --btn-ink: #dfeccf; --btn-edge: inset 0 0 0 1px #4a6a3e;
+  --btn-on: #b4568f; --btn-on-ink: #fff;
+  --ok: #8bc34a; --ok-ink: #142010;
+  --slot: #2a3a27; --slot-edge: inset 0 0 0 1px #4a6a3e;
+  --field: #111a10; --field-ink: #dfeccf; --field-edge: inset 0 0 0 1px #3a5232;
+  --check: #111a10; --check-on: #e58bc4;
+  --radius: 14px; --pad: 14px; --gap: 9px; --font: 13px/1.45 "Segoe UI", sans-serif;
+}
+.t-fulgora {
+  --win: #17132a; --win-edge: #6a4cff; --win-shadow: 0 0 0 1px #6a4cff, 0 0 22px rgba(130,90,255,.35);
+  --title: #e8e2ff; --title-font: 600 16px/1.2 "Segoe UI", sans-serif;
+  --drag: linear-gradient(90deg, transparent 0 10%, #8f7bff 10% 11%, transparent 11% 40%, #8f7bff 40% 41%, transparent 41%);
+  --inset: #120f22; --inset-edge: inset 0 0 0 1px #352a6b;
+  --deep: #08061a; --section: #1c1736; --section-edge: 1px solid #3e3280;
+  --caption: #c3b6ff; --ink: #e0dbf5; --ink-dim: #8e86b8;
+  --btn: #251f47; --btn-ink: #e0dbf5; --btn-edge: inset 0 0 0 1px #4a3d99;
+  --btn-on: #6a4cff; --btn-on-ink: #fff;
+  --ok: #5ef0ff; --ok-ink: #0a0820;
+  --slot: #221c42; --slot-edge: inset 0 0 0 1px #5a4bb8, 0 0 8px rgba(106,76,255,.25);
+  --field: #0c0a1c; --field-ink: #e0dbf5; --field-edge: inset 0 0 0 1px #4a3d99;
+  --check: #0c0a1c; --check-on: #5ef0ff;
+  --radius: 4px; --pad: 12px; --gap: 8px; --font: 13px/1.4 "Segoe UI", sans-serif;
+}
+.t-aquilo {
+  --win: #e9f2f8; --win-edge: #a9c6da; --win-shadow: 0 8px 24px rgba(20,50,80,.35);
+  --title: #17405e; --title-font: 600 16px/1.2 "Segoe UI", sans-serif;
+  --drag: repeating-linear-gradient(0deg, #c6dbea 0 1px, transparent 1px 5px);
+  --inset: #f6fafd; --inset-edge: inset 0 0 0 1px #c3d7e6;
+  --deep: #d5e5f0; --section: #ffffff; --section-edge: 1px solid #c9dcea;
+  --caption: #1f6fa8; --ink: #1d3445; --ink-dim: #5e7c92;
+  --btn: #dbe8f2; --btn-ink: #1d3445; --btn-edge: inset 0 0 0 1px #a9c6da;
+  --btn-on: #1f6fa8; --btn-on-ink: #fff;
+  --ok: #2a9d8f; --ok-ink: #fff;
+  --slot: #e3eef6; --slot-edge: inset 0 0 0 1px #a9c6da;
+  --field: #fff; --field-ink: #1d3445; --field-edge: inset 0 0 0 1px #a9c6da;
+  --check: #fff; --check-on: #1f6fa8;
+  --radius: 6px; --pad: 12px; --gap: 8px; --font: 13px/1.4 "Segoe UI", sans-serif;
+}
+.t-crt {
+  --win: #050a05; --win-edge: #2a5a2a; --win-shadow: 0 0 0 1px #33ff66, 0 0 18px rgba(51,255,102,.25);
+  --title: #66ff88; --title-font: 700 15px/1.2 Consolas, monospace;
+  --drag: repeating-linear-gradient(90deg, #1f5a2a 0 4px, transparent 4px 8px);
+  --inset: #050a05 repeating-linear-gradient(0deg, rgba(51,255,102,.04) 0 1px, transparent 1px 3px); --inset-edge: inset 0 0 0 1px #1f5a2a;
+  --deep: #020502; --section: transparent; --section-edge: 1px solid #1f5a2a;
+  --caption: #66ff88; --ink: #44dd66; --ink-dim: #2a8a40;
+  --btn: transparent; --btn-ink: #44dd66; --btn-edge: inset 0 0 0 1px #2a8a40;
+  --btn-on: #33ff66; --btn-on-ink: #020502;
+  --ok: #33ff66; --ok-ink: #020502;
+  --slot: #0a160a; --slot-edge: inset 0 0 0 1px #2a8a40;
+  --field: #020502; --field-ink: #66ff88; --field-edge: inset 0 0 0 1px #2a8a40;
+  --check: #020502; --check-on: #33ff66;
+  --radius: 0; --pad: 12px; --gap: 8px; --font: 13px/1.4 Consolas, monospace;
+}
+.t-crt .win { text-shadow: 0 0 4px rgba(51,255,102,.5); }
+.t-crt .slot svg, .t-crt .cam svg { filter: grayscale(1) sepia(1) hue-rotate(70deg) saturate(4); }
+
+/* ---------- components (one class = one fstd component = one gui-style per theme) ---------- */
+.win { display: inline-flex; flex-direction: column; background: var(--win); box-shadow: var(--win-shadow); outline: 1px solid var(--win-edge);
+  border-radius: var(--radius); padding: var(--pad); gap: var(--gap); font: var(--font); color: var(--ink); min-width: 620px; }
+.bar { display: flex; align-items: center; gap: var(--gap); }
+.bar .title { font: var(--title-font); color: var(--title); }
+.bar .drag { flex: 1; height: 20px; background: var(--drag); border-radius: var(--radius); }
+.x { width: 22px; height: 22px; display: grid; place-items: center; color: var(--ink); background: none; border: 0; cursor: pointer; font-size: 16px; border-radius: var(--radius); }
+.x:hover { background: #c44; color: #fff; }
+.row { display: flex; align-items: center; gap: var(--gap); flex-wrap: wrap; }
+.push { flex: 1; }
+.tabs { display: flex; gap: 2px; }
+.btn { font: inherit; padding: 4px 12px; border: 0; border-radius: var(--radius); background: var(--btn); color: var(--btn-ink); box-shadow: var(--btn-edge); cursor: pointer; white-space: nowrap; }
+.btn:hover { filter: brightness(1.12); }
+.btn[aria-pressed="true"] { background: var(--btn-on); color: var(--btn-on-ink); }
+.btn.ok { background: var(--ok); color: var(--ok-ink); font-weight: 600; }
+.btn.tool { padding: 4px 0; width: 28px; }
+.btn:disabled { opacity: .45; cursor: default; filter: none; }
+.body { display: flex; gap: var(--gap); }
+.inset { background: var(--inset); box-shadow: var(--inset-edge); border-radius: var(--radius); padding: var(--pad); display: flex; flex-direction: column; gap: var(--gap); flex: 1 1 280px; }
+.section { background: var(--section); border: var(--section-edge); border-radius: var(--radius); padding: var(--pad); display: flex; flex-direction: column; gap: var(--gap); }
+.section > .cap { font-weight: 700; color: var(--caption); }
+.fields { display: flex; gap: calc(var(--gap) * 1.5); flex-wrap: wrap; }
+.field { display: flex; flex-direction: column; gap: 2px; }
+.field > span { color: var(--ink-dim); font-size: .9em; }
+.slot { width: 40px; height: 40px; border-radius: var(--radius); background: var(--slot); box-shadow: var(--slot-edge); display: grid; place-items: center; }
+.slot svg { width: 26px; height: 26px; }
+.tf, .dd { font: inherit; background: var(--field); color: var(--field-ink); border: 0; box-shadow: var(--field-edge); border-radius: var(--radius); padding: 4px 6px; width: 70px; }
+.dd { width: 110px; }
+.chk { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.chk i { width: 14px; height: 14px; background: var(--check); box-shadow: var(--field-edge); border-radius: calc(var(--radius) / 2); display: inline-block; }
+.chk[aria-checked="true"] i { background: var(--check-on); }
+.muted { color: var(--ink-dim); }
+.deep { background: var(--deep); box-shadow: var(--inset-edge); border-radius: var(--radius); flex: 1 1 220px; display: flex; flex-direction: column; gap: var(--gap); padding: var(--pad); }
+.cam { flex: 1; min-height: 200px; border-radius: var(--radius); background:
+  linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px) 0 0/16px 16px,
+  linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px) 0 0/16px 16px; position: relative; }
+.cam svg { position: absolute; inset: 0; margin: auto; width: 80%; height: 80%; }
+
+/* Glass: see-through panels over the factory. The game can't blur what is behind a GUI, so the frost is
+   faked with a light tint, a noise texture and a bright top edge (all doable as a 9-slice sprite). */
+.t-glass, .t-glassdark { background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='160'%3E%3Crect width='240' height='160' fill='%23463b2e'/%3E%3Crect x='10' y='10' width='54' height='54' fill='%235b7f9e'/%3E%3Crect x='24' y='24' width='26' height='26' fill='%232c3e50'/%3E%3Crect x='90' y='10' width='54' height='54' fill='%235b7f9e'/%3E%3Crect x='104' y='24' width='26' height='26' fill='%232c3e50'/%3E%3Crect x='170' y='96' width='54' height='54' fill='%23a5512a'/%3E%3Ccircle cx='197' cy='123' r='12' fill='%23ffb35a'/%3E%3Crect x='0' y='76' width='240' height='12' fill='%23d8b23a'/%3E%3Crect x='70' y='0' width='12' height='160' fill='%23c9a032'/%3E%3Crect x='20' y='110' width='34' height='34' fill='%233fa35b'/%3E%3C/svg%3E") 0 0/240px 160px; border-radius: 8px; }
+.t-glass {
+  --win: rgba(235,242,248,.5); --win-edge: rgba(255,255,255,.6); --win-shadow: 0 10px 34px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.75);
+  --title: #ffffff; --title-font: 600 16px/1.2 "Segoe UI", sans-serif;
+  --drag: transparent;
+  --inset: rgba(255,255,255,.16); --inset-edge: inset 0 0 0 1px rgba(255,255,255,.35);
+  --deep: rgba(20,30,40,.55); --section: rgba(255,255,255,.22); --section-edge: 1px solid rgba(255,255,255,.4);
+  --caption: #ffffff; --ink: #ffffff; --ink-dim: rgba(255,255,255,.8);
+  --btn: rgba(255,255,255,.3); --btn-ink: #fff; --btn-edge: inset 0 0 0 1px rgba(255,255,255,.5), inset 0 1px 0 rgba(255,255,255,.7);
+  --btn-on: rgba(255,255,255,.9); --btn-on-ink: #1b2a36;
+  --ok: rgba(52,199,89,.9); --ok-ink: #fff;
+  --slot: rgba(255,255,255,.22); --slot-edge: inset 0 0 0 1px rgba(255,255,255,.5);
+  --field: rgba(0,0,0,.25); --field-ink: #fff; --field-edge: inset 0 0 0 1px rgba(255,255,255,.35);
+  --check: rgba(0,0,0,.25); --check-on: #fff;
+  --radius: 12px; --pad: 14px; --gap: 9px; --font: 13px/1.4 "Segoe UI", sans-serif;
+}
+.t-glassdark {
+  --win: rgba(18,20,26,.55); --win-edge: rgba(255,255,255,.18); --win-shadow: 0 10px 34px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.25);
+  --title: #ffffff; --title-font: 600 16px/1.2 "Segoe UI", sans-serif;
+  --drag: transparent;
+  --inset: rgba(255,255,255,.06); --inset-edge: inset 0 0 0 1px rgba(255,255,255,.12);
+  --deep: rgba(0,0,0,.45); --section: rgba(255,255,255,.07); --section-edge: 1px solid rgba(255,255,255,.14);
+  --caption: #8fd0ff; --ink: #f2f4f7; --ink-dim: rgba(242,244,247,.65);
+  --btn: rgba(255,255,255,.12); --btn-ink: #f2f4f7; --btn-edge: inset 0 0 0 1px rgba(255,255,255,.18), inset 0 1px 0 rgba(255,255,255,.2);
+  --btn-on: rgba(10,132,255,.85); --btn-on-ink: #fff;
+  --ok: rgba(48,209,88,.85); --ok-ink: #04120a;
+  --slot: rgba(255,255,255,.08); --slot-edge: inset 0 0 0 1px rgba(255,255,255,.2);
+  --field: rgba(0,0,0,.35); --field-ink: #f2f4f7; --field-edge: inset 0 0 0 1px rgba(255,255,255,.16);
+  --check: rgba(0,0,0,.35); --check-on: rgba(10,132,255,.9);
+  --radius: 12px; --pad: 14px; --gap: 9px; --font: 13px/1.4 "Segoe UI", sans-serif;
+}
+.t-glass .win, .t-glassdark .win { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E"); text-shadow: 0 1px 2px rgba(0,0,0,.35); }
+.blur .t-glass .win, .blur .t-glassdark .win { backdrop-filter: blur(14px) saturate(1.4); }
+/* ---------- mock page ---------- */
+:root { --page: #1b1b1b; --page-ink: #ddd; }
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--page-ink); font: 14px/1.4 "Segoe UI", system-ui, sans-serif; }
+header { padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; border-bottom: 1px solid #333; }
+header h1 { font-size: 16px; margin: 0 8px 0 0; }
+header .grp { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+header .grp b { font-size: 11px; color: #999; text-transform: uppercase; margin-right: 6px; }
+header button { background: #2c2c2c; color: #ddd; border: 1px solid #444; padding: 4px 10px; border-radius: 4px; cursor: pointer; font: inherit; font-size: 13px; }
+header button[aria-pressed="true"] { background: #e39827; color: #000; border-color: #e39827; }
+header label { font-size: 13px; color: #ccc; display: inline-flex; gap: 6px; align-items: center; }
+main { display: flex; gap: 20px; padding: 16px; align-items: flex-start; flex-wrap: wrap; }
+.stage { padding: 20px; border-radius: 8px; overflow-x: auto; max-width: 100%; }
+aside { flex: 1 1 300px; max-width: 420px; color: #bbb; font-size: 13px; }
+aside h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #999; margin: 0 0 8px; }
+aside ol { padding-left: 0; list-style: none; margin: 0; display: grid; gap: 10px; }
+aside li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; }
+aside li b { color: #eee; }
+aside .gui { color: #8fb5e0; font-size: 12px; }
+aside p { margin: 12px 0 0; }
+code { color: #e8c88a; }
+
+/* ---------- the window (both versions) ---------- */
+.win { width: 1000px; height: 640px; min-width: 0; }
+.win .body { flex: 1; min-height: 0; }
+.left { flex: 0 0 300px; min-height: 0; display: flex; flex-direction: column; padding: 0; overflow: hidden; gap: 0; }
+.left .scroll { flex: 1; min-height: 0; overflow: auto; padding: var(--pad); display: flex; flex-direction: column; gap: var(--gap); }
+.right { flex: 1; min-width: 0; }
+.cam { min-height: 0; overflow: hidden; }
+.cam .bp { position: absolute; inset: 0; margin: auto; width: 86%; height: 76%; }
+.cam .hint { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 6px; color: var(--ink-dim); }
+.cam .hint big { font-size: 34px; opacity: .5; }
+.row.tight { gap: 4px; }
+.small { font-size: .85em; }
+.btn.sm { padding: 2px 8px; font-size: .9em; }
+.lines { color: var(--ink); font-size: .92em; display: grid; gap: 2px; }
+.stats { display: flex; gap: 6px; }
+.stat { background: var(--section); border: var(--section-edge); border-radius: var(--radius); padding: 5px 12px; min-width: 92px; }
+.stat b { display: block; font-size: 1.2em; color: var(--ink); }
+.stat span { color: var(--ink-dim); font-size: .85em; }
+.badge { display: inline-flex; gap: 4px; align-items: center; background: var(--section); border: var(--section-edge); border-radius: 999px; padding: 1px 9px; font-size: .88em; white-space: nowrap; }
+.badge.warn { border-color: #d9a52a; }
+.ico { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; }
+.i-plate { background: linear-gradient(135deg, #c9ced3, #7d858c); }
+.i-gear { background: radial-gradient(circle, #222 25%, #c9a46a 27% 60%, transparent 62%); }
+.i-belt { background: repeating-linear-gradient(90deg, #d8b23a 0 3px, #8a6d1a 3px 5px); }
+.prog { display: grid; gap: 3px; }
+.prog .meter { height: 8px; background: var(--field); box-shadow: var(--field-edge); border-radius: var(--radius); overflow: hidden; }
+.prog .meter i { display: block; height: 100%; width: 0; background: var(--btn-on); transition: width .25s; }
+.prog .top { display: flex; justify-content: space-between; font-size: .85em; color: var(--ink-dim); }
+
+/* the rearranged one */
+.modes { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.mgroup { display: flex; gap: 2px; align-items: center; }
+.mgroup small { color: var(--ink-dim); font-size: .72em; text-transform: uppercase; letter-spacing: .05em; margin-right: 4px; }
+.foot { padding: var(--pad); border-top: var(--section-edge); background: var(--section); display: flex; flex-direction: column; gap: 6px; }
+.foot .btn.ok { padding: 8px; font-size: 1.05em; }
+.fold .head { display: flex; gap: 8px; align-items: center; cursor: pointer; user-select: none; }
+.fold .head .tw { width: 18px; height: 18px; display: grid; place-items: center; background: var(--btn); color: var(--btn-ink); box-shadow: var(--btn-edge); border-radius: var(--radius); font-weight: 700; font-size: 12px; }
+.fold .head .cap { font-weight: 700; color: var(--caption); }
+.fold .head .badge { margin-left: auto; }
+.fold.closed .fbody { display: none; }
+.fold { gap: 0; }
+.fold .fbody { padding-top: var(--gap); display: flex; flex-direction: column; gap: var(--gap); }
+.ov { position: absolute; top: 8px; display: flex; gap: 2px; padding: 3px; background: var(--win); border-radius: var(--radius); box-shadow: var(--win-shadow); z-index: 2; }
+.ov.l { left: 8px; } .ov.r { right: 8px; }
+.ov .btn { padding: 2px 0; width: 26px; font-size: .9em; }
+.ov .btn.w { width: auto; padding: 2px 8px; }
+.result { gap: 6px; }
+.result .badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.mk { display: flex; align-items: center; gap: 6px; }
+.mk .push { flex: 1; }
+
+/* states */
+.s-empty .when-plan, .s-empty .when-busy { display: none !important; }
+.s-busy .when-plan, .s-busy .when-empty-only { display: none !important; }
+.s-plan .when-busy, .s-plan .when-empty, .s-plan .when-empty-only { display: none !important; }
+.s-busy .when-empty { display: none !important; }
+.s-empty .acts .btn:not(.keep), .s-busy .acts .btn:not(.keep) { opacity: .45; pointer-events: none; }
+
+/* numbered callouts */
+.n { display: none; position: relative; width: 20px; height: 20px; flex: 0 0 20px; border-radius: 50%; background: #e5398f; color: #fff;
+  font: 700 12px/20px "Segoe UI", sans-serif; text-align: center; box-shadow: 0 0 0 2px #fff; text-shadow: none; z-index: 6; }
+.nums .n { display: inline-block; }
+aside .n { display: inline-block; }
+.hidden { display: none !important; }
+
+/* ---------- fse-std components and layouts ---------- */
+.stage { position: relative; }
+.wrap { position: relative; display: inline-block; isolation: isolate; }
+/* pulse: Plan breathes when the settings changed since the last plan */
+@keyframes breathe { 0%, 100% { filter: brightness(1); box-shadow: 0 0 0 0 transparent; } 50% { filter: brightness(1.25); box-shadow: 0 0 0 3px var(--ok); } }
+.s-stale .btn.ok.pulse { animation: breathe 1.6s ease-in-out infinite; }
+/* glow: an accent outline across the preview's edge (FSE draw plugin) */
+.s-busy .cam, .s-test .cam { box-shadow: 0 0 0 2px var(--caption), 0 0 16px 3px var(--caption); }
+/* attach-over: the view toolbar, a screen frame kept over the camera */
+.ov { background: var(--section); border: var(--section-edge); }
+/* toast */
+.toasts { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); display: grid; gap: 4px; z-index: 20; pointer-events: none; }
+.toast { width: 320px; background: var(--section); border: var(--section-edge); border-radius: var(--radius); box-shadow: var(--win-shadow);
+  color: var(--ink); padding: 8px 12px; font: var(--font); transition: opacity .4s; }
+/* confirm: a small themed window of its own */
+.confirm { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); width: 360px; min-width: 0; height: auto; z-index: 15; }
+.confirm .row { justify-content: flex-end; }
+/* rail: modes out of the left edge, grouped; the open one merges into the window */
+.rail { display: none; position: absolute; left: -112px; top: 56px; flex-direction: column; gap: 4px; width: 120px; z-index: -1; }
+.rail small { color: #999; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; margin: 6px 0 0 6px; }
+.rail .btn { text-align: left; padding: 6px 10px; border-radius: var(--radius) 0 0 var(--radius); width: 104px; }
+.rail .btn[aria-pressed="true"] { background: var(--win); color: var(--title); box-shadow: none; font-weight: 700; width: 120px; position: relative; left: -8px; }
+/* dock: the blueprint actions hang below the window */
+.dockbar { display: none; position: absolute; left: 50%; bottom: -26px; transform: translateX(-50%); background: var(--section); border: var(--section-edge);
+  border-radius: calc(var(--radius) + 6px); box-shadow: var(--win-shadow); padding: 6px 10px; gap: 6px; align-items: center; z-index: 3; white-space: nowrap; }
+.l-rail .rail { display: flex; }
+.l-rail .modes .mgroup { display: none; }
+.l-rail .dockbar { display: flex; }
+.l-rail .acts.inwin { display: none; }
+.l-rail .wrap { margin: 0 0 30px 112px; }
+.s-empty .dockbar .btn:not(.keep), .s-busy .dockbar .btn:not(.keep) { opacity: .45; pointer-events: none; }
+/* drawer: History attached to the right edge, with a search box and draggable rows */
+.drawer { display: none; position: absolute; right: -268px; top: 48px; width: 276px; max-height: 470px; background: var(--section); border: var(--section-edge);
+  border-radius: 0 calc(var(--radius) + 6px) calc(var(--radius) + 6px) 0; box-shadow: var(--win-shadow); padding: 10px 10px 10px 18px; z-index: -1;
+  flex-direction: column; gap: 8px; font: var(--font); color: var(--ink); }
+.drawer.open { display: flex; }
+.wrap.drawer-open { margin-right: 268px; }
+.drawer .cap { font-weight: 700; color: var(--caption); }
+.search { display: flex; gap: 2px; } .search .tf { flex: 1; width: auto; }
+.hrow { display: flex; align-items: center; gap: 6px; padding: 4px 6px; background: var(--field); box-shadow: var(--field-edge); border-radius: var(--radius); cursor: grab; }
+.hrow .grip { color: var(--ink-dim); } .hrow .push { flex: 1; } .hrow .muted { font-size: .8em; }
+/* test run: graph + an auto progress (red to green by the share of the expected rate) */
+.test { display: none; gap: 6px; }
+.s-test .test { display: grid; }
+.s-test .stats.when-plan { display: none !important; }
+.graph { height: 64px; background: var(--deep); box-shadow: var(--inset-edge); border-radius: var(--radius); position: relative; }
+.graph svg { position: absolute; inset: 6px; width: calc(100% - 12px); height: calc(100% - 12px); }
+.s-stale .when-busy, .s-test .when-busy, .s-stale .when-empty, .s-test .when-empty, .s-stale .when-empty-only, .s-test .when-empty-only { display: none !important; }
+.stale-note { display: none; }
+.s-stale .stale-note { display: block; }
+.s-stale .plan-note { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>bpgen window · layout mock</h1>
+  <div class="grp" id="ver"><b>Version</b><button data-v="new" aria-pressed="true">Rearranged</button><button data-v="old">Now (0.19.0)</button></div>
+  <div class="grp" id="lay"><b>Layout</b><button data-l="in" aria-pressed="true">In the window</button><button data-l="rail">Rail &amp; dock</button></div>
+  <div class="grp" id="state"><b>State</b><button data-s="empty">Empty</button><button data-s="busy">Planning</button><button data-s="plan" aria-pressed="true">Planned</button><button data-s="stale">Changed</button><button data-s="test">Test run</button></div>
+  <label><input type="checkbox" id="hist"> History</label>
+  <label><input type="checkbox" id="nums" checked> Numbers</label>
+  <div class="grp" id="themes" style="flex-basis:100%"><b>Theme</b></div>
+</header>
+<main>
+  <div class="stage t-vanilla nums s-plan l-in" id="stage">
+  <div class="toasts" id="toasts"></div>
+
+<!-- ======================= rearranged ======================= -->
+<div class="wrap" id="v-new">
+  <!-- tab_rail: the modes out of the left edge -->
+  <div class="rail tabs">
+    <small>Make</small><button class="btn" aria-pressed="true">Line</button><button class="btn">Mall</button><button class="btn">Extend</button>
+    <small>Base</small><button class="btn">Base</button><button class="btn">Bus</button>
+    <small>Rework</small><button class="btn">Refit</button><button class="btn">Move</button>
+    <small>Space</small><button class="btn">Ship</button>
+  </div>
+  <!-- attach "right": History, a drawer -->
+  <div class="drawer" id="drawer">
+    <div class="row tight"><span class="n">9</span><span class="cap">History</span></div>
+    <div class="search"><input class="tf" placeholder="Search"><button class="btn tool">x</button></div>
+    <div class="hrow" title="Drag onto the preview, or click To cursor"><span class="grip">⠿</span><span class="ico i-gear"></span>Gears 3600/min<span class="push"></span><button class="btn sm">To cursor</button></div>
+    <div class="hrow"><span class="grip">⠿</span><span class="ico i-belt"></span>Belts 900/min<span class="push"></span><button class="btn sm">To cursor</button></div>
+    <div class="hrow"><span class="grip">⠿</span><span class="ico i-plate"></span>Mall, 27 products<span class="push"></span><button class="btn sm">To cursor</button></div>
+    <div class="hrow"><span class="grip">⠿</span><span class="ico i-gear"></span>Starter base 30 spm<span class="push"></span><button class="btn sm">To cursor</button></div>
+    <span class="muted small">Drag a row onto the preview to load it, or onto the Recipe slot to plan it again.</span>
+  </div>
+  <div class="win">
+    <div class="bar"><span class="title">bpgen</span><span class="drag"></span><button class="x" title="Close">✕</button></div>
+    <div class="modes">
+      <span class="n">3</span>
+      <div class="mgroup tabs"><small>Make</small><button class="btn" aria-pressed="true">Line</button><button class="btn">Mall</button><button class="btn">Extend</button></div>
+      <div class="mgroup tabs"><small>Base</small><button class="btn">Base</button><button class="btn">Bus</button></div>
+      <div class="mgroup tabs"><small>Rework</small><button class="btn">Refit</button><button class="btn">Move</button></div>
+      <div class="mgroup tabs"><button class="btn">Ship</button></div>
+      <span class="muted small">One recipe at a rate, on the belt you pick</span>
+      <span class="push"></span>
+      <span class="chk" role="checkbox" aria-checked="true"><i></i>Only unlocked</span>
+    </div>
+    <div class="body">
+      <div class="inset left">
+        <div class="scroll">
+          <div class="section"><span class="cap">Recipe</span>
+            <div class="fields">
+              <label class="field"><span>Recipe</span><span class="slot">{gear}</span></label>
+              <label class="field"><span>Machine</span><span class="slot">{asm}</span></label>
+              <label class="field"><span>Per minute</span><input class="tf" value="120" id="rate"></label>
+            </div>
+            <div class="fields">
+              <label class="field"><span>Belt</span><span class="slot">{belt}</span></label>
+              <label class="field"><span>Feed</span><select class="dd"><option>belts</option><option>robots</option><option>my main bus</option></select></label>
+            </div>
+          </div>
+          <div class="section"><span class="cap">Make in this blueprint</span>
+            <div class="mk"><span class="chk" role="checkbox" aria-checked="false"><i></i><span class="ico i-plate"></span> Iron plate</span><span class="push"></span><span class="muted small">on belt</span></div>
+          </div>
+          <div class="section fold closed"><div class="head"><span class="n">2</span><span class="tw">+</span><span class="cap" title="Other products from the same inputs">Also make</span><span class="badge">4</span></div>
+            <div class="fbody">
+              <div class="mk"><span class="chk" role="checkbox"><i></i>Firearm magazine</span><span class="push"></span><input class="tf" style="width:44px"></div>
+              <div class="mk"><span class="chk" role="checkbox"><i></i>Iron chest</span><span class="push"></span><input class="tf" style="width:44px"></div>
+              <div class="mk"><span class="chk" role="checkbox"><i></i>Iron stick</span><span class="push"></span><input class="tf" style="width:44px"></div>
+              <div class="mk"><span class="chk" role="checkbox"><i></i>Light armor</span><span class="push"></span><input class="tf" style="width:44px"></div>
+            </div>
+          </div>
+          <div class="section fold closed"><div class="head"><span class="tw">+</span><span class="cap">Modules &amp; beacons</span><span class="badge">none</span></div>
+            <div class="fbody"><div class="fields">
+              <label class="field"><span>Modules</span><span class="slot">{mod}</span></label>
+              <label class="field"><span>Beacon</span><span class="slot"></span></label>
+              <label class="field"><span>Beacon mods</span><span class="slot"></span></label>
+            </div></div>
+          </div>
+          <div class="section fold closed"><div class="head"><span class="tw">+</span><span class="cap">Fine-tune</span><span class="badge">auto</span></div>
+            <div class="fbody"><div class="fields">
+              <label class="field"><span>Input</span><span class="slot"></span></label>
+              <label class="field"><span>Long-handed</span><span class="slot"></span></label>
+              <label class="field"><span>Output</span><span class="slot"></span></label>
+              <label class="field"><span>Per row</span><input class="tf" style="width:50px"></label>
+            </div></div>
+          </div>
+          <div class="section"><span class="chk" role="checkbox" aria-checked="true"><i></i>Next to my base: build from my main bus</span></div>
+        </div>
+        <div class="foot">
+          <div class="prog when-busy"><div class="top"><span>Planning</span><span>routing iron plate in…</span></div><div class="meter"><i id="meter"></i></div></div>
+          <div class="muted small when-plan plan-note">Planned in 62 ms.</div>
+          <div class="small when-plan stale-note" style="color:var(--caption)">Changed since the last plan: Plan again.</div>
+          <div class="row tight"><span class="n">1</span><button class="btn ok pulse" style="flex:1" id="plan">Plan</button></div>
+          <div class="row tight"><button class="btn sm" style="flex:1">What's short?</button><button class="btn sm" style="flex:1">Check my bus</button></div>
+        </div>
+      </div>
+      <div class="deep right">
+        <div class="cam">
+          <svg class="bp when-plan" viewBox="0 0 320 120">{bp}</svg>
+          <div class="hint when-empty"><big>▦</big>Pick a recipe and press Plan:<br>the blueprint shows here, drawn by the game.<br><span class="small">(or drag one in from History)</span></div>
+          <div class="hint when-busy"><big>…</big>Planning</div>
+          <div class="ov l when-plan"><span class="n">4</span><button class="btn">−</button><button class="btn">+</button><button class="btn w">Fit</button><button class="btn">◀</button><button class="btn">▲</button><button class="btn">▼</button><button class="btn">▶</button></div>
+          <div class="ov r when-plan"><button class="btn w" id="testbtn">Test run</button></div>
+        </div>
+        <div class="stats when-plan">
+          <div class="stat"><b>64 × 13</b><span>size</span></div>
+          <div class="stat"><b>42</b><span>machines</span></div>
+          <div class="stat"><b>3600/min</b><span>made</span></div>
+          <div class="stat"><b>2</b><span>belts in</span></div>
+        </div>
+        <div class="test section"><div class="row tight"><span class="n">8</span><span class="cap" style="font-weight:700;color:var(--caption)">Test run</span><span class="push"></span><span class="badge">×5</span><button class="btn sm keep">Stop</button></div>
+          <div class="prog"><div class="top"><span>gears measured</span><span id="testtxt">3240/min · 90% of expected</span></div><div class="meter"><i id="testbar" style="width:90%;background:#9ad13c"></i></div></div>
+          <div class="graph"><svg viewBox="0 0 300 50" preserveAspectRatio="none"><polygon id="garea" style="fill: var(--caption)" opacity=".22"/><polyline id="gline" style="fill: none; stroke: var(--caption)" stroke-width="2" vector-effect="non-scaling-stroke"/></svg></div>
+        </div>
+        <div class="section result when-plan"><div class="row tight"><span class="n">5</span><span class="cap" style="font-weight:700;color:var(--caption)">Result</span></div>
+          <div class="badges">
+            <span class="badge"><span class="ico i-gear"></span> 42 × assembler 2</span>
+            <span class="badge">needs <span class="ico i-plate"></span> 7200/min</span>
+            <span class="badge"><span class="ico i-belt"></span> transport belt</span>
+            <span class="badge warn">⚠ can't craft yet: 190 <span class="ico i-belt"></span></span>
+          </div>
+        </div>
+        <div class="row acts inwin"><span class="n">6</span>
+          <button class="btn ok" data-toast="Blueprint in your hand">Blueprint to cursor</button><button class="btn" data-toast="Placed 352 ghosts next to you (outlined)">Place near me</button><button class="btn" data-toast="Looking around you for a spot next to your base…">Next to my base</button>
+          <span class="push"></span>
+          <button class="btn sm" data-toast="Blueprint string copied">Copy</button><button class="btn sm undo">Undo</button><button class="btn sm keep histbtn">History</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- dock: the actions hanging below the window -->
+  <div class="dockbar acts"><span class="n">6</span>
+    <button class="btn ok" data-toast="Blueprint in your hand">Blueprint to cursor</button><button class="btn" data-toast="Placed 352 ghosts next to you (outlined)">Place near me</button><button class="btn" data-toast="Looking around you for a spot next to your base…">Next to my base</button>
+    <button class="btn sm" data-toast="Blueprint string copied">Copy</button><button class="btn sm undo">Undo</button><button class="btn sm keep histbtn">History</button>
+  </div>
+  <!-- confirm: Undo asks first -->
+  <div class="win confirm hidden" id="confirm">
+    <div class="bar"><span class="n">7</span><span class="title">Undo the placement?</span><span class="drag"></span></div>
+    <div class="inset" style="flex:none">Removes the 352 ghosts bpgen put down that aren't built yet.</div>
+    <div class="row"><button class="btn" id="keep">Keep</button><button class="btn ok" id="remove">Remove them</button></div>
+  </div>
+</div>
+
+<!-- ======================= now (0.19.0) ======================= -->
+<div class="win hidden" id="v-old">
+  <div class="bar"><span class="title">bpgen</span><span class="drag"></span><button class="x" title="Close">✕</button></div>
+  <div class="row"><span class="n">3</span><div class="tabs"><button class="btn sm">1 What</button><button class="btn sm" aria-pressed="true">2 How</button><button class="btn sm">3 Where</button></div><span class="push"></span><span class="chk" role="checkbox" aria-checked="true"><i></i>Only unlocked</span></div>
+  <div class="tabs"><button class="btn" aria-pressed="true">Line</button><button class="btn">Mall</button><button class="btn">Base</button><button class="btn">Extend</button><button class="btn">Bus</button><button class="btn">Refit</button><button class="btn">Move</button><button class="btn">Ship</button></div>
+  <div class="muted small" style="margin-top:-4px">One recipe at a rate, on the belt you pick</div>
+  <div class="body">
+    <div class="inset left"><div class="scroll">
+      <div class="section"><span class="cap">Recipe</span>
+        <div class="fields">
+          <label class="field"><span>Recipe</span><span class="slot">{gear}</span></label>
+          <label class="field"><span>Machine</span><span class="slot">{asm}</span></label>
+          <label class="field"><span>Per minute</span><input class="tf" value="120"></label>
+        </div>
+        <div class="fields">
+          <label class="field"><span>Belt</span><span class="slot">{belt}</span></label>
+          <label class="field"><span>Feed</span><select class="dd"><option>belts</option></select></label>
+        </div>
+      </div>
+      <div class="section"><span class="cap">Make in this blueprint</span><div class="mk"><span class="chk" role="checkbox"><i></i>Iron plate</span><span class="push"></span><span class="muted small">on belt</span></div></div>
+      <div class="section"><div class="row tight"><span class="n">2</span><span class="cap" style="font-weight:700;color:var(--caption)">Also make (same inputs)</span></div>
+        <div class="mk"><span class="chk" role="checkbox"><i></i>Firearm magazine</span><span class="push"></span><input class="tf" style="width:44px"></div>
+        <div class="mk"><span class="chk" role="checkbox"><i></i>Iron chest</span><span class="push"></span><input class="tf" style="width:44px"></div>
+        <div class="mk"><span class="chk" role="checkbox"><i></i>Iron stick</span><span class="push"></span><input class="tf" style="width:44px"></div>
+        <div class="mk"><span class="chk" role="checkbox"><i></i>Light armor</span><span class="push"></span><input class="tf" style="width:44px"></div>
+        <span class="chk" role="checkbox"><i></i>5 that need one input more or less</span>
+      </div>
+      <div class="section"><span class="cap">Modules &amp; beacons</span><div class="fields">
+        <label class="field"><span>Machine modules</span><span class="slot"></span></label>
+        <label class="field"><span>Beacon</span><span class="slot"></span></label>
+        <label class="field"><span>Beacon modu…</span><span class="slot"></span></label></div></div>
+      <div class="section"><span class="cap">Fine-tune</span><span class="chk" role="checkbox" aria-checked="true"><i></i>Inserters and machines per row</span>
+        <div class="fields"><label class="field"><span>Input</span><span class="slot"></span></label><label class="field"><span>Long-handed</span><span class="slot"></span></label><label class="field"><span>Output</span><span class="slot"></span></label></div>
+        <label class="field"><span>Machines per row</span><input class="tf"></label></div>
+      <div class="section"><span class="cap">Next to my base</span><span class="chk" role="checkbox" aria-checked="true"><i></i>Build from my main bus</span></div>
+      <div class="row"><span class="n">1</span><button class="btn ok" style="flex:1">Plan</button></div>
+      <div class="row tight"><button class="btn">What's short?</button><button class="btn">Check my bus</button></div>
+    </div></div>
+    <div class="deep right">
+      <div class="cam">
+        <svg class="bp when-plan" viewBox="0 0 320 120">{bp}</svg>
+        <div class="hint when-empty"><span>Pick a recipe and press Plan: the blueprint shows here, drawn by the game.</span></div>
+      </div>
+      <div class="prog when-busy"><div class="top"><span>Planning</span><span>routing iron plate in…</span></div><div class="meter"><i style="width:45%"></i></div></div>
+      <div class="stats when-plan">
+        <div class="stat"><b>64 × 13</b><span>size</span></div><div class="stat"><b>42</b><span>machines</span></div><div class="stat"><b>3600/min</b><span>made</span></div>
+      </div>
+      <div class="row tight"><span class="n">4</span><button class="btn tool">−</button><button class="btn tool">+</button><button class="btn">Fit</button><button class="btn tool">◀</button><button class="btn tool">▲</button><button class="btn tool">▼</button><button class="btn tool">▶</button><span class="push"></span><button class="btn">Test run</button></div>
+      <div class="row tight acts"><span class="n">6</span><button class="btn ok">Blueprint to cursor</button><button class="btn">Copy string</button><button class="btn">Place near me</button><button class="btn">Next to my base</button><button class="btn">Undo</button><button class="btn keep">History</button></div>
+      <div class="lines when-plan"><span class="n">5</span>
+        <span>⚙ × 42 assembler 2 · 3600.0/min expected · belt</span>
+        <span>Needs a minute: iron plate 7200.0</span>
+        <span>65 × 14 tiles · planned in 62 ms</span>
+        <span>⚠ Can't craft yet and not enough on hand: 190 transport belt (have 0)</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+  </div>
+  <aside>
+    <h2>Built from fse-std</h2>
+    <ol>
+      <li><span class="n">1</span><div><b>Plan pinned</b> under the left panel's scroll, the progress bar over it; it <b>breathes</b> when you changed something since the last plan.<div class="gui"><code>theme.progress</code>, <code>pulse</code> role</div></div></li>
+      <li><span class="n">2</span><div><b>Rare sections fold</b>, a badge saying what's in them.<div class="gui"><code>theme.fold</code>, <code>theme.badge</code></div></div></li>
+      <li><span class="n">3</span><div><b>Modes grouped</b>: one row in the window, or (Rail &amp; dock) tabs out of its left edge, the open one merging in.<div class="gui"><code>tab</code> role, or <code>theme.tab_rail</code></div></div></li>
+      <li><span class="n">4</span><div><b>View tools on the preview</b>: a small frame of its own kept over the camera, following the window.<div class="gui"><code>theme.attach</code> + the camera's place read from the engine, as <code>overlay.lua</code> does (new: attach to an element, not only an edge)</div></div></li>
+      <li><span class="n">5</span><div><b>Result as tiles and badges</b>; warnings stand out.<div class="gui"><code>theme.stat</code>, <code>theme.badge</code></div></div></li>
+      <li><span class="n">6</span><div><b>One action bar</b>: under the preview, or (Rail &amp; dock) a toolbar hanging below the window.<div class="gui"><code>ok</code> role, or <code>theme.dock</code></div></div></li>
+      <li><span class="n">7</span><div><b>Messages as toasts</b> (placed, copied, can't) instead of the status line and chat; <b>Undo asks first</b>.<div class="gui"><code>theme.toast</code>, <code>theme.confirm</code></div></div></li>
+      <li><span class="n">8</span><div><b>Test run live</b>: the rate as a line chart, a bar red to green by the share of the expected rate, the preview glowing while it runs.<div class="gui"><code>theme.graph</code>, <code>theme.progress{auto}</code>, <code>theme.glow</code></div></div></li>
+      <li><span class="n">9</span><div><b>History as a drawer</b> on the right edge: search it, drag a row onto the preview or the Recipe slot.<div class="gui"><code>theme.attach("right")</code>, <code>theme.search</code>, <code>dnd</code></div></div></li>
+    </ol>
+    <p>Try: Plan, Undo, the buttons under the preview (toasts), Test run, the folds, History. Without FSE: no glow, the graph as columns, drag &amp; drop by click-to-pick; the rest is the same.</p>
+    <p class="gui">A browser mock: the game draws details differently. Element names and tags stay, so the tests keep working.</p>
+  </aside>
+</main>
+<script>
+const ICON = {
+  gear: '<svg viewBox="0 0 24 24" width="26" height="26"><circle cx="12" cy="12" r="7" fill="none" stroke="#c9a46a" stroke-width="4" stroke-dasharray="3 2.5"/><circle cx="12" cy="12" r="3" fill="#c9a46a"/></svg>',
+  asm: '<svg viewBox="0 0 24 24" width="26" height="26"><rect x="3" y="3" width="18" height="18" rx="2" fill="#5b7f9e"/><rect x="7" y="7" width="10" height="10" fill="#2c3e50"/></svg>',
+  belt: '<svg viewBox="0 0 24 24" width="26" height="26"><rect x="3" y="7" width="18" height="10" fill="#d8b23a"/><path d="M6 12h10m-3-3 3 3-3 3" stroke="#333" stroke-width="2" fill="none"/></svg>',
+  mod: '<svg viewBox="0 0 24 24" width="26" height="26"><rect x="5" y="4" width="14" height="16" rx="2" fill="#3fa35b"/><rect x="8" y="7" width="8" height="4" fill="#1d5a2e"/></svg>',
+  bp: Array.from({ length: 2 }, (_, r) => Array.from({ length: 10 }, (_, i) =>
+        `<rect x="${12 + i * 30}" y="${18 + r * 46}" width="24" height="24" fill="#5b7f9e" opacity=".9"/><rect x="${18 + i * 30}" y="${24 + r * 46}" width="12" height="12" fill="#2c3e50"/>`).join('')).join('') +
+      '<rect x="6" y="8" width="308" height="5" fill="#d8b23a"/><rect x="6" y="54" width="308" height="5" fill="#d8b23a"/><rect x="6" y="100" width="308" height="5" fill="#d8b23a"/>',
+};
+const $ = id => document.getElementById(id);
+const stage = $('stage');
+stage.innerHTML = stage.innerHTML.replace(/\{(\w+)\}/g, (_, k) => ICON[k]);
+const THEMES = [["vanilla","Vanilla"],["compact","Compact"],["flat","Flat dark"],["blueprint","Blueprint"],["platform","Space platform"],
+  ["vulcanus","Vulcanus"],["gleba","Gleba"],["fulgora","Fulgora"],["aquilo","Aquilo"],["crt","CRT terminal"],["glass","Frosted glass"],["glassdark","Dark glass"]];
+const themes = $('themes');
+for (const [k, n] of THEMES) themes.insertAdjacentHTML('beforeend', `<button data-t="${k}" aria-pressed="${k === 'vanilla'}">${n}</button>`);
+function press(group, btn) { group.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b === btn)); }
+function setClass(prefix, value) { stage.className = stage.className.split(' ').filter(c => !c.startsWith(prefix)).concat(prefix + value).join(' '); }
+function group(el, attr, fn) { el.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; press(el, b); fn(b.dataset[attr]); }); }
+group(themes, 't', t => setClass('t-', t));
+group($('ver'), 'v', v => { $('v-new').classList.toggle('hidden', v !== 'new'); $('v-old').classList.toggle('hidden', v !== 'old'); });
+group($('lay'), 'l', l => setClass('l-', l));
+
+// toasts (theme.toast): go away by themselves
+function toast(text) {
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = text; $('toasts').append(t);
+  setTimeout(() => { t.style.opacity = 0; setTimeout(() => t.remove(), 400); }, 2600);
+}
+
+// states
+let timer, testTimer;
+const series = [];
+function drawGraph() {
+  const max = 4000, n = series.length;
+  if (n < 2) { $('gline').setAttribute('points', ''); $('garea').setAttribute('points', ''); return; }
+  const pts = series.map((v, i) => `${(300 * i / (n - 1)).toFixed(1)},${(50 - 46 * v / max).toFixed(1)}`);
+  $('gline').setAttribute('points', pts.join(' '));
+  $('garea').setAttribute('points', `0,50 ${pts.join(' ')} 300,50`);
+}
+function ramp(v) { v = Math.max(0, Math.min(1, v)); return v < .5 ? `rgb(230,${Math.round(64 + 306 * v)},51)` : `rgb(${Math.round(230 - 357 * (v - .5))},217,64)`; }
+function setTest(v) {
+  $('testbar').style.width = (v * 100).toFixed(0) + '%';
+  $('testbar').style.background = ramp(v);
+  $('testtxt').textContent = `${Math.round(3600 * v)}/min · ${Math.round(v * 100)}% of expected`;
+}
+function setState(s, still) {
+  clearInterval(timer); clearInterval(testTimer);
+  press($('state'), $('state').querySelector(`[data-s="${s}"]`));
+  setClass('s-', s);
+  const m = $('meter');
+  if (s === 'busy') {
+    let v = still ? 45 : 0; m.style.width = v + '%';
+    if (!still) timer = setInterval(() => { v += 7; m.style.width = Math.min(v, 100) + '%'; if (v >= 105) { setState('plan'); toast('Planned: 42 machines, 3600/min'); } }, 120);
+  }
+  if (s === 'test') {
+    series.length = 0;
+    const target = [.12, .3, .52, .7, .82, .88, .9, .91, .9, .92, .9, .91];
+    if (still) { series.push(...target.map(v => v * 3600)); drawGraph(); setTest(.9); return; }
+    let i = 0;
+    testTimer = setInterval(() => { const v = target[Math.min(i, target.length - 1)] + (Math.random() - .5) * .03; series.push(v * 3600); if (series.length > 30) series.shift();
+      drawGraph(); setTest(v); i++; }, 400);
+  }
+}
+$('state').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setState(b.dataset.s); });
+$('plan').addEventListener('click', () => setState('busy'));
+$('testbtn').addEventListener('click', () => setState('test'));
+$('rate').addEventListener('input', () => { if (stage.classList.contains('s-plan')) setState('stale'); });
+$('nums').addEventListener('change', e => stage.classList.toggle('nums', e.target.checked));
+$('hist').addEventListener('change', e => { $('drawer').classList.toggle('open', e.target.checked); $('v-new').classList.toggle('drawer-open', e.target.checked); });
+
+stage.addEventListener('click', e => {
+  const head = e.target.closest('.fold .head');
+  if (head) { const f = head.parentNode; f.classList.toggle('closed'); head.querySelector('.tw').textContent = f.classList.contains('closed') ? '+' : '−'; return; }
+  const tab = e.target.closest('.tabs .btn');
+  if (tab) { const scope = tab.closest('.rail') || tab.closest('.modes') || tab.closest('.tabs');
+    const all = tab.closest('#v-new') ? $('v-new').querySelectorAll('.rail .btn, .modes .btn') : scope.querySelectorAll('.btn');
+    all.forEach(b => b.setAttribute('aria-pressed', b.textContent === tab.textContent)); }
+  const chk = e.target.closest('.chk');
+  if (chk) { chk.setAttribute('aria-checked', chk.getAttribute('aria-checked') !== 'true'); if (stage.classList.contains('s-plan')) setState('stale'); }
+  if (e.target.closest('[data-toast]')) toast(e.target.closest('[data-toast]').dataset.toast);
+  if (e.target.closest('.undo')) $('confirm').classList.remove('hidden');
+  if (e.target.closest('.histbtn')) $('hist').click();
+});
+$('keep').addEventListener('click', () => $('confirm').classList.add('hidden'));
+$('remove').addEventListener('click', () => { $('confirm').classList.add('hidden'); toast('352 placed ghosts removed'); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') $('confirm').classList.add('hidden'); });
+
+// (?t=aquilo&v=old&l=rail&s=test&h=1&c=1&toast=1: what to open with, for screenshots)
+const q = new URLSearchParams(location.search);
+if (q.get('t')) themes.querySelector(`[data-t="${q.get('t')}"]`)?.click();
+if (q.get('v')) $('ver').querySelector(`[data-v="${q.get('v')}"]`)?.click();
+if (q.get('l')) $('lay').querySelector(`[data-l="${q.get('l')}"]`)?.click();
+if (q.get('s')) setState(q.get('s'), true);
+if (q.get('h')) $('hist').click();
+if (q.get('c')) $('confirm').classList.remove('hidden');
+if (q.get('toast')) toast('Placed 352 ghosts next to you (outlined)');
+</script>
+</body>
+</html>

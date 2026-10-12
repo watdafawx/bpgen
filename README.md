@@ -95,6 +95,12 @@ In game, after each plan you see whether your save can build it (missing researc
 modules would change, and what your factory is short of. **Test run** runs the preview for real (powered, fed and
 drained) and shows the rate it reaches. **Place near me** puts it down as ghosts at the nearest free spot.
 
+With `fse-std` the window follows each player's theme (`/fse-theme`): the modes are tabs on its left edge, the
+blueprint's actions hang below it, the preview's zoom, arrows and Test run are tabs on its right edge,
+History opens as a drawer under them (search it, drag a row onto the preview or the Recipe slot), and Plan stays
+in sight under the settings, breathing when you changed something since the last plan. Without it, the same in
+one window in the game's own styles.
+
 ## Getting started: in game
 
 ### 1. Install FSE
@@ -232,6 +238,9 @@ placed exactly, then ore to science packs in a game), `harness\busdesign_check.p
 [direction]` (bus design built on made-up patches and run: every lane's rate, the balancers even). They use the same `run\` folder as the web app.
 `mod\test\run_compat.py` opens a real game with Recipe Book and Factory Planner (from your mods folder) and checks
 bpgen's buttons in their windows.
+`mod	estun_theme_gui.py [--plain]` opens a real game through the fse launcher and shoots the bpgen window in five
+of fse-std's themes (`--plain`: without fse-std, in the game's own styles), with its progress bar and Undo's
+confirm dialog.
 
 ## License
 

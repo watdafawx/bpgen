@@ -868,11 +868,15 @@ if script.active_mods["fse-std"] then
 end
 
 local function on_selected(e)
-  if e.item == "bpgen-patches" then return window.add_patch(game.get_player(e.player_index), e.area) end
-  if e.item == "bpgen-refit" then return window.refit(game.get_player(e.player_index), e.area) end
-  if e.item == "bpgen-move" then return window.move(game.get_player(e.player_index), e.area) end
-  if e.item ~= "bpgen-snapshot" then return end
-  measure(game.get_player(e.player_index), e.area, "snapshot_tool", e.area)
+  local player = game.get_player(e.player_index)
+  if e.item == "bpgen-patches" then return window.add_patch(player, e.area) end
+  if not window.TOOLS[e.item] then return end
+  -- (one drag is all these take: the tool put away, the window back to show what it does)
+  player.clear_cursor()
+  window.tool_done(player)
+  if e.item == "bpgen-refit" then return window.refit(player, e.area) end
+  if e.item == "bpgen-move" then return window.move(player, e.area) end
+  measure(player, e.area, "snapshot_tool", e.area)
 end
 on_event(defines.events.on_player_selected_area, on_selected)
 
@@ -920,7 +924,16 @@ remote.add_interface("bpgen", {
   -- (tests) the recipe filters "Only unlocked" sets, for a force
   recipe_filters = function(force_name) return window.recipe_filters(game.forces[force_name or "player"]) end,
   plan_window = function(player_index) window.plan(game.get_player(player_index)) end,
-  click = function(player_index, tags) window.click(player_index, tags) end,
+  -- (tests) a button press, as its tags; as_button: as the player's own press (Undo asks first, as for a click)
+  click = function(player_index, tags, as_button) window.click(player_index, tags, as_button) end,
+  -- (tests) the planning progress bar at {fraction, step, lines}
+  progress = function(player_index, p) window.on_progress(game.get_player(player_index), p) end,
+  -- (tests) a setting changed by the player (scripts raise no GUI events), by its element's name
+  touch = function(player_index, name) window.touch(player_index, name) end,
+  -- (tests) the window resized (GUI units), as by its corner grip
+  resize = function(player_index, w, h) window.test_resize(player_index, w, h) end,
+  -- (tests) "Docked" ticked or not
+  docked = function(player_index, on) window.set_docked(game.get_player(player_index), on) end,
   hover_camera = function(player_index) return window.test_hover_camera(player_index) end,
   last_absolute = function(player_index) return window.last_absolute(player_index) end,
   hover_grip = function(player_index) window.test_hover_grip(player_index) end,
@@ -952,5 +965,6 @@ end)
 -- (with the fse-std library: its window and input handlers, for the bpgen window's corner grip)
 if script.active_mods["fse-std"] then
   safe.chain("bpgen", { require("__fse-std__/input").handlers, require("__fse-std__/window").handlers,
-    require("ui").handlers })  -- (the theme: restyled when a player picks another, folds, toasts)
+    require("ui").handlers,  -- (the theme: restyled when a player picks another, folds, toasts)
+    require("__fse-std__/dnd").handlers })  -- (History's rows dragged onto the preview)
 end
