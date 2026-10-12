@@ -20,6 +20,7 @@ _lock = threading.Lock()  # (plans share one Service: one at a time)
 _taking = None  # the thread writing data the game sent (planning waits for it)
 _last = None  # the last plan that isn't placed yet (entities, sources, sinks...): what place() puts next to the base
 _sections = {}  # a starter base's prints by name (place() can put one of them next to the base)
+_where = None  # where place() last put _last: {of: that _last, seed, offset} (the window's arrows move it from there)
 # what the job running now has done, for the window's progress bar (read by progress(), without _lock: the job holds
 # it while it works). Appending to a list is atomic in CPython.
 STAGES = ("reading your request", "planning", "placing it next to your base", "finishing")
@@ -472,13 +473,19 @@ def place(request: str) -> str:
             x1, y1, x2, y2 = _last["prune"]
             snap = dict(snap, entities=[e for e in snap.get("entities") or [] if not (
                 x1 <= e["position"]["x"] < x2 and y1 <= e["position"]["y"] < y2)])
+        global _where
+        seed, at = req.get("seed"), None
+        if req.get("shift") and _where and _where["of"] is _last:  # (the arrows: that far from the last spot)
+            seed = _where["seed"]
+            at = (_where["offset"][0] + req["shift"][0], _where["offset"][1] + req["shift"][1])
         _begin()
         _note("placing the last plan where you asked", 2)
         with _lock:
             _svc().progress = lambda text: _note(text, 2)
             placed = _svc().extend(dict(_last, bus="here" if _last.get("mode") == "move" else req.get("bus") or "auto",
-                                        seed=req.get("seed"), snapshot=snap, turn=req.get("turn") or 0,
-                                        avoid=req.get("avoid")))
+                                        seed=seed, snapshot=snap, turn=req.get("turn") or 0,
+                                        avoid=req.get("avoid"), spot=bool(req.get("spot")), at=at))
+        _where = {"of": _last, "seed": seed, "offset": placed["offset"]}
         absolute = _absolute(placed)
         if _last.get("clear"):
             absolute["clear"] = _last["clear"]

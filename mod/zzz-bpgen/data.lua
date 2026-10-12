@@ -51,6 +51,18 @@ data:extend({
     select = { border_color = { 0.4, 1, 0.5 }, cursor_box_type = "copy", mode = { "any-entity" } },
     alt_select = { border_color = { 0.4, 1, 0.5 }, cursor_box_type = "copy", mode = { "any-entity" } },
   },
+  -- click (or drag over) where the planned build goes next to the base: the bpgen window places it there
+  {
+    type = "selection-tool",
+    name = "bpgen-spot",
+    icon = "__base__/graphics/icons/assembling-machine-1.png",
+    icon_size = 64,
+    flags = { "only-in-cursor", "not-stackable", "spawnable" },
+    hidden = true,
+    stack_size = 1,
+    select = { border_color = { 1, 0.85, 0.2 }, cursor_box_type = "copy", mode = { "any-tile" } },
+    alt_select = { border_color = { 1, 0.85, 0.2 }, cursor_box_type = "copy", mode = { "any-tile" } },
+  },
   { type = "custom-input", name = "bpgen-snapshot", key_sequence = "CONTROL + SHIFT + N", action = "spawn-item",
     item_to_spawn = "bpgen-snapshot", consuming = "game-only" },
   {

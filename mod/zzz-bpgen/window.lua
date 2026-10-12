@@ -754,6 +754,7 @@ local TOOLS = {
   ["bpgen-refit"] = { title = "Refit", text = "Drag over the part of your base to lay out again as a compact mall." },
   ["bpgen-move"] = { title = "Move", text = "Stand where the section should go, then drag over the section." },
   ["bpgen-snapshot"] = { title = "Snapshot", text = "Drag over your base: bpgen plans new builds that fit next to it." },
+  ["bpgen-spot"] = { title = "Pick spot", text = "Click where the build should go (its middle), on the side of the bus you want." },
   ["bpgen-patches"] = { title = "Ore patches", text = "Drag over each ore patch the bus should mine, then press Done.",
     many = true },
 }
@@ -1222,10 +1223,13 @@ function M.open(player, prefill)
     tooltip = "Ghosts at a free spot next to you, inputs pointed at your belts that carry them" })
   tools.add({ type = "button", name = "bpgen_place_base", caption = "Next to my base", tags = { bpgen = "place_base" },
     enabled = false, tooltip = "Stand by the part of your base to build next to: bpgen looks around you, puts this on free ground beside it (beside your main bus when there is one), taps the belts that carry its inputs, takes its output where it's needed and links the power. Ghosts, ready for your bots" })
-  tools.add({ type = "button", name = "bpgen_nudge_back", caption = "◀", style = "tool_button", visible = false,
-    tags = { bpgen = "nudge", d = -1 }, tooltip = "Move it back along your bus (or west), then look again" })
-  tools.add({ type = "button", name = "bpgen_nudge_fwd", caption = "▶", style = "tool_button", visible = false,
-    tags = { bpgen = "nudge", d = 1 }, tooltip = "Move it on along your bus (or east), then look again" })
+  tools.add({ type = "button", name = "bpgen_base_spot", caption = "Pick spot", visible = false,
+    tags = { bpgen = "base_spot" }, tooltip = "Click on the map where it should go: placed there, on the side of the bus you clicked, its belts and power connected" })
+  for _, a in ipairs({ { "left", "◀", -1, 0 }, { "up", "▲", 0, -1 }, { "down", "▼", 0, 1 }, { "right", "▶", 1, 0 } }) do
+    tools.add({ type = "button", name = "bpgen_nudge_" .. a[1], caption = a[2], style = "tool_button", visible = false,
+      tags = { bpgen = "nudge", dx = a[3], dy = a[4] },
+      tooltip = "Move it 1 tile " .. a[1] .. " (Shift: 5 tiles), its belts connected again" })
+  end
   tools.add({ type = "button", name = "bpgen_base_rotate", caption = "⟳", style = "tool_button", visible = false,
     tags = { bpgen = "base_rotate" }, tooltip = "Rotate it a quarter turn where it is, its belts and power connected again" })
   tools.add({ type = "button", name = "bpgen_base_redo", caption = "Redo", visible = false, tags = { bpgen = "base_redo" },
@@ -1634,6 +1638,18 @@ end
 
 --- a section of the base to move (the move tool): its blueprint (settings, wires) and where it is, to bpgen, which
 --- places it near the player with its belts in and out run to the base again (see ingame.move)
+--- the pick-spot tool clicked (or dragged): the last plan placed with its middle there, on that side of the bus
+function M.spot(player, area)
+  local frame = player.gui.screen[NAME]
+  if not (frame and results[player.index]) then return say(player, "Plan something first, then pick its spot.") end
+  local seed = { x = (area.left_top.x + area.right_bottom.x) / 2, y = (area.left_top.y + area.right_bottom.y) / 2 }
+  tried[player.index] = nil
+  local sec = find(frame, "bpgen_section")
+  local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off", seed = seed,
+    spot = true, turn = turns[player.index], section = sec.visible and sec.items[sec.selected_index] or nil })
+  status(frame, ok and "Placing it where you clicked..." or ("Can't: " .. tostring(why)))
+end
+
 function M.move(player, area)
   if not player.gui.screen[NAME] then M.open(player, { mode = "move" }) end
   local frame = player.gui.screen[NAME]
@@ -1883,8 +1899,10 @@ function M.on_result(player, res)
   pb.tooltip = res.absolute and "Ghosts where the preview shows it, its taps replacing the belts they cut into"
     or "Ghosts at a free spot next to you, inputs pointed at your belts that carry them"
   local fixed = res.mode == "lane"  -- (where it is is the point: no arrows; a bus design's move its head sideways)
-  find(frame, "bpgen_nudge_back").visible = res.absolute ~= nil and not fixed
-  find(frame, "bpgen_nudge_fwd").visible = res.absolute ~= nil and not fixed
+  for _, n in ipairs({ "left", "up", "down", "right" }) do
+    find(frame, "bpgen_nudge_" .. n).visible = res.absolute ~= nil and not fixed
+  end
+  find(frame, "bpgen_base_spot").visible = res.absolute ~= nil and not fixed or find(frame, "bpgen_place_base").enabled
   find(frame, "bpgen_base_rotate").visible = res.absolute ~= nil and not fixed
   find(frame, "bpgen_base_redo").visible = res.absolute ~= nil and not fixed
   local tb = find(frame, "bpgen_test")
@@ -2446,7 +2464,7 @@ local function on_click(e)
     bus_shift[player.index] = nil
     M.plan(player)
   elseif action == "nudge" and r and r.res.mode == "busdesign" then  -- (its head, sideways: planned again)
-    bus_shift[player.index] = (bus_shift[player.index] or 0) + el.tags.d * BUS_STEP
+    bus_shift[player.index] = (bus_shift[player.index] or 0) + (el.tags.dx + el.tags.dy) * BUS_STEP
     status(frame, "Moving the bus head...")
     M.plan(player)
   elseif action == "recipe" then  -- a bpgen button in another mod's window (compat.lua)
@@ -2541,13 +2559,19 @@ local function on_click(e)
   elseif action == "upgrade_lane" and r and r.res.absolute then
     M.upgrade_lane(player, r.res.absolute.upgrades[el.tags.i])
   elseif action == "nudge" and r and r.res.absolute then
-    local b, axis = r.res.absolute.box, r.res.absolute.axis
-    local along = axis == 0 and b[4] or b[3]
-    local step = el.tags.d * math.max(8, math.ceil(along / 2))
-    local seed = { x = b[1] + b[3] / 2 + (axis == 0 and 0 or step), y = b[2] + b[4] / 2 + (axis == 0 and step or 0) }
-    local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off", seed = seed,
-      turn = turns[player.index] })
+    -- (exactly that far from where it is: no looking for another spot, the belts and power connected again)
+    local n = e.shift and 5 or 1
+    local b = r.res.absolute.box  -- (the snapshot around it; where it goes is bpgen's last spot, shifted)
+    local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off",
+      seed = { x = b[1] + b[3] / 2, y = b[2] + b[4] / 2 },
+      turn = turns[player.index], shift = { el.tags.dx * n, el.tags.dy * n } })
     status(frame, ok and "Moving it..." or ("Can't: " .. tostring(why)))
+  elseif action == "base_spot" then
+    if player.clear_cursor() then
+      player.cursor_stack.set_stack({ name = "bpgen-spot" })
+      M.tool_card(player, "bpgen-spot")
+      status(frame, "Click where it should go.")
+    end
   elseif (action == "base_rotate" or action == "base_redo") and r and r.res.absolute then
     -- (both around where it is now: Rotate turns it there, Redo looks past every spot it was shown on)
     local b = r.res.absolute.box

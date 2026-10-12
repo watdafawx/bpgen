@@ -160,4 +160,29 @@ for bus in ("auto", "off"):
     print("redo", bus, b, a)
     assert a[2] <= b[0] or a[0] >= b[2] or a[3] <= b[1] or a[1] >= b[3], "another spot, not on the one shown"
     assert len(r2["taps"]) == len(r0["taps"]), "still fed"
+    # the arrows: exactly one tile on from where it was, still fed; into the bus: refused
+    r3 = at(at=(r0["offset"][0], r0["offset"][1] + 1))
+    print("arrow", bus, r0["offset"], r3["offset"], len(r3["taps"]))
+    assert r3["offset"] == [r0["offset"][0], r0["offset"][1] + 1] and len(r3["taps"]) == len(r0["taps"])
+    try:
+        at(at=(r0["offset"][0] - (box(r0)[0] - 21), r0["offset"][1]))
+        raise AssertionError("onto the bus should be refused")
+    except ValueError as e:
+        print("arrow refused:", e)
+# the pick-spot tool: west of the bus, far down it: built there (west side, level with the click), not by the player
+r = extend.place(s.data, extend.Ground({"area": [0, 0, 110, 110], "entities": ents}), res["entities"],
+                 res.get("sources") or [], sinks=sinks, seed=(8, 70), spot=True)
+t = extend.plan_tiles([e for e in r["entities"] if e["name"] == "assembling-machine-2"])
+print("spot", r["notes"][0], min(x for x, _ in t), min(y for _, y in t))
+assert "west side" in r["notes"][0] and max(x for x, _ in t) < 20 and abs(sum(y for _, y in t) / len(t) - 70) < 8
+# a bus in groups of two lanes, 6 tiles apart: one bus, the build beside it all, not in a gap between its groups
+gapped = [{"name": "transport-belt", "type": "transport-belt", "position": {"x": c + 0.5, "y": y + 0.5},
+           "direction": 8, "lanes": [it, it]} for c, it in zip((20, 21, 27, 28), bus_items) for y in range(0, 80)]
+g = extend.Ground({"area": [0, 0, 110, 110], "entities": gapped})
+main = extend.find_bus(g)
+print("gapped bus", [ln["at"] for ln in main["lanes"]])
+assert [ln["at"] for ln in main["lanes"]] == [20, 21, 27, 28]
+r = extend.place(s.data, g, res["entities"], res.get("sources") or [], sinks=sinks, seed=(24, 40))
+t = extend.plan_tiles(extend.shifted(extend.turn_plan(res["entities"], [], [], r["turn"])[0], *r["offset"]))
+assert min(x for x, _ in t) > 28 or max(x for x, _ in t) < 20, "beside the bus, not between its lanes"
 print("ok")

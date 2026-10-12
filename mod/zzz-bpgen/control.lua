@@ -903,6 +903,7 @@ local function on_selected(e)
   window.tool_done(player)
   if e.item == "bpgen-refit" then return window.refit(player, e.area) end
   if e.item == "bpgen-move" then return window.move(player, e.area) end
+  if e.item == "bpgen-spot" then return window.spot(player, e.area) end
   measure(player, e.area, "snapshot_tool", e.area)
 end
 on_event(defines.events.on_player_selected_area, on_selected)

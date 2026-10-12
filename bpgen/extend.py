@@ -671,11 +671,14 @@ def pipe_runs(ground, axis):
     return out
 
 
+BUS_GAP = 8  # belt lanes this far apart or closer are one bus (lanes in groups with gaps between: no build fits in)
+
+
 def bridged(a, b, pipes):
-    """belt lanes at a and b (a < b) close enough for one bus: at most 3 tiles apart, or pipe runs between them in
-    steps of at most 3 (a fluid bus among the belts)"""
+    """belt lanes at a and b (a < b) close enough for one bus: at most BUS_GAP tiles apart, or pipe runs between
+    them in steps of at most that (a fluid bus among the belts)"""
     pts = [a] + sorted(c for c in pipes if a < c < b) + [b]
-    return all(q - p <= 3 for p, q in zip(pts, pts[1:]))
+    return all(q - p <= BUS_GAP for p, q in zip(pts, pts[1:]))
 
 
 def pipe_lanes(runs, belts):
@@ -834,7 +837,7 @@ def path_entities(path, belt_name, ug_name):
 
 
 def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt="transport-belt", connect=True,
-          sinks=None, bus="auto", needs=None, extend_bus=True, progress=None, turn=0, avoid=None):
+          sinks=None, bus="auto", needs=None, extend_bus=True, progress=None, turn=0, avoid=None, spot=False, at=None):
     """bus: "auto" (build beside a main bus when the snapshot has one), "on" (the same, saying so when there is
     none), "here" (at the seed - a refit, in the area it replaces - its inputs still taken off the bus's lanes) or
     "off" (free ground nearest the seed, taps from any belt). needs: {item: items/s the build really takes}
@@ -843,6 +846,8 @@ def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt=
     continued that far, the ones ending in the open (BUS_PAST at most).
     With a bus the plan is turned so its inputs face it. turn: quarter turns clockwise on top of that (the
     window's Rotate). avoid: [x, y, w, h] boxes it must not land on (spots the window's Redo already showed).
+    spot: the seed is where the player clicked, kept beside a bus too (else the bus picks the spot along it). at:
+    the offset to use, exactly (the window's arrows), ValueError when something is in the way there.
     -> dict(offset (of the plan as turned), turn (quarter turns clockwise), entities (new, world coords), taps,
     deliveries, outputs (where its sinks landed), notes, bus (what was found, or None))"""
     notes = []
@@ -855,7 +860,8 @@ def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt=
         k = (next((n for n in range(4) if f and turned(f[0], f[1], n) == want), 0) + turn) % 4
         plan_entities, sources, sinks = turn_plan(plan_entities, sources, sinks, k)
         if bus != "here":
-            seed, keep_clear = bus_spot(main, plan_entities, side, seed)
+            spot_, keep_clear = bus_spot(main, plan_entities, side, seed)
+            seed = seed if spot and seed else spot_  # (a spot the player picked: kept, off the bus's room)
         np_ = sum(1 for ln in main["lanes"] if ln.get("pipe"))
         notes.append(f"main bus: {len(main['lanes']) - np_} lanes flowing {FLOW_NAME[main['dir']]}"
                      + (f" and {np_} pipe{'s' if np_ > 1 else ''} beside them" if np_ else "")
@@ -881,7 +887,14 @@ def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt=
         else:
             x1, y1, x2, y2 = ground.bounds
             seed = ((x1 + x2) / 2, (y1 + y2) / 2)
-    dx, dy = find_spot(ground, plan_entities, seed, avoid_ore, keep_clear=keep_clear)
+    if at is not None:  # (exactly there: the window's arrows)
+        dx, dy = at
+        hit = (ground.blocked(avoid_ore=False) | set(keep_clear)) & plan_tiles(shifted(plan_entities, dx, dy))
+        if hit:
+            raise ValueError("something's in the way there" + (" (the room kept beside your bus)" if not
+                             hit & ground.blocked(avoid_ore=False) else "") + ": move it the other way")
+    else:
+        dx, dy = find_spot(ground, plan_entities, seed, avoid_ore, keep_clear=keep_clear)
     new = shifted(plan_entities, dx, dy)
     blocked = ground.blocked(avoid_ore=False) | plan_tiles(new)
     ends = belt_ends(ground.snap["entities"] + new, blocked)
