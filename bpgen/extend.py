@@ -210,6 +210,20 @@ MAX_FAILS = 16
 TAP_EXPANSIONS = 25_000
 
 
+def reachable(ground, blocked, spans, starts, goal_tile, goal_dir, max_ug):
+    """can any of `starts` ([(tile, [dirs])]) reach the goal at all: one search from all of them together, on
+    `blocked` as it is (each candidate's own route has more blocked, never less: when this fails, they all fail).
+    A goal walled in costs this one search, not MAX_FAILS of them"""
+    if not starts:
+        return False
+    try:
+        router.route(blocked, starts, goal_tile, goal_dir, ground.bounds, max_ug, underground_spans=set(spans),
+                     max_expansions=4 * TAP_EXPANSIONS)
+        return True
+    except router.RouteError:
+        return False
+
+
 def tap(ground, blocked, spans, want, goal_tile, goal_dir, names, prefer=None, rate=0):
     """a splitter on an existing belt carrying `want` (set of items), and a routed belt from its free side to the
     goal ("enter goal_tile moving goal_dir"); prefer: (main bus, side of it the build is on) to branch off the bus
@@ -236,8 +250,17 @@ def _tap(ground, blocked, spans, want, goal_tile, goal_dir, names, prefer=None, 
     cands = tap_candidates(ground, want)
     cands.sort(key=lambda c: (bool(prefer) and c[0] not in prefer, c[3],
                               abs(c[0][0] - goal_tile[0]) + abs(c[0][1] - goal_tile[1])))
+    cands = [c for c in cands if c[0] not in ground.tapped][:40]
+    starts = []
+    for t, d, _, _ in cands:
+        dx, dy = DIR[d]
+        for side in (-1, 1):
+            s_tile = (t[0] - dy * side, t[1] + dx * side)
+            starts.append(((s_tile[0] + dx, s_tile[1] + dy), [d]))
+    if not reachable(ground, blocked, spans, starts, goal_tile, goal_dir, max_ug):
+        return None
     fails = 0
-    for t, d, belt, _ in [c for c in cands if c[0] not in ground.tapped][:40]:
+    for t, d, belt, _ in cands:
         if fails >= MAX_FAILS:
             break
         dx, dy = DIR[d]
@@ -296,8 +319,12 @@ def bus_tap(ground, blocked, spans, bus_side, want, goal, goal_dir, names, rate=
               load.get(ln["at"], 0) + ln.get("used", 0), abs(a + f - goal_a), a, ln)
              for ln in lanes if ln["items"] == want for a in range(ln["lo"] + 1, ln["hi"] - 1)]
     cands.sort(key=lambda c: c[:5])
+    cands = cands[:300]
+    if not reachable(ground, blocked, spans, list({(bus_xy(main, a + f, outer + side), (sd, d)) for *_, a, ln in cands}),
+                     goal, goal_dir, max_ug):
+        return None
     fails = 0
-    for *_, a, ln in cands[:300]:
+    for *_, a, ln in cands:
         if fails >= MAX_FAILS:
             break
         lb, lug, lspl, _ = ln.get("names") or names  # (on the bus: the lane's own tier; routed on: the plan's)

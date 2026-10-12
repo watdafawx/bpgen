@@ -2564,7 +2564,7 @@ local function on_click(e)
     local b = r.res.absolute.box  -- (the snapshot around it; where it goes is bpgen's last spot, shifted)
     local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off",
       seed = { x = b[1] + b[3] / 2, y = b[2] + b[4] / 2 },
-      turn = turns[player.index], shift = { el.tags.dx * n, el.tags.dy * n } })
+      turn = turns[player.index], shift = { el.tags.dx * n, el.tags.dy * n }, again = true })
     status(frame, ok and "Moving it..." or ("Can't: " .. tostring(why)))
   elseif action == "base_spot" then
     if player.clear_cursor() then
@@ -2585,7 +2585,7 @@ local function on_click(e)
       avoid = tried[player.index]
     end
     local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off", seed = seed,
-      turn = turns[player.index], avoid = avoid })
+      turn = turns[player.index], avoid = avoid, again = true })
     status(frame, ok and (action == "base_rotate" and "Rotating it..." or "Looking for another spot...")
       or ("Can't: " .. tostring(why)))
   elseif action == "place_base" and r then

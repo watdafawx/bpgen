@@ -253,7 +253,15 @@ window.setup({
   -- it), then bpgen places it (taps, a main bus, power); the answer lands in the window as a plan's does
   place_base = function(player, params)
     if not in_game() then return false, "start the game with the fse loader" end
-    measure(player, around(params.seed or player.position), "place_base", params)
+    local seed = params.seed or player.position
+    -- (the window's arrows, Rotate, Redo: the last snapshot again while the spot is well inside it, not measured anew)
+    local last = params.again and (storage.bpgen_place_snap or {})[player.index]
+    if last and seed.x - last.area[1] > PLACE_R / 2 and last.area[3] - seed.x > PLACE_R / 2
+        and seed.y - last.area[2] > PLACE_R / 2 and last.area[4] - seed.y > PLACE_R / 2 then
+      after.place_base(player, last, params)
+      return true
+    end
+    measure(player, around(seed), "place_base", params)
     return true
   end,
   -- the bus around the player, looked at (lanes, what they carry, what the base lacks): to window.on_api "bus"
@@ -862,6 +870,9 @@ after.plan_line = function(player, snap, req)
   plan_with(player, snap, req, "bpgen.ingame:plan", { player = player.index, auto = true })
 end
 after.place_base = function(player, snap, params)
+  storage.bpgen_place_snap = storage.bpgen_place_snap or {}
+  storage.bpgen_place_snap[player.index] = snap
+  params.again = nil
   params.snapshot = snap
   start_job(player.index, "bpgen.ingame:place", helpers.table_to_json(params), { player = player.index, recipe = "", window = true })
 end
