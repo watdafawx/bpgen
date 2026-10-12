@@ -38,6 +38,14 @@ local function check(name, ok, detail)
   log((ok and "ok   " or "FAIL ") .. name .. (detail and ("  (" .. tostring(detail) .. ")") or ""))
 end
 local function p() return game.get_player(1) end
+--- a caption as text for the log: a LocalisedString as its keys and parameters ("bpgen-window.cant(why)")
+local function text(c)
+  if type(c) ~= "table" then return tostring(c) end
+  local parts = {}
+  for k = 2, #c do parts[#parts + 1] = text(c[k]) end
+  if c[1] == "" then return table.concat(parts) end
+  return tostring(c[1]) .. (#parts > 0 and ("(" .. table.concat(parts, ", ") .. ")") or "")
+end
 local function w() return p().gui.screen.bpgen_window end
 local function shot(name)
   game.take_screenshot({ player = 1, show_gui = true, path = "theme-gui-" .. name .. ".png", zoom = 1,
@@ -248,8 +256,8 @@ steps[#steps + 1] = { run = function()
   end, ticks = 10 }
 steps[#steps + 1] = { run = function()
     local card = p().gui.screen.bpgen_tool_card
-    check("patch card counts", card and card.bpgen_card_note and card.bpgen_card_note.caption == "1 patch picked.",
-      card and card.bpgen_card_note and card.bpgen_card_note.caption)
+    local note = card and card.bpgen_card_note and text(card.bpgen_card_note.caption)
+    check("patch card counts", note == "bpgen-window.patches-picked(1)", note)
     shot("tool-card-patches")
   end, ticks = 25 }
 steps[#steps + 1] = { run = function()
@@ -311,7 +319,7 @@ steps[#steps + 1] = { run = function()
     check("test run shown", box and box.visible)
     local bar = find(w(), "bpgen_test_bar")
     check("test run measured", bar and bar.value > 0, bar and bar.value)
-    log("test: " .. tostring(find(w(), "bpgen_test_status").caption):gsub("\n", " | "))
+    log("test: " .. text(find(w(), "bpgen_test_status").caption):gsub("\n", " | "))
     shot("test")
   end, ticks = 25 }
 steps[#steps + 1] = { run = function()
@@ -326,6 +334,18 @@ steps[#steps + 1] = { run = function()
     end
     shot("history")
   end, ticks = 25 }
+-- (closed mid-run at x10: the test stops, the game back at its own speed)
+steps[#steps + 1] = { run = function()
+    rc("click", 1, { bpgen = "test" })
+    rc("click", 1, { bpgen = "test_speed" })  -- (x5)
+    rc("click", 1, { bpgen = "test_speed" })  -- (x10)
+  end, ticks = 30 }
+steps[#steps + 1] = { run = function()
+    local b = find(w(), "bpgen_test_speed")
+    check("fast-forward x10, kept in its tags", game.speed == 10 and b and b.tags.speed == 10, game.speed)
+    rc("click", 1, { bpgen = "close" })
+    check("closed mid-run: the game's own speed again", game.speed == 1, game.speed)
+  end, ticks = 5 }
 steps[#steps + 1] = { run = function()
     rc("click", 1, { bpgen = "close" })
     check("closed with what's stuck to it", w() == nil and #attached() == 0, #attached())

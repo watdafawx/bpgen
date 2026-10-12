@@ -67,7 +67,7 @@ places the same (no desyncs). The window's mouse-dragged preview works with its 
   main bus (3+ long straight belts side by side, flowing the same way) it builds beside the bus instead: splitters
   branch off its lanes, the lanes in between dive underground under each branch, and an output the bus doesn't carry
   yet gets a new lane of its own beside it. Auto by default; "Build from my main bus" in the window turns it off.
-  Any line or mall goes the same way: plan it, stand by your base and press **Next to my base**.
+  Any line or mall goes the same way: plan it, stand by your base and press **Place by my base**.
   Or set a line's **Feed** to *my main bus*: stand by your bus and press Plan; what the bus carries is tapped from
   it, the other ingredients are made in the blueprint, and the line lands beside the bus.
 - **Starter base tiers**: every main-bus starter base has a C of stone brick over its bus head and snaps to a 64-tile

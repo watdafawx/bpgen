@@ -14,6 +14,25 @@ local stdwin = script.active_mods["fse-std"] and require("__fse-std__/window") o
 local stdinput = stdwin and require("__fse-std__/input") or nil
 local dnd = stdwin and require("__fse-std__/dnd") or nil  -- (History's rows dragged onto the preview)
 local ui = require("ui")
+
+--- the window's words: a line of [bpgen-window] in locale/en/window.cfg, with its parameters
+local function T(key, ...) return { "bpgen-window." .. key, ... } end
+
+--- localised strings (or plain ones) joined, `sep` between them: nested, as a LocalisedString takes 20 parameters
+local function join(list, sep)
+  local flat = {}
+  for i, x in ipairs(list) do
+    if i > 1 and sep then flat[#flat + 1] = sep end
+    flat[#flat + 1] = x
+  end
+  while #flat > 20 do
+    local up = {}
+    for i = 1, #flat, 20 do up[#up + 1] = { "", table.unpack(flat, i, math.min(i + 19, #flat)) } end
+    flat = up
+  end
+  return { "", table.unpack(flat) }
+end
+
 local FRAME_W, FRAME_H = 360, 366  -- (the window around the preview: the tabs, the left panel, the rows under it)
 -- (with fse-std's layouts, what sticks out of the window: the rails left and right, the dock below; GUI units)
 local OUT_SIDE, OUT_BELOW = 106, 32
@@ -77,7 +96,7 @@ local place = require("place")
 local ctx          -- from control.lua: craftable, unlocked, bonuses, start, measured
 -- (per-player state in storage: in multiplayer every peer must show and place the same; see safe.stored)
 local results = safe.stored("results") -- player index -> { blueprint, res, center, zoom }
-local placed = safe.stored("placed")     -- player index -> the ghosts "Place near me" and "Next to my base" made
+local placed = safe.stored("placed")     -- player index -> the ghosts "Place near me" and "Place by my base" made
 local unmark = safe.stored("unmark")     -- player index -> what those pastes marked for deconstruction (Undo unmarks it)
 local turns = safe.stored("turns")       -- player index -> quarter turns Rotate added to the plan next to the base
 local tried = safe.stored("tried")       -- player index -> the boxes Redo looked past ({x, y, w, h} each)
@@ -191,7 +210,7 @@ local function build_preview(player, bp, box, section)
   stack.set_stack({ name = "blueprint" })
   if stack.import_stack(bp) == 1 then
     inv.destroy()
-    return nil, "the blueprint string didn't import"
+    return nil, T("bp-not-imported")
   end
   if stack.is_blueprint_book then  -- (a starter base: the print picked, else the first: the connected base)
     local inner = stack.get_inventory(defines.inventory.item_main)
@@ -211,7 +230,7 @@ local function build_preview(player, bp, box, section)
   end
   if not (stack and stack.valid_for_read and stack.is_blueprint and stack.is_blueprint_setup()) then
     inv.destroy()
-    return nil, "nothing to show"
+    return nil, T("nothing-to-show")
   end
   local w, h = 0, 0
   for _, e in pairs(stack.get_blueprint_entities() or {}) do
@@ -271,7 +290,7 @@ local function build_preview(player, bp, box, section)
     x2 = math.max(x2 or b.right_bottom.x, b.right_bottom.x)
     y2 = math.max(y2 or b.right_bottom.y, b.right_bottom.y)
   end
-  if not x1 then return nil, "nothing was built" end
+  if not x1 then return nil, T("nothing-built") end
   player.force.chart(s, { { x1 - 4, y1 - 4 }, { x2 + 4, y2 + 4 } })
   -- (where a test run finds the plan's sources and sinks: as the harness, the built area's top-left)
   local where = { origin = { x = math.floor(x1 + 0.5), y = math.floor(y1 + 0.5) }, area = { { x1 - 8, y1 - 8 }, { x2 + 8, y2 + 8 } } }
@@ -312,13 +331,9 @@ end
 ---------------------------------------------------------------------------------------------------------------------
 -- the window
 
--- (in groups: making things, a base, reworking a base, space; short names, the full one as their tooltip)
+-- (in groups: making things, a base, reworking a base, space; short names (mode-<mode> in the locale), the full one
+-- as their tooltip (mode-<mode>-tip))
 local MODES = { "line", "mall", "extend", "base", "busdesign", "refit", "move", "ship" }
-local MODE_NAMES = { "Line", "Mall", "Extend", "Base", "Bus", "Refit", "Move", "Ship" }
-local MODE_TIPS = { "One recipe at a rate, on the belt you pick", "Many products, a chest each",
-  "Make an item next to your base, fed by its belts", "Science per minute, up to the labs",
-  "Ore patches to plates on a main bus", "Tidy a part of your base that grew all over the place",
-  "Move a section of your base, its belts reconnected", "A space platform round its hub (Space Age)" }
 local GROUP_START = { base = true, refit = true, ship = true }  -- (a gap above them on the rail)
 local RAIL_W, RAIL_H = 112, #MODES * 34 + 3 * 12 + 8          -- (the rail of mode tabs, GUI units)
 local DOCK_W, DOCK_H = 720, 44                                  -- (the blueprint's actions, below the window)
@@ -351,7 +366,8 @@ end
 --- a field: its caption, small and dim, over the control added to the returned flow
 local field = ui.field
 
---- a section folded unless `open`, a badge in its heading saying what's in it (themed); returns its body
+--- a section folded unless `open`, a badge in its heading saying what's in it (themed; hidden while badge_text is
+--- nil); returns its body
 local function fold(parent, title, open, badge_name, badge_text)
   local body = ui.fold(parent, title, open)
   if body.name == "fstd_fold_body" then
@@ -360,7 +376,8 @@ local function fold(parent, title, open, badge_name, badge_text)
     local head = f.children[1]
     head.style.horizontally_stretchable = true
     head.add({ type = "empty-widget" }).style.horizontally_stretchable = true
-    ui.badge(head, badge_text).name = badge_name
+    local b = ui.badge(head, badge_text or "")
+    b.name, b.visible = badge_name, badge_text ~= nil
   end
   return body
 end
@@ -644,8 +661,40 @@ local function adopt(player)
   for _, c in pairs(ui.attached(player, NAME)) do ui.adopt(c) end
 end
 
---- the window closed, and what's stuck to it
+--- the test run's fast-forward off: the game's speed as it was (the ×5 / ×10 button back at ×1)
+local function test_speed_off(frame)
+  if storage.bpgen_speed_was then
+    game.speed = storage.bpgen_speed_was
+    storage.bpgen_speed_was = nil
+  end
+  local b = frame and find(frame, "bpgen_test_speed")
+  if b then
+    b.caption, b.visible = "×1", false
+    local tags = b.tags
+    tags.speed = 1
+    b.tags = tags
+  end
+end
+
+--- a test run going on (anyone's)
+local function testing()
+  for _, run in pairs(storage.bpgen_bench and storage.bpgen_bench.runs or {}) do
+    if run.kind == "test" then return true end
+  end
+  return false
+end
+
+--- the player's test run stopped (its window closed, the player gone), and the fast-forward with it once no test
+--- runs any more
+local function test_stop(player_index)
+  local run = bench.find("test", player_index)
+  if run then bench.stop(run.id) end
+  if not testing() then test_speed_off(nil) end
+end
+
+--- the window closed, and what's stuck to it (its test run stops: nothing would show it)
 local function close(player)
+  test_stop(player.index)
   for _, c in pairs(ui.attached(player, NAME)) do c.destroy() end
   if player.gui.screen[NAME] then player.gui.screen[NAME].destroy() end
 end
@@ -667,9 +716,9 @@ local function badges_of(frame)
     local el = find(frame, name)
     if el and el.elem_value then n = n + 1 end
   end
-  ui.set_badge(find(frame, "bpgen_modules_badge"), n > 0 and (n .. " set") or "none")
+  ui.set_badge(find(frame, "bpgen_modules_badge"), n > 0 and T("n-set", n) or T("none"))
   local more = find(frame, "bpgen_more_toggle")
-  ui.set_badge(find(frame, "bpgen_tune_badge"), more and more.state and "set" or "auto")
+  ui.set_badge(find(frame, "bpgen_tune_badge"), T(more and more.state and "set" or "auto"))
 end
 
 local glows = safe.stored("glows")  -- player index -> the preview's glow (fse-std's overlay id)
@@ -711,7 +760,7 @@ local function set_mode(frame, mode)
   find(frame, "bpgen_next_box").visible = mode == "line" or mode == "mall" or mode == "extend"
   find(frame, "bpgen_base_tools").visible = mode ~= "ship"
   for i, m in ipairs(MODES) do
-    if m == mode then find(frame, "bpgen_mode_tip").caption = MODE_TIPS[i] end
+    if m == mode then find(frame, "bpgen_mode_tip").caption = T("mode-" .. m .. "-tip") end
   end
   M.steps(frame)
 end
@@ -742,27 +791,26 @@ local function show_patches(frame, player)
   for i, p in ipairs(patch_areas[player.index] or {}) do
     local t = {}
     for name, n in pairs(p.counts) do t[#t + 1] = string.format("[entity=%s] %d", name, n) end
-    lines[#lines + 1] = i .. ". " .. (#t > 0 and table.concat(t, "  ") or "no ore")
+    lines[#lines + 1] = T("patch-line", i, #t > 0 and table.concat(t, "  ") or T("no-ore"))
   end
-  note.caption = #lines > 0 and table.concat(lines, "\n") or "No patches picked yet."
+  note.caption = #lines > 0 and join(lines, "\n") or T("no-patches")
 end
 
 -- a bpgen tool in hand: the window (and what's stuck to it) out of the way, a small card at the top says what to
 -- drag; the window back once the tool leaves the hand (a drag done, Cancel, Q)
 local CARD = "bpgen_tool_card"
 local TOOLS = {
-  ["bpgen-refit"] = { title = "Refit", text = "Drag over the part of your base to lay out again as a compact mall." },
-  ["bpgen-move"] = { title = "Move", text = "Stand where the section should go, then drag over the section." },
-  ["bpgen-snapshot"] = { title = "Snapshot", text = "Drag over your base: bpgen plans new builds that fit next to it." },
-  ["bpgen-spot"] = { title = "Pick spot", text = "Click where the build should go (its middle), on the side of the bus you want." },
-  ["bpgen-patches"] = { title = "Ore patches", text = "Drag over each ore patch the bus should mine, then press Done.",
-    many = true },
+  ["bpgen-refit"] = { title = T("mode-refit"), text = T("card-refit") },
+  ["bpgen-move"] = { title = T("mode-move"), text = T("card-move") },
+  ["bpgen-snapshot"] = { title = T("snapshot"), text = T("card-snapshot") },
+  ["bpgen-spot"] = { title = T("pick-spot"), text = T("card-spot") },
+  ["bpgen-patches"] = { title = T("ore-patches"), text = T("card-patches"), many = true },
 }
 M.TOOLS = TOOLS
 
 local function patch_count(player)
   local n = #(patch_areas[player.index] or {})
-  return n == 0 and "No patches picked yet." or (n == 1 and "1 patch picked." or (n .. " patches picked."))
+  return n == 0 and T("no-patches") or T("patches-picked", n)
 end
 
 --- the window and its stuck frames shown or hidden
@@ -787,20 +835,20 @@ function M.tool_card(player, item)
   local card = screen.add({ type = "frame", name = CARD, direction = "vertical", tags = { item = item } })
   card.style.padding = 10
   card.style.width = 380
-  ui.add(card, { type = "label", caption = "[item=" .. item .. "]  bpgen: " .. tool.title }, "caption")
+  ui.add(card, { type = "label", caption = T("card-title", "[item=" .. item .. "]", tool.title) }, "caption")
   local text = ui.add(card, { type = "label", caption = tool.text }, "text")
   text.style.single_line = false
   text.style.maximal_width = 356
   ui.add(card, { type = "label", name = "bpgen_card_note", caption = tool.many and patch_count(player)
-    or "Q or Cancel puts the tool away." }, "dim")
+    or T("card-note") }, "dim")
   local row = card.add({ type = "flow", direction = "horizontal" })
   row.style.top_margin = 6
   row.style.vertical_align = "center"
   row.add({ type = "empty-widget" }).style.horizontally_stretchable = true
   if tool.many then
-    ui.add(row, { type = "button", caption = "Done", tags = { bpgen = "tool_done" } }, "ok")
+    ui.add(row, { type = "button", caption = T("done"), tags = { bpgen = "tool_done" } }, "ok")
   end
-  ui.add(row, { type = "button", caption = "Cancel", tags = { bpgen = "tool_done" } }, "button")
+  ui.add(row, { type = "button", caption = T("cancel"), tags = { bpgen = "tool_done" } }, "button")
   ui.adopt(card)
   local scale = player.display_scale
   card.location = { math.max(0, (player.display_resolution.width - 380 * scale) / 2), math.floor(60 * scale) }
@@ -845,7 +893,8 @@ function M.open(player, prefill)
   if stdwin then
     local cw, ch = cam_size(player)
     frame, holder = stdwin.create(player, { name = NAME, title = "bpgen", width = cw + LEFT_W, height = ch + FRAME_H,
-      min_width = 420 + LEFT_W, min_height = 300 + FRAME_H, themed = ui.themed, settings = ui.menus })
+      min_width = 420 + LEFT_W, min_height = 300 + FRAME_H, themed = ui.themed, settings = ui.menus,
+      esc = false })  -- (a companion: it stays open while the player uses the game's own windows)
     holder.style.padding = 0
   else
     frame = screen.add({ type = "frame", name = NAME, direction = "vertical" })
@@ -873,7 +922,7 @@ function M.open(player, prefill)
     tabs.style.left_padding = 6
   end
   for i, m in ipairs(MODES) do
-    ui.add(tabs, { type = "button", caption = MODE_NAMES[i], tooltip = MODE_TIPS[i], toggled = i == 1,
+    ui.add(tabs, { type = "button", caption = T("mode-" .. m), tooltip = T("mode-" .. m .. "-tip"), toggled = i == 1,
       tags = { bpgen = "tab", mode = m } }, rail and "rtab" or "tab",
       rail and { width = RAIL_W - 8, height = 30, top_margin = GROUP_START[m] and 12 or nil }
         or { minimal_width = 70, height = 34 })
@@ -882,16 +931,15 @@ function M.open(player, prefill)
   local top = holder.add({ type = "flow", name = "bpgen_top", direction = "horizontal" })
   top.style.vertical_align = "center"
   top.style.left_padding, top.style.right_padding = 6, 6
-  ui.add(top, { type = "label", name = "bpgen_mode_tip", caption = MODE_TIPS[1] }, "dim")
+  ui.add(top, { type = "label", name = "bpgen_mode_tip", caption = T("mode-line-tip") }, "dim")
   top.add({ type = "empty-widget" }).style.horizontally_stretchable = true
   if ui.menus then  -- (the window's settings are behind the gear by its close button: a mark while a filter is on)
-    ui.badge(top, "only unlocked", "Pickers offer only what you can make now (the gear by the close button)").name =
+    ui.badge(top, T("unlocked-badge"), T("unlocked-badge-tip")).name =
       "bpgen_unlocked_badge"
     find_in(top, "bpgen_unlocked_badge").visible = only_unlocked[player.index] == true
   else
-    ui.add(top, { type = "checkbox", name = "bpgen_only_unlocked", caption = "Only unlocked",
-      state = only_unlocked[player.index] == true,
-      tooltip = "Pickers offer only recipes you can craft and what you can build now" }, "check")
+    ui.add(top, { type = "checkbox", name = "bpgen_only_unlocked", caption = T("only-unlocked"),
+      state = only_unlocked[player.index] == true, tooltip = T("only-unlocked-tip") }, "check")
   end
   local body = holder.add({ type = "flow", direction = "horizontal" })
   local outer = body.add({ type = "frame", style = "inside_shallow_frame", direction = "vertical" })
@@ -903,137 +951,131 @@ function M.open(player, prefill)
 
   -- a production line: sections as the web app's
   local line = left.add({ type = "flow", name = "bpgen_line_box", direction = "vertical" })
-  local sec = section(line, "Recipe")
+  local sec = section(line, T("recipe"))
   local fs = fields(sec)
-  field(fs, "Recipe").add({ type = "choose-elem-button", elem_type = "recipe", name = "bpgen_recipe",
+  field(fs, T("recipe")).add({ type = "choose-elem-button", elem_type = "recipe", name = "bpgen_recipe",
     elem_filters = { { filter = "hidden", invert = true } } })
-  field(fs, "Machine", "and its quality").add({ type = "choose-elem-button", elem_type = "entity-with-quality",
+  field(fs, T("machine"), T("machine-tip")).add({ type = "choose-elem-button", elem_type = "entity-with-quality",
     name = "bpgen_machine", elem_filters = { { filter = "crafting-machine" } } })
-  field(fs, "Per minute", "Items a minute; empty: as much as one belt carries").add({ type = "textfield",
+  field(fs, T("per-minute"), T("rate-tip")).add({ type = "textfield",
     name = "bpgen_rate", numeric = true, allow_decimal = true, lose_focus_on_confirm = true }).style.width = 90
   fs = fields(sec)
-  field(fs, "Belt", "empty: the fastest you have").add({ type = "choose-elem-button", elem_type = "entity",
+  field(fs, T("belt"), T("belt-tip")).add({ type = "choose-elem-button", elem_type = "entity",
     name = "bpgen_belt", elem_filters = { { filter = "type", type = "transport-belt" } } })
-  field(fs, "Feed", "my main bus: stand by your bus; what it carries is tapped from its lanes, the other ingredients are made in the blueprint, and the line is placed beside it").add({
-    type = "drop-down", name = "bpgen_feed", items = { "belts", "robots (logistic chests)", "my main bus" },
+  field(fs, T("feed"), T("feed-tip")).add({
+    type = "drop-down", name = "bpgen_feed", items = { T("feed-belts"), T("feed-robots"), T("feed-bus") },
     selected_index = 1 })
 
-  sec = section(line, "Make in this blueprint",
-    "Tick an ingredient to make it inside this blueprint too (its recipe on the right); unticked ones come in on a belt")
-  sec.add({ type = "flow", name = "bpgen_make", direction = "vertical" }).add({ type = "label", caption = "(pick a recipe)" })
+  sec = section(line, T("make-here"), T("make-here-tip"))
+  sec.add({ type = "flow", name = "bpgen_make", direction = "vertical" }).add({ type = "label", caption = T("pick-a-recipe") })
 
   -- (what's seldom set: folded, a badge saying what's in it)
-  sec = fold(line, "Also make", false, "bpgen_also_badge", "-")
-  sec.add({ type = "flow", name = "bpgen_also", direction = "vertical" }).add({ type = "label", caption = "(pick a recipe)" })
+  sec = fold(line, T("also-make"), false, "bpgen_also_badge", nil)
+  sec.add({ type = "flow", name = "bpgen_also", direction = "vertical" }).add({ type = "label", caption = T("pick-a-recipe") })
 
-  sec = fold(line, "Modules", prefill.modules ~= nil, "bpgen_modules_badge", "none")
+  sec = fold(line, T("modules"), prefill.modules ~= nil, "bpgen_modules_badge", T("none"))
   fs = fields(sec)
-  field(fs, "Machine modules", "fills every module slot").add({ type = "choose-elem-button", elem_type = "item-with-quality",
+  field(fs, T("machine-modules"), T("machine-modules-tip")).add({ type = "choose-elem-button", elem_type = "item-with-quality",
     name = "bpgen_module", elem_filters = { { filter = "type", type = "module" } } })
-  field(fs, "Beacon", "and its quality (empty: no beacons)").add({ type = "choose-elem-button",
+  field(fs, T("beacon"), T("beacon-tip")).add({ type = "choose-elem-button",
     elem_type = "entity-with-quality", name = "bpgen_beacon", elem_filters = { { filter = "type", type = "beacon" } } })
-  field(fs, "Beacon modules").add({ type = "choose-elem-button", elem_type = "item-with-quality",
+  field(fs, T("beacon-modules")).add({ type = "choose-elem-button", elem_type = "item-with-quality",
     name = "bpgen_beacon_module", elem_filters = { { filter = "type", type = "module" } } })
 
-  sec = fold(line, "Fine-tune", prefill.more == true, "bpgen_tune_badge", "auto")
-  sec.add({ type = "checkbox", name = "bpgen_more_toggle", caption = "Inserters, machines a row", state = false,
+  sec = fold(line, T("fine-tune"), prefill.more == true, "bpgen_tune_badge", T("auto"))
+  sec.add({ type = "checkbox", name = "bpgen_more_toggle", caption = T("fine-tune-toggle"), state = false,
     tags = { bpgen_toggle = "bpgen_more" } })
   local more = sec.add({ type = "flow", name = "bpgen_more", direction = "vertical", visible = false })
   local ins = { { filter = "type", type = "inserter" } }
   fs = fields(more)
-  field(fs, "Input", "the inserters feeding the machines (empty: bpgen picks)").add({ type = "choose-elem-button",
+  field(fs, T("input"), T("input-tip")).add({ type = "choose-elem-button",
     elem_type = "entity", name = "bpgen_near", elem_filters = ins })
-  field(fs, "Long-handed", "the ones reaching the far belt").add({ type = "choose-elem-button", elem_type = "entity",
+  field(fs, T("long-handed"), T("long-handed-tip")).add({ type = "choose-elem-button", elem_type = "entity",
     name = "bpgen_far", elem_filters = ins })
-  field(fs, "Output").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_out", elem_filters = ins })
-  field(more, "Machines per row", "empty: what fills a belt").add({ type = "textfield", name = "bpgen_per_row",
+  field(fs, T("output")).add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_out", elem_filters = ins })
+  field(more, T("per-row"), T("per-row-tip")).add({ type = "textfield", name = "bpgen_per_row",
     numeric = true, lose_focus_on_confirm = true }).style.width = 60
 
   -- a mall: many products into chests
   local mall = left.add({ type = "flow", name = "bpgen_mall_box", direction = "vertical", visible = false })
-  local sec = section(mall, "Products", "Each product gets its machine and a chest; an empty slot is always at the end")
+  local sec = section(mall, T("products"), T("products-tip"))
   sec.add({ type = "table", name = "bpgen_products", column_count = 6 }).add({ type = "choose-elem-button",
     elem_type = "recipe", tags = { bpgen_product = true }, elem_filters = { { filter = "hidden", invert = true } } })
-  sec = section(mall, "Machines & chests")
+  sec = section(mall, T("machines-chests"))
   local fs = fields(sec)
-  field(fs, "Machine", "empty: one that makes every product").add({ type = "choose-elem-button", elem_type = "entity",
+  field(fs, T("machine"), T("mall-machine-tip")).add({ type = "choose-elem-button", elem_type = "entity",
     name = "bpgen_mall_machine", elem_filters = { { filter = "crafting-machine" } } })
-  field(fs, "Chest").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_chest",
+  field(fs, T("chest")).add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_chest",
     elem_filters = { { filter = "type", type = { "container", "logistic-container" } } } })
   fs = fields(sec)  -- (its own row: its longest item is wide)
-  field(fs, "Fed by", "mixed belts: columns of machines between mixed belts, gears, cable, circuits... made at the top, only plates come in. My main bus: the same, the parts your bus carries taken from it, placed beside it. A belt loop: plate belts and one mixed loop carrying every part, for products that don't share their inputs (modded malls; fluids piped in too); from my bus: the same beside your bus. Rows: the older layout, its own 4-lane bus").add({
-    type = "drop-down", name = "bpgen_mall_feed", items = { "rows on a 4-lane bus", "robots", "mixed belts", "my main bus",
-      "the base in my hand", "a belt loop", "a belt loop, from my bus" },
+  field(fs, T("fed-by"), T("fed-by-tip")).add({
+    type = "drop-down", name = "bpgen_mall_feed", items = { T("mall-feed-rows"), T("mall-feed-robots"), T("mall-feed-mixed"),
+      T("feed-bus"), T("mall-feed-hand"), T("mall-feed-loop"), T("mall-feed-loop-bus") },
     selected_index = 3 })
   fs = fields(sec)
-  field(fs, "Buffer", "crafts each machine keeps ahead").add({ type = "textfield", name = "bpgen_mall_buffer", text = "5",
+  field(fs, T("buffer"), T("buffer-tip")).add({ type = "textfield", name = "bpgen_mall_buffer", text = "5",
     numeric = true, lose_focus_on_confirm = true }).style.width = 60
-  field(fs, "Chest limit", "slots each product's chest may fill").add({ type = "textfield", name = "bpgen_chest_limit",
+  field(fs, T("chest-limit"), T("chest-limit-tip")).add({ type = "textfield", name = "bpgen_chest_limit",
     text = "4", numeric = true, lose_focus_on_confirm = true }).style.width = 60
-  field(fs, "Keep", "mixed belts: each machine takes from the belts only while its chest has fewer than this (wired to the chest), so the ones down a column get plates soon; 0: no limit").add({
+  field(fs, T("keep"), T("keep-tip")).add({
     type = "textfield", name = "bpgen_mall_stock", text = "10", numeric = true, lose_focus_on_confirm = true }).style.width = 60
   -- refit: an area of the base laid out again (its own mode: Plan gives the refit tool)
   local refitb = left.add({ type = "flow", name = "bpgen_refit_box", direction = "vertical", visible = false })
-  sec = section(refitb, "Refit an area", "A part of your base that grew all over the place: drag over it, and its machines are laid out again, compact, in its place (fed from your main bus when there is one). Place it marks the old ones for removal")
-  ui.add(sec, { type = "label", caption = "Press Plan, then drag over the area with the refit tool." }, "dim",
+  sec = section(refitb, T("refit-area"), T("refit-area-tip"))
+  ui.add(sec, { type = "label", caption = T("refit-how") }, "dim",
     { single_line = false, maximal_width = 260 })
   fs = fields(sec)
-  field(fs, "Refit as", "a mall: the area's products, compact. A base on a bus: the science the area makes (its labs and what feeds them), rebuilt as a main-bus base").add({
-    type = "drop-down", name = "bpgen_refit_as", items = { "a mall", "a base on a bus" }, selected_index = 1 })
+  field(fs, T("refit-as"), T("refit-as-tip")).add({
+    type = "drop-down", name = "bpgen_refit_as", items = { T("refit-as-mall"), T("refit-as-base") }, selected_index = 1 })
   fs = fields(sec)
-  field(fs, "Layout", "As a mall: Compact puts every part on one belt loop, its inserters wired so the loop never jams and each chest keeps a few. Side by side: columns of machines between plain belts, parts made at the top and handed straight down, no circuits").add({
-    type = "drop-down", name = "bpgen_refit_layout", items = { "compact loop (circuits)", "side by side (no circuits)" },
+  field(fs, T("layout"), T("refit-layout-tip")).add({
+    type = "drop-down", name = "bpgen_refit_layout", items = { T("refit-layout-loop"), T("refit-layout-side") },
     selected_index = 1 })
   fs = fields(sec)
-  fs.add({ type = "checkbox", name = "bpgen_refit_add", caption = "Add machines", state = false,
-    tooltip = "Off: the area's machines only (what none of them makes comes in on the belts). On: the mall makes the parts it needs, more machines" })
+  fs.add({ type = "checkbox", name = "bpgen_refit_add", caption = T("refit-add"), state = false, tooltip = T("refit-add-tip") })
 
   -- a starter base: science
   local base = left.add({ type = "flow", name = "bpgen_base_box", direction = "vertical", visible = false })
-  sec = section(base, "Science")
+  sec = section(base, T("science"))
   fs = fields(sec)
-  field(fs, "Per minute", "each pack, a minute").add({ type = "textfield", name = "bpgen_spm", text = "30", numeric = true,
+  field(fs, T("per-minute"), T("spm-tip")).add({ type = "textfield", name = "bpgen_spm", text = "30", numeric = true,
     allow_decimal = true, lose_focus_on_confirm = true }).style.width = 60
-  field(fs, "Lab").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_lab",
+  field(fs, T("lab")).add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_lab",
     elem_filters = { { filter = "type", type = "lab" } } })
   fs = fields(sec)
-  fs.add({ type = "checkbox", name = "bpgen_base_military", caption = "Military", state = false,
-    tooltip = "Military science too" })
-  fs.add({ type = "checkbox", name = "bpgen_base_chemical", caption = "Chemical (blue)", state = false,
-    tooltip = "Chemical science too: plastic and sulfur from your bus (a bus design with an oil field), or made here" })
-  sec = section(base, "Buildings", "empty: bpgen's starter picks")
+  fs.add({ type = "checkbox", name = "bpgen_base_military", caption = T("military"), state = false,
+    tooltip = T("military-tip") })
+  fs.add({ type = "checkbox", name = "bpgen_base_chemical", caption = T("chemical"), state = false,
+    tooltip = T("chemical-tip") })
+  sec = section(base, T("buildings"), T("buildings-base-tip"))
   fs = fields(sec)
-  field(fs, "Assembler").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_assembler",
+  field(fs, T("assembler")).add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_assembler",
     elem_filters = { { filter = "type", type = "assembling-machine" } } })
-  field(fs, "Furnace").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_furnace",
+  field(fs, T("furnace")).add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_furnace",
     elem_filters = { { filter = "crafting-category", crafting_category = "smelting" } } })
-  sec = section(base, "Layout")
-  sec.add({ type = "checkbox", name = "bpgen_base_mall", caption = "With a mall for its buildings", state = false })
-  sec.add({ type = "checkbox", name = "bpgen_base_bus", caption = "As a main bus", state = false,
-    tooltip = "One column of blocks beside a bus of belts that each block takes from and puts back onto; the mall takes from it too. Unticked: blocks in columns by recipe depth, the mall a print of its own" })
-  sec.add({ type = "checkbox", name = "bpgen_base_plates", caption = "Plates in at the bus head", state = false,
-    tooltip = "A main bus fed iron and copper plates, stone bricks... at its head (from the Bus design tab, or your smelters): no smelting in the base. Every main-bus base has a stone-brick C over its bus head; the next tier pastes onto it" })
-  sec.add({ type = "checkbox", name = "bpgen_base_fit", caption = "Its head on my bus design", state = true,
-    tooltip = "With plates in: its inputs right where the lanes of the bus you last planned (Bus design tab) end, belts from each lane to the input of its item; turned the way the bus flows; Place it puts it there. Lanes it doesn't need end there, for the next tier" })
-  sec.add({ type = "checkbox", name = "bpgen_base_add", caption = "Add to the base in my hand", state = false,
-    tooltip = "Hold a bpgen main-bus base (with its C): the science it doesn't make yet at this rate, as a base of its own beside it, its bus inputs on the same row. Paste it with its C on the old base's C. (A bigger base instead: just plan it and paste it over the old one, C on C)" })
-  sec.add({ type = "checkbox", name = "bpgen_base_import", caption = "Rebuild the blueprint in my hand", state = false,
-    tooltip = "a blueprint of your own base in your hand: rebuilt for the science it makes, with these buildings" })
+  sec = section(base, T("layout"))
+  sec.add({ type = "checkbox", name = "bpgen_base_mall", caption = T("base-mall"), state = false })
+  sec.add({ type = "checkbox", name = "bpgen_base_bus", caption = T("base-bus"), state = false, tooltip = T("base-bus-tip") })
+  sec.add({ type = "checkbox", name = "bpgen_base_plates", caption = T("base-plates"), state = false,
+    tooltip = T("base-plates-tip") })
+  sec.add({ type = "checkbox", name = "bpgen_base_fit", caption = T("base-fit"), state = true, tooltip = T("base-fit-tip") })
+  sec.add({ type = "checkbox", name = "bpgen_base_add", caption = T("base-add"), state = false, tooltip = T("base-add-tip") })
+  sec.add({ type = "checkbox", name = "bpgen_base_import", caption = T("base-import"), state = false,
+    tooltip = T("base-import-tip") })
 
   -- next to the base: a whole chain fed by what the base's belts carry, tapped in, powered
   local ext = left.add({ type = "flow", name = "bpgen_extend_box", direction = "vertical", visible = false })
-  sec = section(ext, "Make", "the whole chain for it, fed by what your belts carry, placed next to your base")
+  sec = section(ext, T("make"), T("make-tip"))
   fs = fields(sec)
-  field(fs, "Item").add({ type = "choose-elem-button", elem_type = "item", name = "bpgen_ext_item" })
-  field(fs, "Per minute").add({ type = "textfield", name = "bpgen_ext_rate", text = "30", numeric = true,
+  field(fs, T("item")).add({ type = "choose-elem-button", elem_type = "item", name = "bpgen_ext_item" })
+  field(fs, T("per-minute")).add({ type = "textfield", name = "bpgen_ext_rate", text = "30", numeric = true,
     allow_decimal = true, lose_focus_on_confirm = true }).style.width = 60
   -- move: a section of the base somewhere else (its own mode: Plan gives the move tool)
   local moveb = left.add({ type = "flow", name = "bpgen_move_box", direction = "vertical", visible = false })
-  sec = section(moveb, "Move a section", "Drag over a part of your base: it's previewed where you stand (the arrows move it), Place it builds it there, marks the old one for removal and runs its belts in and out to your base again")
-  ui.add(sec, { type = "label", caption = "Stand where it should go, press Plan, then drag over the section with the move tool. Its settings and wires go with it." }, "dim", { single_line = false, maximal_width = 260 })
-  sec = section(ext, "Your base")
-  sec.add({ type = "button", caption = "Pick my base area", tags = { bpgen = "snapshot" },
-    tooltip = "Optional: gives you the snapshot tool, to drag over the part of your base to build next to (its belts feed the new part). Without it, bpgen looks around you" })
+  sec = section(moveb, T("move-section"), T("move-section-tip"))
+  ui.add(sec, { type = "label", caption = T("move-how") }, "dim", { single_line = false, maximal_width = 260 })
+  sec = section(ext, T("your-base"))
+  sec.add({ type = "button", caption = T("pick-base-area"), tags = { bpgen = "snapshot" }, tooltip = T("pick-base-area-tip") })
   local snap_note = sec.add({ type = "label", name = "bpgen_snap_note", caption = "" })
   snap_note.style.single_line = false
   snap_note.style.maximal_width = 260
@@ -1041,19 +1083,17 @@ function M.open(player, prefill)
   -- a bus design: ore patches -> drills -> smelter columns -> balancers -> a main bus
   -- a ship: a space platform round its hub, self-sufficient (asteroids to fuel and ammo)
   local shipb = left.add({ type = "flow", name = "bpgen_ship_box", direction = "vertical", visible = false })
-  sec = section(shipb, "Inner-planet shuttle", "Collectors, crushers, fuel and oxidizer, ammo and solar power round the platform's hub: plan it, stand on the platform and Place it (it lands on the hub)")
+  sec = section(shipb, T("shuttle"), T("shuttle-tip"))
   fs = fields(sec)
-  field(fs, "Thrusters").add({ type = "textfield", name = "bpgen_ship_thrusters", text = "2", numeric = true,
+  field(fs, T("thrusters")).add({ type = "textfield", name = "bpgen_ship_thrusters", text = "2", numeric = true,
     lose_focus_on_confirm = true }).style.width = 60
-  field(fs, "Gun turrets").add({ type = "textfield", name = "bpgen_ship_turrets", text = "6", numeric = true,
+  field(fs, T("gun-turrets")).add({ type = "textfield", name = "bpgen_ship_turrets", text = "6", numeric = true,
     lose_focus_on_confirm = true }).style.width = 60
-  field(fs, "Collectors", "asteroid collectors in a row out front").add({ type = "textfield",
+  field(fs, T("collectors"), T("collectors-tip")).add({ type = "textfield",
     name = "bpgen_ship_collectors", text = "4", numeric = true, lose_focus_on_confirm = true }).style.width = 60
   fs = fields(sec)
-  field(fs, "Thrust", "pumps on the thrusters' way in, opened one tick in so many (a thruster burns fuel most "
-    .. "efficiently nearly empty, half as efficiently full)\nAuto: what the fuel plant makes\nEfficient: slowest, "
-    .. "least fuel\nHalf\nFull: fastest, runs dry").add({ type = "drop-down", name = "bpgen_ship_throttle",
-    items = { "Auto", "Efficient", "Half", "Full" },
+  field(fs, T("thrust"), T("thrust-tip")).add({ type = "drop-down", name = "bpgen_ship_throttle",
+    items = { T("thrust-auto"), T("thrust-efficient"), T("thrust-half"), T("thrust-full") },
     selected_index = 1, tags = { values = { -1, 0, 0.5, 1 } } })
   local orbits, names = {}, {}
   for name, loc in pairs(prototypes.space_location or {}) do
@@ -1061,48 +1101,45 @@ function M.open(player, prefill)
   end
   table.sort(orbits)
   for i, n in ipairs(orbits) do names[i] = { "", "[space-location=" .. n .. "] ", prototypes.space_location[n].localised_name } end
-  field(fs, "Solar sized for", "the orbit with the least sunlight it will be in (solar power in space differs)").add({
+  field(fs, T("solar-for"), T("solar-for-tip")).add({
     type = "drop-down", name = "bpgen_ship_orbit", items = names, tags = { orbits = orbits },
     selected_index = math.max(1, (function() for i, n in ipairs(orbits) do if n == "nauvis" then return i end end end)() or 1) })
   local bus = left.add({ type = "flow", name = "bpgen_bus_box", direction = "vertical", visible = false })
-  sec = section(bus, "Ore patches", "drills cover each patch; their ore runs on belts to smelters at the bus head")
+  sec = section(bus, T("ore-patches"), T("ore-patches-tip"))
   local pf = sec.add({ type = "flow", direction = "horizontal" })
-  pf.add({ type = "button", caption = "Pick ore patches", tags = { bpgen = "patches" },
-    tooltip = "Gives you the patch tool: drag over each ore patch to mine (one drag a patch)" })
-  pf.add({ type = "button", caption = "Clear", tags = { bpgen = "patches_clear" } })
+  pf.add({ type = "button", caption = T("pick-patches"), tags = { bpgen = "patches" }, tooltip = T("pick-patches-tip") })
+  pf.add({ type = "button", caption = T("clear"), tags = { bpgen = "patches_clear" } })
   local pnote = sec.add({ type = "label", name = "bpgen_patch_note", caption = "" })
   pnote.style.single_line = false
   pnote.style.maximal_width = 260
-  sec = section(bus, "Bus", "starts near you and runs the way you pick; lanes in groups with free tiles between")
+  sec = section(bus, T("mode-busdesign"), T("bus-tip"))
   fs = fields(sec)
-  field(fs, "Flows").add({ type = "drop-down", name = "bpgen_bus_dir", items = { "north", "east", "south", "west" },
+  field(fs, T("flows")).add({ type = "drop-down", name = "bpgen_bus_dir",
+    items = { T("dir-north"), T("dir-east"), T("dir-south"), T("dir-west") },
     selected_index = 1 })
-  field(fs, "Length").add({ type = "textfield", name = "bpgen_bus_length", text = "40", numeric = true,
+  field(fs, T("length")).add({ type = "textfield", name = "bpgen_bus_length", text = "40", numeric = true,
     lose_focus_on_confirm = true }).style.width = 50
   fs = fields(sec)  -- (a second row: four fields don't fit the panel's width)
-  field(fs, "Belts a group").add({ type = "textfield", name = "bpgen_bus_group", text = "4", numeric = true,
+  field(fs, T("belts-a-group")).add({ type = "textfield", name = "bpgen_bus_group", text = "4", numeric = true,
     lose_focus_on_confirm = true }).style.width = 50
-  field(fs, "Gap").add({ type = "textfield", name = "bpgen_bus_gap", text = "4", numeric = true,
+  field(fs, T("gap")).add({ type = "textfield", name = "bpgen_bus_gap", text = "4", numeric = true,
     lose_focus_on_confirm = true }).style.width = 50
-  sec.add({ type = "checkbox", name = "bpgen_bus_add", caption = "Add to my bus here", state = false,
-    tooltip = "Stand by your main bus (a lane running dry: more of its item): the patches' ore is smelted upstream of the bus and goes onto new lanes laid along it" })
-  sec.add({ type = "checkbox", name = "bpgen_bus_wood", caption = "A wood lane", state = true,
-    tooltip = "A lane of wood beside the others, for wooden chests and small poles in a mall: fill the chest at its head (its burner inserter runs on the wood)" })
-  sec.add({ type = "checkbox", name = "bpgen_bus_balance", caption = "Balancers", state = true,
-    tooltip = "A 4-to-4 balancer at the start of each full group of 4 lanes of one item (2 lanes: a splitter)" })
-  sec = section(bus, "Buildings", "empty: the electric mining drill and furnace, the fastest belt you have")
+  sec.add({ type = "checkbox", name = "bpgen_bus_add", caption = T("bus-add"), state = false, tooltip = T("bus-add-tip") })
+  sec.add({ type = "checkbox", name = "bpgen_bus_wood", caption = T("bus-wood"), state = true, tooltip = T("bus-wood-tip") })
+  sec.add({ type = "checkbox", name = "bpgen_bus_balance", caption = T("balancers"), state = true,
+    tooltip = T("balancers-tip") })
+  sec = section(bus, T("buildings"), T("buildings-bus-tip"))
   fs = fields(sec)
-  field(fs, "Drill", "3x3").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_bus_drill",
+  field(fs, T("drill"), T("drill-tip")).add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_bus_drill",
     elem_filters = { { filter = "type", type = "mining-drill" } } })
-  field(fs, "Furnace", "an electric furnace, or stone / steel (burner: coal goes onto each column's ore belt from a belt under them, fed by your coal patch or a chest)").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_bus_furnace",
+  field(fs, T("furnace"), T("bus-furnace-tip")).add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_bus_furnace",
     elem_filters = { { filter = "crafting-category", crafting_category = "smelting" } } })
-  field(fs, "Belt").add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_bus_belt",
+  field(fs, T("belt")).add({ type = "choose-elem-button", elem_type = "entity", name = "bpgen_bus_belt",
     elem_filters = { { filter = "type", type = "transport-belt" } } })
   show_patches(frame, player)
 
-  sec = section(left, "Next to my base", nil, "bpgen_next_box")
-  sec.add({ type = "checkbox", name = "bpgen_ext_bus", caption = "Build from my main bus", state = true,
-    tooltip = "Extend and \"Next to my base\": when your base has a main bus there (3+ long straight belts side by side, flowing the same way), build beside it, branching off its lanes, with a new lane for an output it doesn't carry yet, and the bus continued past the build when it ends before it. Unticked: free ground nearest the belts" })
+  sec = section(left, T("next-to-base"), nil, "bpgen_next_box")
+  sec.add({ type = "checkbox", name = "bpgen_ext_bus", caption = T("ext-bus"), state = true, tooltip = T("ext-bus-tip") })
   -- pinned under the panel's scroll, always in sight: planning's progress, what was said last, Plan (breathing when
   -- something changed since the last plan), the tools that look at the base
   local foot = outer.add({ type = "flow", name = "bpgen_foot", direction = "vertical" })
@@ -1111,29 +1148,27 @@ function M.open(player, prefill)
   foot.style.horizontally_stretchable = true
   local prog = foot.add({ type = "flow", name = "bpgen_progress", direction = "vertical", visible = false })
   prog.style.horizontally_stretchable = true
-  local bar = ui.progress(prog, 0, { caption = "Planning", text = "" })
+  local bar = ui.progress(prog, 0, { caption = T("planning"), text = "" })
   bar.name = "bpgen_progress_bar"
   bar.parent.style.horizontally_stretchable = true
-  local details = ui.fold(prog, "Details", false, "bpgen_details")
+  local details = ui.fold(prog, T("details"), false, "bpgen_details")
   ui.add(details, { type = "label", name = "bpgen_log", caption = "" }, "dim",
     { single_line = false, maximal_width = 260, font = "default-small" })
   ui.add(foot, { type = "label", name = "bpgen_status" }, "text", { single_line = false, maximal_width = 270 })
-  ui.add(foot, { type = "label", name = "bpgen_stale", caption = "Changed since the last plan: Plan again.",
+  ui.add(foot, { type = "label", name = "bpgen_stale", caption = T("stale"),
     visible = false }, "caption", { single_line = false, maximal_width = 270 })
-  ui.add(foot, { type = "button", name = "bpgen_plan", caption = "Plan", tags = { bpgen = "plan" } }, "ok",
+  ui.add(foot, { type = "button", name = "bpgen_plan", caption = T("plan"), tags = { bpgen = "plan" } }, "ok",
     { horizontally_stretchable = true, height = 36 })
   local go = foot.add({ type = "flow", name = "bpgen_base_tools", direction = "horizontal" })  -- (looking at the base)
   go.style.horizontal_spacing = 4
-  ui.add(go, { type = "button", caption = "What's short?", tags = { bpgen = "short" },
-    tooltip = "What your factory uses faster than it makes (last 10 minutes): plan one of them" }, "button",
+  ui.add(go, { type = "button", caption = T("short"), tags = { bpgen = "short" }, tooltip = T("short-tip") }, "button",
     { horizontally_stretchable = true, minimal_width = 0, height = 28 })
-  ui.add(go, { type = "button", caption = "Check my bus", tags = { bpgen = "check_bus" },
-    tooltip = "Stand by your main bus: what each item's lanes carry and how much of it is used, which run dry, what your base lacks that isn't on the bus; add a lane of something, or make more of it beside the bus" },
+  ui.add(go, { type = "button", caption = T("check-bus"), tags = { bpgen = "check_bus" }, tooltip = T("check-bus-tip") },
     "button", { horizontally_stretchable = true, minimal_width = 0, height = 28 })
 
   local right = body.add({ type = "frame", style = "inside_deep_frame", direction = "vertical" })
   local cam = right.add({ type = "camera", name = "bpgen_cam", position = { 0, 0 }, surface_index = player.surface.index, zoom = 1,
-    raise_hover_events = true, tooltip = safe.has("std") and "Drag to move, mouse wheel to zoom" or nil })
+    raise_hover_events = true, tooltip = safe.has("std") and T("cam-tip") or nil })
   local CAM_W, CAM_H = cam_size(player)
   -- what the plan comes to: a few numbers under the preview
   local res, scale = player.display_resolution, player.display_scale  -- (a size kept from a bigger screen: fit it)
@@ -1143,7 +1178,7 @@ function M.open(player, prefill)
     cam.style.height = CAM_H
   end
   cam.visible = false
-  local empty = right.add({ type = "label", name = "bpgen_empty", caption = "Pick a recipe and press Plan: the blueprint shows here, drawn by the game." })
+  local empty = right.add({ type = "label", name = "bpgen_empty", caption = T("empty") })
   if not stdwin then
     empty.style.width = CAM_W
     empty.style.height = CAM_H
@@ -1171,35 +1206,34 @@ function M.open(player, prefill)
     if vrail then spec.caption = label end
     return ui.add(tools, spec, vrail and "rtab" or "tool", vrail and (tweak or wide) or tweak)
   end
-  tool({ type = "button", caption = "+", tags = { bpgen = "zoom", f = 1.25 }, tooltip = "Zoom in" }, "Zoom in")
-  tool({ type = "button", caption = "−", tags = { bpgen = "zoom", f = 0.8 }, tooltip = "Zoom out" }, "Zoom out")
-  tool({ type = "button", caption = "Fit", tags = { bpgen = "fit" }, tooltip = "The whole plan in view" }, "Fit",
+  tool({ type = "button", caption = "+", tags = { bpgen = "zoom", f = 1.25 }, tooltip = T("zoom-in") }, T("zoom-in"))
+  tool({ type = "button", caption = "−", tags = { bpgen = "zoom", f = 0.8 }, tooltip = T("zoom-out") }, T("zoom-out"))
+  tool({ type = "button", caption = T("fit"), tags = { bpgen = "fit" }, tooltip = T("fit-tip") }, T("fit"),
     not vrail and { width = 40 } or nil)
   local arrows = vrail and tools.add({ type = "flow", direction = "horizontal" }) or tools
   if vrail then arrows.style.horizontal_spacing = 2 end
   for _, a in ipairs({ { "◀", -1, 0 }, { "▲", 0, -1 }, { "▼", 0, 1 }, { "▶", 1, 0 } }) do
     ui.add(arrows, { type = "button", caption = a[1], tags = { bpgen = "pan", dx = a[2], dy = a[3] },
-      tooltip = "Move the view" }, vrail and "rtab" or "tool", vrail and { width = math.floor((RAIL_W - 14) / 4), height = 30,
+      tooltip = T("pan-tip") }, vrail and "rtab" or "tool", vrail and { width = math.floor((RAIL_W - 14) / 4), height = 30,
       padding = 0 } or nil)
   end
   tools.add({ type = "button", name = "bpgen_grip", caption = "⇲", style = "tool_button", tags = { bpgen = "size" },
-    raise_hover_events = true, tooltip = safe.has("std") and "Drag to resize the preview, click for the next size"
-      or "Next size (small, medium, large)" })
+    raise_hover_events = true, tooltip = safe.has("std") and T("grip-tip") or T("grip-tip-plain") })
   if not vrail then tools.add({ type = "empty-widget" }).style.horizontally_stretchable = true end
-  ui.add(tools, { type = "button", name = "bpgen_test", caption = "Test run", tags = { bpgen = "test" }, enabled = false,
-    tooltip = "Runs the line for real on the preview: inputs fed, output counted, starved machines marked" },
+  ui.add(tools, { type = "button", name = "bpgen_test", caption = T("test-run"), tags = { bpgen = "test" }, enabled = false,
+    tooltip = T("test-run-tip") },
     vrail and "rtab" or "button", vrail and { width = RAIL_W - 8, height = 30, top_margin = 12 } or nil)
   -- the test run, live: the rate it reaches (a bar red to green by the share of the expected), a chart of it
   local tb = section(under, nil, nil, "bpgen_test_box")
   tb.visible = false
   local th = tb.add({ type = "flow", direction = "horizontal" })  -- (its heading, the fast-forward beside it)
   th.style.vertical_align = "center"
-  ui.add(th, { type = "label", caption = "Test run" }, "caption")
+  ui.add(th, { type = "label", caption = T("test-run") }, "caption")
   th.add({ type = "empty-widget" }).style.horizontally_stretchable = true
-  ui.add(th, { type = "button", name = "bpgen_test_speed", caption = "×1", tags = { bpgen = "test_speed" }, visible = false,
-    tooltip = "Fast-forward the test run: the whole game runs this much faster until the test ends (single player)" },
+  ui.add(th, { type = "button", name = "bpgen_test_speed", caption = "×1", tags = { bpgen = "test_speed", speed = 1 },
+    visible = false, tooltip = T("test-speed-tip") },
     "tool", { width = 44 })
-  local tbar = ui.progress(tb, 0, { caption = "measured", text = "", auto = true })
+  local tbar = ui.progress(tb, 0, { caption = T("measured"), text = "", auto = true })
   tbar.name = "bpgen_test_bar"
   tbar.parent.style.horizontally_stretchable = true
   tb.add({ type = "flow", name = "bpgen_test_graph", direction = "vertical" })
@@ -1215,35 +1249,37 @@ function M.open(player, prefill)
     tools = under.add({ type = "flow", direction = "horizontal" })
   end
   local small = { minimal_width = 0, left_padding = 8, right_padding = 8 }
-  ui.add(tools, { type = "button", name = "bpgen_cursor", caption = "Blueprint to cursor", tags = { bpgen = "cursor" },
-    enabled = false }, "ok")
-  ui.add(tools, { type = "button", name = "bpgen_copy", caption = "Copy", tags = { bpgen = "copy" }, enabled = false,
-    tooltip = "Copy the blueprint string" }, "button", small)
-  tools.add({ type = "button", name = "bpgen_place", caption = "Place near me", tags = { bpgen = "place" }, enabled = false,
-    tooltip = "Ghosts at a free spot next to you, inputs pointed at your belts that carry them" })
-  tools.add({ type = "button", name = "bpgen_place_base", caption = "Next to my base", tags = { bpgen = "place_base" },
-    enabled = false, tooltip = "Stand by the part of your base to build next to: bpgen looks around you, puts this on free ground beside it (beside your main bus when there is one), taps the belts that carry its inputs, takes its output where it's needed and links the power. Ghosts, ready for your bots" })
-  tools.add({ type = "button", name = "bpgen_base_spot", caption = "Pick spot", visible = false,
-    tags = { bpgen = "base_spot" }, tooltip = "Click on the map where it should go: placed there, on the side of the bus you clicked, its belts and power connected" })
+  -- (a plain button until there's a blueprint: a disabled main action's faded colours hardly read on some themes)
+  ui.add(tools, { type = "button", name = "bpgen_cursor", caption = T("to-cursor"), tags = { bpgen = "cursor" },
+    enabled = false }, "button")
+  ui.add(tools, { type = "button", name = "bpgen_copy", caption = T("copy"), tags = { bpgen = "copy" }, enabled = false,
+    tooltip = T("copy-tip") }, "button", small)
+  -- (the dock's buttons as tight as Copy: all of them fit its width in the wide monospace fonts too)
+  ui.add(tools, { type = "button", name = "bpgen_place", caption = T("place-near"), tags = { bpgen = "place" },
+    enabled = false, tooltip = T("place-near-tip") }, "button", small)
+  ui.add(tools, { type = "button", name = "bpgen_place_base", caption = T("place-base"), tags = { bpgen = "place_base" },
+    enabled = false, tooltip = T("place-base-tip") }, "button", small)
+  ui.add(tools, { type = "button", name = "bpgen_base_spot", caption = T("pick-spot"), visible = false,
+    tags = { bpgen = "base_spot" }, tooltip = T("pick-spot-tip") }, "button", small)
   for _, a in ipairs({ { "left", "◀", -1, 0 }, { "up", "▲", 0, -1 }, { "down", "▼", 0, 1 }, { "right", "▶", 1, 0 } }) do
     tools.add({ type = "button", name = "bpgen_nudge_" .. a[1], caption = a[2], style = "tool_button", visible = false,
       tags = { bpgen = "nudge", dx = a[3], dy = a[4] },
-      tooltip = "Move it 1 tile " .. a[1] .. " (Shift: 5 tiles), its belts connected again" })
+      tooltip = T("nudge-tip", T("dir-" .. a[1])) })
   end
   tools.add({ type = "button", name = "bpgen_base_rotate", caption = "⟳", style = "tool_button", visible = false,
-    tags = { bpgen = "base_rotate" }, tooltip = "Rotate it a quarter turn where it is, its belts and power connected again" })
-  tools.add({ type = "button", name = "bpgen_base_redo", caption = "Redo", visible = false, tags = { bpgen = "base_redo" },
-    tooltip = "Look again: another spot next to your base, not one it already showed" })
-  ui.add(tools, { type = "button", caption = "Undo", tags = { bpgen = "unplace" },
-    tooltip = "Removes the ghosts bpgen put down (still unbuilt)" }, "button", small)
-  ui.add(tools, { type = "button", caption = "History", tags = { bpgen = "history" },
-    tooltip = "Blueprints you took from bpgen (here or in the web app)" }, "button", small)
+    tags = { bpgen = "base_rotate" }, tooltip = T("rotate-tip") })
+  ui.add(tools, { type = "button", name = "bpgen_base_redo", caption = T("redo"), visible = false,
+    tags = { bpgen = "base_redo" }, tooltip = T("redo-tip") }, "button", small)
+  ui.add(tools, { type = "button", caption = T("undo"), tags = { bpgen = "unplace" }, tooltip = T("undo-tip") }, "button",
+    small)
+  ui.add(tools, { type = "button", caption = T("history"), tags = { bpgen = "history" }, tooltip = T("history-tip") },
+    "button", small)
   -- (what's said about the plan, in one scroll area of a fixed height: the preview gets the rest of the window)
   local info = under.add({ type = "scroll-pane", name = "bpgen_info", horizontal_scroll_policy = "never" })
   info.style.maximal_height = INFO_H  -- (as tall as what it says, up to this: the preview takes the rest)
   info.style.horizontally_stretchable = true
   -- the plan's result: badges, its notes, the book's prints, the details folded
-  local result = section(info, "Result", nil, "bpgen_result")
+  local result = section(info, T("result"), nil, "bpgen_result")
   result.visible = false
   -- (its numbers as tiles, then badges three a row for the rest: nothing runs past the preview's width)
   local tiles = result.add({ type = "flow", name = "bpgen_tiles", direction = "horizontal", visible = false })
@@ -1251,8 +1287,8 @@ function M.open(player, prefill)
   result.add({ type = "flow", name = "bpgen_badges", direction = "vertical" }).style.vertical_spacing = 4
   ui.add(result, { type = "label", name = "bpgen_notes" }, "dim", { single_line = false, maximal_width = CAM_W - 40 })
   result.add({ type = "drop-down", name = "bpgen_section", items = {}, visible = false, tags = { bpgen_section = true },
-    tooltip = "Which print of the book the preview shows" })
-  local dets = ui.fold(result, "Details", false)
+    tooltip = T("section-tip") })
+  local dets = ui.fold(result, T("details"), false)
   ui.add(dets, { type = "label", name = "bpgen_stats" }, "text", { single_line = false, maximal_width = CAM_W - 40 })
   -- (after a plan: can your save build it, and what modules would do; or the history list)
   local extra = info.add({ type = "flow", name = "bpgen_extra", direction = "vertical" })
@@ -1369,10 +1405,10 @@ local function request(player, frame)
     for _, b in pairs(find(frame, "bpgen_products").children) do
       if b.elem_value then products[#products + 1] = b.elem_value end
     end
-    if #products == 0 then return nil, "pick the products" end
+    if #products == 0 then return nil, T("err-pick-products") end
     local picked = value(frame, "bpgen_mall_machine")
     local candidates = picked and { picked } or machines_for_all(player, products)
-    if #candidates == 0 then return nil, "no machine you have makes all of these: split them, or pick one" end
+    if #candidates == 0 then return nil, T("err-no-mall-machine") end
     req.params = { mode = "mall", products = products, machine = candidates[1], machines_try = candidates,
       chest = value(frame, "bpgen_chest") or (prototypes.entity["steel-chest"] and "steel-chest") or "wooden-chest",
       feed = find(frame, "bpgen_mall_feed").selected_index == 2 and "robots" or "belt",
@@ -1389,12 +1425,12 @@ local function request(player, frame)
       stock = tonumber(find(frame, "bpgen_mall_stock").text),
       belt = req.belt }
     if req.params.wants_base and not req.params.add_to then
-      return nil, "hold the blueprint of the base on your bus to put the mall beside"
+      return nil, T("err-hold-base-mall")
     end
     return req
   elseif mode == "extend" then
     local item = value(frame, "bpgen_ext_item")
-    if not item then return nil, "pick the item to make" end
+    if not item then return nil, T("err-pick-item") end
     req.params = { mode = "extend", item = item, rate_per_min = tonumber(find(frame, "bpgen_ext_rate").text) or 30,
       assembler = best_of_type(player, "assembling-machine", "crafting"), furnace = best_of_type(player, "furnace", "smelting"),
       belt = req.belt or u.belts[#u.belts], bus = find(frame, "bpgen_ext_bus").state and "auto" or "off" }
@@ -1416,7 +1452,7 @@ local function request(player, frame)
       local a = p.area
       list[i] = { a.left_top.x, a.left_top.y, a.right_bottom.x, a.right_bottom.y }
     end
-    if #list == 0 then return nil, "pick the ore patches first" end
+    if #list == 0 then return nil, T("err-pick-patches") end
     local dir = BUS_DIRS[find(frame, "bpgen_bus_dir").selected_index] or "north"
     local shift = bus_shift[player.index] or 0  -- (across the bus's flow)
     local across = (dir == "north" or dir == "south") and { shift, 0 } or { 0, shift }
@@ -1447,25 +1483,25 @@ local function request(player, frame)
     if add then
       local cs = player.cursor_stack
       if not (cs and cs.valid_for_read and (cs.is_blueprint and cs.is_blueprint_setup() or cs.is_blueprint_book)) then
-        return nil, "hold the blueprint of the base to add to"
+        return nil, T("err-hold-base-add")
       end
       req.params.add_to = cs.export_stack()
     end
     if find(frame, "bpgen_base_import").state and not add then
       local cs = player.cursor_stack
       if not (cs and cs.valid_for_read and cs.is_blueprint and cs.is_blueprint_setup()) then
-        return nil, "hold a blueprint of your base to rebuild it"
+        return nil, T("err-hold-base-import")
       end
       req.params.import = cs.export_stack()
     end
     return req
   end
   local recipe = value(frame, "bpgen_recipe")
-  if not recipe then return nil, "pick a recipe" end
+  if not recipe then return nil, T("err-pick-recipe") end
   local machine = value(frame, "bpgen_machine")
   if not machine then
     local m = best_machine(player, recipe)
-    if not m then return nil, "you have no machine that makes this" end
+    if not m then return nil, T("err-no-machine") end
     machine = { name = m, quality = "normal" }
     find(frame, "bpgen_machine").elem_value = machine
   end
@@ -1529,7 +1565,7 @@ function M.place_absolute(player)
   local r = results[player.index]
   if not (frame and r and r.res.absolute) then return end
   if r.res.mode == "ship" and not player.surface.platform then
-    return status(frame, "Stand on the space platform first: the ship is built round its hub.")
+    return status(frame, T("ship-stand-on-platform"))
   end
   local cleared = {}  -- (a refit: the area's old entities go, the mall's ghosts on their spot; Undo unmarks them)
   for _, c in ipairs(r.res.absolute.clear or {}) do
@@ -1541,27 +1577,26 @@ function M.place_absolute(player)
   local ghosts, _, area, marks = place.place(player, r.blueprint, nil, r.res.absolute.box)
   for _, e in ipairs(cleared) do marks[#marks + 1] = e end
   placed[player.index], unmark[player.index] = ghosts, marks
-  if area then place.outline(player, area, r.res.label or "placed by bpgen") end
+  if area then place.outline(player, area, r.res.label or T("placed-by-bpgen")) end
   local a = r.res.absolute
   if a.head then  -- (a new bus lane: where to feed it)
-    rendering.draw_text({ text = { "", "feed [item=" .. a.item .. "] here" }, surface = player.surface, target = a.head,
+    rendering.draw_text({ text = T("feed-here", "[item=" .. a.item .. "]"), surface = player.surface, target = a.head,
       color = { 1, 0.85, 0.2 }, scale = 2, alignment = "center", use_rich_text = true, players = { player },
       time_to_live = 60 * 300 })
     rendering.draw_circle({ color = { 1, 0.85, 0.2 }, radius = 0.7, width = 4, filled = false, target = a.head,
       surface = player.surface, players = { player }, time_to_live = 60 * 300 })
-    say(player, string.format("Placed a new [item=%s] lane (%d ghosts): feed it at its head (marked).", a.item, #ghosts))
+    say(player, T("placed-lane", "[item=" .. a.item .. "]", #ghosts))
     ctx.api(player, "history", { add = r.blueprint, mode = r.res.mode }, "history_add")
     return
   end
   if r.res.mode == "busdesign" or a.fitted then
-    say(player, string.format(a.fitted and "Placed %d ghosts (outlined): the base at the end of your bus, its head on the lanes."
-      or "Placed %d ghosts (outlined): drills on your patches, the bus head near you, one pole network: wire one of its poles to your grid.", #ghosts))
+    say(player, T(a.fitted and "placed-fitted" or "placed-bus", #ghosts))
     ctx.api(player, "history", { add = r.blueprint, mode = r.res.mode }, "history_add")
     return
   end
-  say(player, string.format("Placed %d ghosts next to your base (outlined): %d belt taps%s%s.", #ghosts, a.taps or 0,
-    (a.deliveries or 0) > 0 and string.format(", output onto %d of your belts", a.deliveries) or "",
-    (a.new_lanes or 0) > 0 and string.format(", %d new bus lane%s", a.new_lanes, a.new_lanes > 1 and "s" or "") or ""))
+  say(player, T("placed-next", #ghosts, a.taps or 0, { "",
+    (a.deliveries or 0) > 0 and T("placed-next-deliveries", a.deliveries) or "",
+    (a.new_lanes or 0) > 0 and T("placed-next-lanes", a.new_lanes) or "" }))
   ctx.api(player, "history", { add = r.blueprint, mode = r.res.mode }, "history_add")
 end
 
@@ -1589,7 +1624,7 @@ function M.upgrade_lane(player, u)
   target = target or belts[#belts]
   local now = prototypes.entity[u.belt]
   if not target or (now and target.belt_speed <= now.belt_speed) then
-    return status(frame, "No belt you have carries more than that lane's: add another lane of it instead.")
+    return status(frame, T("no-faster-belt"))
   end
   local area = u.axis == 0 and { { u.at + 0.1, u.lo + 0.1 }, { u.at + 0.9, u.hi + 0.9 } }
     or { { u.lo + 0.1, u.at + 0.1 }, { u.hi + 0.9, u.at + 0.9 } }
@@ -1615,7 +1650,7 @@ function M.upgrade_lane(player, u)
     end
   end
   placed[player.index] = mine
-  say(player, string.format("%d pieces of that lane marked for upgrade to [entity=%s].", n, target.name))
+  say(player, T("upgrade-marked", n, "[entity=" .. target.name .. "]"))
 end
 
 function M.plan(player)
@@ -1628,10 +1663,10 @@ function M.plan(player)
   local req, err = request(player, frame)
   if not req then return status(frame, err) end
   local ok, why = ctx.start(player, req)
-  status(frame, ok and "" or ("Can't plan in game: " .. tostring(why)))
+  status(frame, ok and "" or T("cant-plan", tostring(why)))
   stale(player, false)
   if ok then
-    M.on_progress(player, { fraction = 0, step = "starting" })
+    M.on_progress(player, { fraction = 0, step = T("starting") })
     glow(player, true)
   end
 end
@@ -1641,13 +1676,13 @@ end
 --- the pick-spot tool clicked (or dragged): the last plan placed with its middle there, on that side of the bus
 function M.spot(player, area)
   local frame = player.gui.screen[NAME]
-  if not (frame and results[player.index]) then return say(player, "Plan something first, then pick its spot.") end
+  if not (frame and results[player.index]) then return say(player, T("plan-first")) end
   local seed = { x = (area.left_top.x + area.right_bottom.x) / 2, y = (area.left_top.y + area.right_bottom.y) / 2 }
   tried[player.index] = nil
   local sec = find(frame, "bpgen_section")
   local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off", seed = seed,
     spot = true, turn = turns[player.index], section = sec.visible and sec.items[sec.selected_index] or nil })
-  status(frame, ok and "Placing it where you clicked..." or ("Can't: " .. tostring(why)))
+  status(frame, ok and T("placing-clicked") or T("cant", tostring(why)))
 end
 
 function M.move(player, area)
@@ -1661,7 +1696,7 @@ function M.move(player, area)
     include_modules = true, include_station_names = true })
   if not stack.is_blueprint_setup() then
     inv.destroy()
-    return status(frame, "Nothing to move there.")
+    return status(frame, T("nothing-to-move"))
   end
   local offset
   for _, be in pairs(stack.get_blueprint_entities() or {}) do  -- (a blueprint position plus offset: the world's)
@@ -1673,13 +1708,13 @@ function M.move(player, area)
   end
   local bp = stack.export_stack()
   inv.destroy()
-  if not offset then return status(frame, "Nothing to move there.") end
+  if not offset then return status(frame, T("nothing-to-move")) end
   local a = area
   local ok, why = ctx.start(player, { tick = game.tick, surface = player.surface.name, params = { mode = "move",
     move = { area = { math.floor(a.left_top.x), math.floor(a.left_top.y), math.ceil(a.right_bottom.x),
                       math.ceil(a.right_bottom.y) }, blueprint = bp, offset = offset },
     seed = { x = player.position.x, y = player.position.y } } })
-  status(frame, ok and "Moving the section..." or ("Can't plan in game: " .. tostring(why)))
+  status(frame, ok and T("moving-section") or T("cant-plan", tostring(why)))
 end
 
 --- an area picked with the refit tool: its assembling machines' recipes fill the mall's products, then it plans
@@ -1699,7 +1734,7 @@ function M.refit(player, area)
   local frame = player.gui.screen[NAME]
   if find(frame, "bpgen_refit_as").selected_index == 2 then  -- (a base on a bus: the science the area makes)
     local bp = area_blueprint(player, area)
-    if not bp then return status(frame, "Nothing to refit there.") end
+    if not bp then return status(frame, T("nothing-to-refit")) end
     local u = unlocked(player)
     local a = area
     local ok, why = ctx.start(player, { tick = game.tick, surface = player.surface.name,
@@ -1707,7 +1742,7 @@ function M.refit(player, area)
       belts = u.belts, poles = u.poles, belt = u.belts[#u.belts],
       params = { mode = "base", import = bp, layout = "bus", belt = u.belts[#u.belts], productivity = 0,
         refit = { area = { a.left_top.x, a.left_top.y, a.right_bottom.x, a.right_bottom.y } } } })
-    return status(frame, ok and "Planning the refit as a base..." or ("Can't plan in game: " .. tostring(why)))
+    return status(frame, ok and T("planning-refit-base") or T("cant-plan", tostring(why)))
   end
   set_mode(frame, "mall")
   local count, machines, order = {}, {}, {}
@@ -1719,7 +1754,7 @@ function M.refit(player, area)
       machines[e.name] = (machines[e.name] or 0) + 1
     end
   end
-  if #order == 0 then return status(frame, "No assembling machines with a recipe in that area.") end
+  if #order == 0 then return status(frame, T("no-machines-in-area")) end
   local t = find(frame, "bpgen_products")
   t.clear()
   for _, r in ipairs(order) do
@@ -1744,7 +1779,7 @@ function M.refit(player, area)
                        add = find(frame, "bpgen_refit_add").state,
                        layout = find(frame, "bpgen_refit_layout").selected_index == 2 and "grid" or nil }
   local ok, why = ctx.start(player, req)
-  status(frame, ok and "Planning the refit..." or ("Can't plan in game: " .. tostring(why)))
+  status(frame, ok and T("planning-refit") or T("cant-plan", tostring(why)))
 end
 
 local function sig(name)
@@ -1759,12 +1794,21 @@ local function named(name)
   return p and { "", sig(name), " ", p.localised_name } or name
 end
 
+--- a row note's colour: grey, or green when `made` (themed: "dim" with tweaks, so it lasts through a theme change)
+local function note_color(l, made)
+  if ui.themed then
+    ui.theme.apply(l, "dim", { font = "default-small", font_color = made and { 0.5, 0.9, 0.5 } or nil })
+  else
+    l.style.font_color = made and { 0.5, 0.9, 0.5 } or { 0.6, 0.6, 0.6 }
+  end
+end
+
 --- a list row's right-hand note (e.g. "on belt"), small and grey, pushed to the row's end
 local function row_note(row, caption, name)
   row.add({ type = "empty-widget" }).style.horizontally_stretchable = true
   local l = row.add({ type = "label", name = name, caption = caption })
   l.style.font = "default-small"
-  l.style.font_color = { 0.6, 0.6, 0.6 }
+  note_color(l, false)
   return l
 end
 
@@ -1794,14 +1838,15 @@ local function show_tiles(frame, res, w, h)
   row.clear()
   local a, sm = res.absolute or {}, res.summary or {}
   local function tile(v, caption)
-    if v then ui.stat(row, tostring(v), caption, { horizontally_stretchable = false, minimal_width = 96 }) end
+    if v then ui.stat(row, type(v) == "table" and v or tostring(v), T(caption), { horizontally_stretchable = false,
+      minimal_width = 96 }) end
   end
-  if a.box then tile(a.box[3] .. " × " .. a.box[4], "size")
-  elseif type(w) == "number" then tile(math.floor(w) .. " × " .. math.floor(h), "size") end
-  tile(sm.machines or (res.mall and res.mall.machines), "machines")
-  if a.taps then tile(a.taps, "taps on your belts") end
-  if a.inputs and #a.inputs > 0 then tile(#a.inputs, "to feed by hand") end
-  if res.expected then tile(string.format("%.1f/min", res.expected * 60), "made") end
+  if a.box then tile(a.box[3] .. " × " .. a.box[4], "tile-size")
+  elseif type(w) == "number" then tile(math.floor(w) .. " × " .. math.floor(h), "tile-size") end
+  tile(sm.machines or (res.mall and res.mall.machines), "tile-machines")
+  if a.taps then tile(a.taps, "tile-taps") end
+  if a.inputs and #a.inputs > 0 then tile(#a.inputs, "tile-by-hand") end
+  if res.expected then tile(T("per-min", string.format("%.1f", res.expected * 60)), "tile-made") end
   row.visible = #row.children > 0
 end
 
@@ -1827,16 +1872,16 @@ local function show_result(frame, res, w, h, need)
   local function badge(text, tip) add_badge(frame, text, tip) end
   local s = res.summary or {}
   if s.machines and not res.mall and not res.base then
-    badge(string.format("[entity=%s] %s", s.machine or "?", sig(s.recipe or "")), "the machine and its recipe")
-    if s.belt then badge("[entity=" .. s.belt .. "] belts", "its belts") end
+    badge(string.format("[entity=%s] %s", s.machine or "?", sig(s.recipe or "")), T("badge-machine-tip"))
+    if s.belt then badge(T("badge-belts", "[entity=" .. s.belt .. "]"), T("badge-belts-tip")) end
   end
-  for _, n in ipairs(need or {}) do badge("needs " .. n .. "/min", "brought in a minute") end
-  if res.mall then badge(#(res.mall.products or {}) .. " products") end
-  if res.base then badge(tostring(res.base.spm) .. "/min of each pack") end
-  if res.seconds then badge(string.format("planned in %.0f ms", res.seconds * 1000)) end
+  for _, n in ipairs(need or {}) do badge(T("badge-needs", n), T("badge-needs-tip")) end
+  if res.mall then badge(T("badge-products", #(res.mall.products or {}))) end
+  if res.base then badge(T("badge-spm", tostring(res.base.spm))) end
+  if res.seconds then badge(T("badge-planned-in", string.format("%.0f", res.seconds * 1000))) end
   local notes = {}
-  for _, n in ipairs(res.notes or {}) do notes[#notes + 1] = "• " .. n end
-  find(frame, "bpgen_notes").caption = table.concat(notes, "\n")
+  for _, n in ipairs(res.notes or {}) do notes[#notes + 1] = { "", "• ", n } end
+  find(frame, "bpgen_notes").caption = join(notes, "\n")
 end
 
 function M.on_result(player, res)
@@ -1853,18 +1898,16 @@ function M.on_result(player, res)
       -- (inserter setups bpgen hasn't measured: measured here and now, live, then planned again)
       preview_surface()
       bench.calibrate(player.index, res.measure)
-      status(frame, string.format("Measuring %d inserter setups bpgen hasn't seen yet (%d s), then planning...",
-        #res.measure.cases, math.ceil(((res.measure.warmup or 300) + (res.measure.measure or 1800)) / 60)))
+      status(frame, T("measuring-setups", #res.measure.cases,
+        math.ceil(((res.measure.warmup or 300) + (res.measure.measure or 1800)) / 60)))
     else
-      say(player, "Can't plan this: " .. tostring(res.error))
+      say(player, T("cant-plan-this", tostring(res.error)))
     end
     return true
   end
   local old = bench.find("test", player.index)
   if old then bench.stop(old.id) end
-  if storage.bpgen_speed_was then  -- (a test run's fast-forward: off with it)
-    game.speed, storage.bpgen_speed_was = storage.bpgen_speed_was, nil
-  end
+  test_speed_off(frame)  -- (a test run's fast-forward: off with it)
   find(frame, "bpgen_test_status").caption = ""
   local center, w, h, where = build_preview(player, res.blueprint, res.absolute and res.absolute.box)
   local sec = find(frame, "bpgen_section")
@@ -1882,22 +1925,23 @@ function M.on_result(player, res)
   else
     results[player.index] = { blueprint = res.blueprint, res = res }
     cam.visible, empty.visible = false, true
-    empty.caption = "No preview: " .. tostring(w)
+    empty.caption = T("no-preview", type(w) == "table" and w or tostring(w))
   end
   show_tiles(frame, res, w, h)
   glow(player, false)
   stale(player, false)
   find(frame, "bpgen_test_box").visible = false
   M.steps(frame)
-  find(frame, "bpgen_cursor").enabled = true
+  local cursor = find(frame, "bpgen_cursor")
+  cursor.enabled = true
+  if ui.themed then ui.set_role(cursor, "ok") else cursor.style = "confirm_button" end
   find(frame, "bpgen_copy").enabled = safe.has("std")
   find(frame, "bpgen_place").enabled = where ~= nil
   find(frame, "bpgen_place_base").enabled = res.absolute == nil and (res.mode == "line" or res.mode == "mall"
     or res.mode == "base")
   local pb = find(frame, "bpgen_place")
-  pb.caption = res.absolute and "Place it" or "Place near me"
-  pb.tooltip = res.absolute and "Ghosts where the preview shows it, its taps replacing the belts they cut into"
-    or "Ghosts at a free spot next to you, inputs pointed at your belts that carry them"
+  pb.caption = T(res.absolute and "place-it" or "place-near")
+  pb.tooltip = T(res.absolute and "place-it-tip" or "place-near-tip")
   local fixed = res.mode == "lane"  -- (where it is is the point: no arrows; a bus design's move its head sideways)
   for _, n in ipairs({ "left", "up", "down", "right" }) do
     find(frame, "bpgen_nudge_" .. n).visible = res.absolute ~= nil and not fixed
@@ -1907,13 +1951,13 @@ function M.on_result(player, res)
   find(frame, "bpgen_base_redo").visible = res.absolute ~= nil and not fixed
   local tb = find(frame, "bpgen_test")
   tb.enabled = res.test ~= nil and where ~= nil
-  tb.caption = "Test run"
+  tb.caption = T("test-run")
   local s = res.summary or {}
   local lines = {}
   if s.machines and not res.mall and not res.base then
-    lines[#lines + 1] = string.format("%s × %d [entity=%s]   %s %.1f/min expected%s",
-      sig(s.recipe or ""), s.machines, s.machine or "?", sig(s.output or ""), (s.expected or 0) * 60,
-      s.belt and ("   belt [entity=" .. s.belt .. "]") or "")
+    lines[#lines + 1] = T("stats-line", sig(s.recipe or ""), s.machines, "[entity=" .. (s.machine or "?") .. "]",
+      sig(s.output or ""), string.format("%.1f", (s.expected or 0) * 60),
+      s.belt and { "", "   ", T("stats-belt", "[entity=" .. s.belt .. "]") } or "")
   end
   -- (what the line takes a minute: its expected output through the recipe, less what productivity adds)
   local need = {}
@@ -1944,7 +1988,7 @@ function M.on_result(player, res)
     end
   end
   table.sort(need)
-  if #need > 0 then lines[#lines + 1] = "Needs a minute: " .. table.concat(need, "   ") end
+  if #need > 0 then lines[#lines + 1] = T("stats-needs", table.concat(need, "   ")) end
   -- (parts the plan made inside the blueprint on its own, e.g. fed from the bus: ticked, as if picked)
   local make_box = find(frame, "bpgen_make")
   for _, st in pairs(s.stages or {}) do
@@ -1959,39 +2003,39 @@ function M.on_result(player, res)
     return table.concat(t, " ")
   end
   if res.mall then
-    lines[#lines + 1] = string.format("Mall: %s   (%s machines)", icons(res.mall.products, "recipe"), tostring(res.mall.machines))
+    lines[#lines + 1] = T("stats-mall", icons(res.mall.products, "recipe"), tostring(res.mall.machines))
   end
   if res.base then
     local b = res.base
-    lines[#lines + 1] = string.format("Starter base: %s/min each of %s", tostring(b.spm), icons(b.packs))
+    lines[#lines + 1] = T("stats-base", tostring(b.spm), icons(b.packs))
     if type(b.bring_in) == "table" and next(b.bring_in) then
       local t = {}
       for k, v in pairs(b.bring_in) do
-        t[#t + 1] = type(k) == "string" and (sig(k) .. (type(v) == "number" and string.format(" %.0f/min", v) or ""))
-          or sig(tostring(v))
+        t[#t + 1] = type(k) == "string" and (type(v) == "number"
+          and { "", sig(k), " ", T("per-min", string.format("%.0f", v)) } or sig(k)) or sig(tostring(v))
       end
-      lines[#lines + 1] = "Brought in: " .. table.concat(t, "  ")
+      lines[#lines + 1] = T("stats-brought-in", join(t, "  "))
     end
-    if type(b.not_automated) == "table" and #b.not_automated > 0 then lines[#lines + 1] = "Not automated: " .. icons(b.not_automated) end
+    if type(b.not_automated) == "table" and #b.not_automated > 0 then lines[#lines + 1] = T("stats-not-automated", icons(b.not_automated)) end
     if b.route_note then lines[#lines + 1] = b.route_note end
-    lines[#lines + 1] = "(a book of prints: pick one under the preview)"
+    lines[#lines + 1] = T("stats-book")
   end
-  if center then lines[#lines + 1] = string.format("%d × %d tiles · planned in %.0f ms", math.ceil(w), math.ceil(h), (res.seconds or 0) * 1000) end
-  for _, n in ipairs(res.notes or {}) do lines[#lines + 1] = "• " .. n end
-  find(frame, "bpgen_stats").caption = table.concat(lines, "\n")
+  if center then
+    lines[#lines + 1] = T("stats-size", math.ceil(w), math.ceil(h), string.format("%.0f", (res.seconds or 0) * 1000))
+  end
+  for _, n in ipairs(res.notes or {}) do lines[#lines + 1] = { "", "• ", n } end
+  find(frame, "bpgen_stats").caption = join(lines, "\n")
   show_result(frame, res, center and w, h, need)
   adopt(player)
-  status(frame, res.mode == "lane" and "The preview shows the new lane along your bus: Place it puts the ghosts down."
-    or res.mode == "busdesign" and "The preview shows the drills on your patches and the bus head near you: Place it puts the ghosts down."
-    or res.absolute and "The preview shows it with your base around it: ◀ ▶ move it, Place it puts the ghosts down." or "")
+  status(frame, res.mode == "lane" and T("preview-shows-lane") or res.mode == "busdesign" and T("preview-shows-bus")
+    or res.absolute and T("preview-shows-base") or "")
   -- what next: can the save build it (and for a line, what modules would do)
   find(frame, "bpgen_extra").clear()
   for i, u in ipairs(res.absolute and res.absolute.upgrades or {}) do
     local icons = {}
     for _, it in ipairs(u.items) do icons[#icons + 1] = sig(it) end
-    find(frame, "bpgen_extra").add({ type = "button", caption = "Upgrade the " .. table.concat(icons) .. " lane",
-      tags = { bpgen = "upgrade_lane", i = i },
-      tooltip = string.format("Marks that bus lane's belts, undergrounds and splitters for upgrade to the slowest belt you have that carries %.0f/min (else your fastest), bpgen's ghosts on it too", u.need * 60) })
+    find(frame, "bpgen_extra").add({ type = "button", caption = T("upgrade-lane", table.concat(icons)),
+      tags = { bpgen = "upgrade_lane", i = i }, tooltip = T("upgrade-lane-tip", string.format("%.0f", u.need * 60)) })
   end
   ctx.api(player, "save_check", { blueprint = res.blueprint }, "check")
   if s.recipe and s.machine then
@@ -2011,29 +2055,29 @@ local function show_check(frame, r)
   local box = extra(frame)
   if r.ok then
     local badges = find(frame, "bpgen_badges")
-    if badges and ui.themed then add_badge(frame, "[img=utility/check_mark_green] your save can build it") return end
-    box.add({ type = "label", caption = "[img=utility/check_mark_green] Your save can build this." })
+    if badges and ui.themed then add_badge(frame, { "", "[img=utility/check_mark_green] ", T("can-build-badge") }) return end
+    box.add({ type = "label", caption = { "", "[img=utility/check_mark_green] ", T("can-build") } })
     return
   end
   local short = {}
   for _, b in ipairs(r.buildings or {}) do
     if not b.craftable and (b.have or 0) < b.need then
-      short[#short + 1] = string.format("%s %d (have %d)", sig(b.item), b.need, b.have or 0)
+      short[#short + 1] = T("short-item", sig(b.item), b.need, b.have or 0)
     end
   end
   local lines = {}
   if #(r.recipes or {}) > 0 then
     local t = {}
     for _, rn in ipairs(r.recipes) do t[#t + 1] = prototypes.recipe[rn] and ("[recipe=" .. rn .. "]") or rn end
-    lines[#lines + 1] = "Not researched yet: " .. table.concat(t, " ")
+    lines[#lines + 1] = T("not-researched", table.concat(t, " "))
   end
-  if #short > 0 then lines[#lines + 1] = "Can't craft yet and not enough on hand: " .. table.concat(short, ", ") end
+  if #short > 0 then lines[#lines + 1] = T("cant-craft", join(short, ", ")) end
   local badges = find(frame, "bpgen_badges")
   if badges and ui.themed then
-    add_badge(frame, "[img=utility/warning_icon] can't build it yet", table.concat(lines, "\n"))
+    add_badge(frame, { "", "[img=utility/warning_icon] ", T("cant-build-badge") }, join(lines, "\n"))
     return
   end
-  local l = box.add({ type = "label", caption = "[img=utility/warning_icon] " .. table.concat(lines, "\n") })
+  local l = box.add({ type = "label", caption = { "", "[img=utility/warning_icon] ", join(lines, "\n") } })
   l.style.single_line = false
   l.style.maximal_width = cam_size(game.get_player(frame.player_index)) - 24
 end
@@ -2042,15 +2086,16 @@ local function show_ideas(frame, r)
   local ideas = r.ideas or {}
   if #ideas < 2 then return end
   local box = extra(frame)
-  ui.add(box, { type = "label", caption = "Modules would make it:" }, "caption")
+  ui.add(box, { type = "label", caption = T("ideas") }, "caption")
   local t = box.add({ type = "table", column_count = 4 })
   t.style.horizontal_spacing = 12
-  for _, h in ipairs({ "", "machines", "power", "input per output" }) do t.add({ type = "label", caption = h }) end
+  for _, h in ipairs({ "", T("ideas-machines"), T("ideas-power"), T("ideas-input") }) do t.add({ type = "label", caption = h }) end
   for _, idea in ipairs(ideas) do
     t.add({ type = "button", caption = idea.name, tags = { bpgen = "idea", modules = idea.modules or "",
-      beacon = idea.beacon or "", beacon_modules = idea.beacon_modules or "" }, tooltip = "Use these and plan again" })
-    t.add({ type = "label", caption = tostring(idea.machines) .. (idea.beacons and idea.beacons > 0 and (" + " .. idea.beacons .. " beacons") or "") })
-    t.add({ type = "label", caption = string.format("%.1f MW", (idea.power_kw or 0) / 1000) })
+      beacon = idea.beacon or "", beacon_modules = idea.beacon_modules or "" }, tooltip = T("idea-tip") })
+    t.add({ type = "label", caption = idea.beacons and idea.beacons > 0 and T("ideas-beacons", tostring(idea.machines), idea.beacons)
+      or tostring(idea.machines) })
+    t.add({ type = "label", caption = T("mw", string.format("%.1f", (idea.power_kw or 0) / 1000)) })
     t.add({ type = "label", caption = string.format("%.2f", idea.input or 0) })
   end
 end
@@ -2064,12 +2109,12 @@ local function history_drawer(player, frame)
     overlap = 8,
     role = "toast", direction = "vertical", padding = 8 })
   if not d then return nil end
-  ui.add(d, { type = "label", caption = "History" }, "caption")
-  ui.search(d, "bpgen_history", "Search your blueprints")
+  ui.add(d, { type = "label", caption = T("history") }, "caption")
+  ui.search(d, "bpgen_history", T("search-history"))
   local list = ui.add(d, { type = "scroll-pane", name = "bpgen_history_list", horizontal_scroll_policy = "never" },
     "scroll", { vertically_stretchable = true, horizontally_stretchable = true })
   ui.add(list, { type = "label", caption = "..." }, "dim")
-  ui.add(d, { type = "label", caption = "Drag a row onto the preview to see it again, or onto the Recipe slot to plan it again." },
+  ui.add(d, { type = "label", caption = T("history-drag-hint") },
     "dim", { single_line = false, maximal_width = 276, font = "default-small" })
   return d
 end
@@ -2079,22 +2124,23 @@ local function show_history(frame, items)
   if list then
     list.clear()
     if #items == 0 then
-      ui.add(list, { type = "label", caption = "Nothing yet: blueprints you take go here (shared with the web app)." },
+      ui.add(list, { type = "label", caption = T("history-empty") },
         "dim", { single_line = false, maximal_width = 260 })
     end
     for i, h in ipairs(items) do
       if i > 40 then break end
       local icon = h.recipe and prototypes.recipe[h.recipe] and ("[recipe=" .. h.recipe .. "] ") or ""
-      local name = h.label or "blueprint"
-      local row = list.add({ type = "flow", direction = "horizontal", tags = { bpgen_hist = string.lower(name) } })
+      local name = h.label or T("blueprint")
+      local row = list.add({ type = "flow", direction = "horizontal",
+        tags = { bpgen_hist = string.lower(h.label or "blueprint") } })
       row.style.vertical_align = "center"
       row.style.horizontally_stretchable = true
-      local l = ui.add(row, { type = "label", caption = icon .. name, tooltip = { "", name, "\n",
-        (h.book and "book, " or "") .. tostring(h.entities) .. " entities", "\nDrag onto the preview or the Recipe slot" } },
+      local l = ui.add(row, { type = "label", caption = { "", icon, name }, tooltip = { "", name, "\n",
+        T(h.book and "history-entities-book" or "history-entities", tostring(h.entities)), "\n", T("history-row-tip") } },
         "text", { maximal_width = 170 })
-      if dnd then dnd.draggable(l, { kind = "bpgen_history", i = i, caption = icon .. name }) end
+      if dnd then dnd.draggable(l, { kind = "bpgen_history", i = i, caption = { "", icon, name } }) end
       row.add({ type = "empty-widget" }).style.horizontally_stretchable = true
-      ui.add(row, { type = "button", caption = "To cursor", tags = { bpgen = "history_take", i = i } }, "button",
+      ui.add(row, { type = "button", caption = T("to-cursor-short"), tags = { bpgen = "history_take", i = i } }, "button",
         { minimal_width = 0, height = 26, left_padding = 6, right_padding = 6 })
     end
     return
@@ -2102,7 +2148,7 @@ local function show_history(frame, items)
   local box = extra(frame)
   box.clear()
   if #items == 0 then
-    box.add({ type = "label", caption = "Nothing yet: blueprints you take go here (shared with the web app)." })
+    box.add({ type = "label", caption = T("history-empty") })
     return
   end
   local t = box.add({ type = "table", column_count = 3 })
@@ -2110,10 +2156,10 @@ local function show_history(frame, items)
     if i > 25 then break end
     -- (an icon only for a recipe this game has: a removed mod's shows as raw text otherwise)
     local icon = h.recipe and prototypes.recipe[h.recipe] and ("[recipe=" .. h.recipe .. "] ") or ""
-    local l = t.add({ type = "label", caption = icon .. (h.label or "blueprint"), tooltip = h.label })
+    local l = t.add({ type = "label", caption = { "", icon, h.label or T("blueprint") }, tooltip = h.label })
     l.style.maximal_width = 330
-    t.add({ type = "label", caption = (h.book and "book, " or "") .. tostring(h.entities) .. " entities" })
-    t.add({ type = "button", caption = "To cursor", tags = { bpgen = "history_take", i = i } })
+    t.add({ type = "label", caption = T(h.book and "history-entities-book" or "history-entities", tostring(h.entities)) })
+    t.add({ type = "button", caption = T("to-cursor-short"), tags = { bpgen = "history_take", i = i } })
   end
 end
 
@@ -2123,15 +2169,16 @@ local function show_short(frame, rows)
   local box = extra(frame)
   box.clear()
   if #rows == 0 then
-    box.add({ type = "label", caption = "Nothing's short (or bpgen hasn't counted 10 minutes yet)." })
+    box.add({ type = "label", caption = T("nothing-short") })
     return
   end
-  ui.add(box, { type = "label", caption = "Used faster than made (a minute):" }, "caption")
+  ui.add(box, { type = "label", caption = T("short-head") }, "caption")
   local t = box.add({ type = "table", column_count = 3 })
   for _, r in ipairs(rows) do
-    t.add({ type = "label", caption = string.format("%s  short %.0f  (made %.0f, used %.0f)", sig(r.name), r.short, r.made, r.used) })
+    t.add({ type = "label", caption = T("short-row", sig(r.name), string.format("%.0f", r.short), string.format("%.0f", r.made),
+      string.format("%.0f", r.used)) })
     t.add({ type = "empty-widget" })
-    t.add({ type = "button", caption = "Plan it", tags = { bpgen = "plan_short", recipe = r.recipe, rate = r.short } })
+    t.add({ type = "button", caption = T("plan-it"), tags = { bpgen = "plan_short", recipe = r.recipe, rate = r.short } })
   end
 end
 
@@ -2139,41 +2186,41 @@ local function show_bus(frame, r)
   local box = extra(frame)
   box.clear()
   if not r.bus then
-    box.add({ type = "label", caption = "No main bus around you (3+ long straight belts side by side, flowing the same way)." })
+    box.add({ type = "label", caption = T("no-bus") })
     return
   end
   local b = r.bus
-  ui.add(box, { type = "label", caption = string.format("Your bus: %d lanes%s, %d tiles%s", b.lanes,
-    #b.pipes > 0 and string.format(" and %d pipe%s", #b.pipes, #b.pipes > 1 and "s" or "") or "", b.length,
-    b.measured and "" or " (not measured)") }, "caption")
+  ui.add(box, { type = "label", caption = T("bus-report", b.lanes,
+    #b.pipes > 0 and { "", " ", T("bus-pipes", #b.pipes) } or "", b.length,
+    b.measured and "" or { "", " ", T("not-measured") }) }, "caption")
   local t = box.add({ type = "table", column_count = 3 })
   for _, it in ipairs(r.items or {}) do
     local full = it.used and (it.used >= 0.9 * it.cap or it.dry > 0)
-    local used = it.used and string.format("%.0f of %.0f/min used", it.used * 60, it.cap * 60)
-      or string.format("carries up to %.0f/min", it.cap * 60)
+    local used = it.used and T("bus-used", string.format("%.0f", it.used * 60), string.format("%.0f", it.cap * 60))
+      or T("bus-carries", string.format("%.0f", it.cap * 60))
     local single = not it.item:find(" + ", 1, true)
-    t.add({ type = "label", caption = string.format("%s%s  %d lane%s, %s%s%s%s", full and "[color=yellow]" or "",
-      single and sig(it.item) or it.item, it.lanes, it.lanes > 1 and "s" or "", used,
-      it.dry > 0 and string.format(", %d run%s dry", it.dry, it.dry > 1 and "" or "s") or "",
-      (it.short or 0) > 0 and string.format(", your base is %.0f/min short", it.short) or "", full and "[/color]" or "") })
+    t.add({ type = "label", caption = { "", full and "[color=yellow]" or "",
+      T("bus-row", single and sig(it.item) or it.item, it.lanes, { "", used,
+        it.dry > 0 and T("bus-dry", it.dry) or "",
+        (it.short or 0) > 0 and T("bus-base-short", string.format("%.0f", it.short)) or "" }), full and "[/color]" or "" } })
     local acts = t.add({ type = "flow", direction = "horizontal" })
     if single then
-      acts.add({ type = "button", caption = "Add a lane", tags = { bpgen = "bus_lane", item = it.item },
-        tooltip = "A new lane of it along the bus (previewed first): you feed it at its head" })
+      acts.add({ type = "button", caption = T("add-lane"), tags = { bpgen = "bus_lane", item = it.item },
+        tooltip = T("add-lane-tip") })
     end
     if single and it.makeable then
-      acts.add({ type = "button", caption = "Make more", tags = { bpgen = "bus_make", item = it.item,
-        rate = math.max(it.short or 0, 60) }, tooltip = "Plan making it next to the bus from what the bus carries (Extend)" })
+      acts.add({ type = "button", caption = T("make-more"), tags = { bpgen = "bus_make", item = it.item,
+        rate = math.max(it.short or 0, 60) }, tooltip = T("make-more-tip") })
     end
     t.add({ type = "empty-widget" })
   end
   if #(r.short or {}) > 0 then
-    ui.add(box, { type = "label", caption = "Your base lacks, and the bus doesn't carry:" }, "caption")
+    ui.add(box, { type = "label", caption = T("lacks-head") }, "caption")
     local s = box.add({ type = "table", column_count = 2 })
     for _, it in ipairs(r.short) do
-      s.add({ type = "label", caption = string.format("%s  %.0f/min short", sig(it.item), it.short) })
-      s.add({ type = "button", caption = "Make it by the bus", tags = { bpgen = "bus_make", item = it.item, rate = it.short },
-        tooltip = "Plan making it next to the bus from what the bus carries, its output on a new lane (Extend)" })
+      s.add({ type = "label", caption = T("lacks-row", sig(it.item), string.format("%.0f", it.short)) })
+      s.add({ type = "button", caption = T("make-by-bus"), tags = { bpgen = "bus_make", item = it.item, rate = it.short },
+        tooltip = T("make-by-bus-tip") })
     end
   end
 end
@@ -2207,7 +2254,7 @@ local function on_api(player, tag, out)
       cb.style.maximal_width = 200  -- (a long name shortens: the rate boxes stay in one column)
       cb.style.horizontally_squashable = true
       f.add({ type = "empty-widget" }).style.horizontally_stretchable = true
-      f.add({ type = "textfield", numeric = true, allow_decimal = true, tooltip = "a minute (empty: what fits)" }).style.width = 44
+      f.add({ type = "textfield", numeric = true, allow_decimal = true, tooltip = T("also-rate-tip") }).style.width = 44
     end
     local near = {}
     for _, sib in ipairs(r) do
@@ -2215,16 +2262,16 @@ local function on_api(player, tag, out)
     end
     if #near > 0 then
       box.add({ type = "checkbox", state = false, tags = { bpgen_toggle = "bpgen_also_near" },
-        caption = string.format("%d that need one input more or less", #near) })
+        caption = T("also-near", #near) })
       local more = box.add({ type = "flow", name = "bpgen_also_near", direction = "vertical", visible = false })
       for i, sib in ipairs(near) do
         if i > 12 then break end
         add_row(more, sib)
       end
     end
-    if #r == 0 then box.add({ type = "label", caption = "(nothing else is made from the same inputs)" }) end
+    if #r == 0 then box.add({ type = "label", caption = T("also-none") }) end
     fit_panel(box)
-    ui.set_badge(find(frame, "bpgen_also_badge"), #r > 0 and tostring(#r) or "none")
+    ui.set_badge(find(frame, "bpgen_also_badge"), #r > 0 and tostring(#r) or nil)
   elseif tag == "tree" and r then
     local box = find(frame, "bpgen_make")
     box.clear()
@@ -2235,17 +2282,17 @@ local function on_api(player, tag, out)
         f.style.horizontally_stretchable = true
         if #ing.recipes > 0 then
           f.add({ type = "checkbox", state = false, caption = named(ing.item), tags = { item = ing.item, bpgen_make_row = true } })
-          local pick = f.add({ type = "choose-elem-button", elem_type = "recipe", tooltip = "made with this recipe",
+          local pick = f.add({ type = "choose-elem-button", elem_type = "recipe", tooltip = T("made-with-tip"),
             elem_filters = { { filter = "has-product-item", elem_filters = { { filter = "name", name = ing.item } } } } })
           pick.elem_value = ing.recipes[1].recipe
           pick.style.size = 28
         else
           f.add({ type = "label", caption = named(ing.item) })
         end
-        row_note(f, "on belt", "bpgen_where")
+        row_note(f, T("on-belt"), "bpgen_where")
       end
     end
-    if #box.children == 0 then box.add({ type = "label", caption = "(nothing but fluids)" }) end
+    if #box.children == 0 then box.add({ type = "label", caption = T("only-fluids") }) end
   end
 end
 
@@ -2261,44 +2308,32 @@ local function mark(player, boxes)
   end
 end
 
---- the test run's fast-forward off: the game's speed as it was
-local function test_speed_off(frame)
-  if storage.bpgen_speed_was then
-    game.speed = storage.bpgen_speed_was
-    storage.bpgen_speed_was = nil
-  end
-  local b = frame and find(frame, "bpgen_test_speed")
-  if b then b.caption, b.visible = "×1", false end
-end
-
 local function describe_test(run, final)
   local seconds, cases = bench.rates(run)
   local t = game.tick - run.start
   local count, starved = bench.statuses(run)
   local machines = {}
-  for k, n in pairs(count) do machines[#machines + 1] = n .. " " .. k:gsub("_", " ") end
+  for k, n in pairs(count) do machines[#machines + 1] = n .. " " .. k:gsub("_", " ") end  -- (the game's status names)
   table.sort(machines)
   local head
   if run.products then  -- (a mall: nothing to rate, what has reached its chests)
     local got, waiting = bench.chest_contents(run), {}
     for _, p in ipairs(run.products) do if not got[p] then waiting[#waiting + 1] = sig(p) end end
-    head = string.format("%s: %d of %d products in their chests (%d s)%s", final and "Test run done" or "Test run (mall)",
-      #run.products - #waiting, #run.products, math.floor(t / 60),
-      #waiting > 0 and ("\nStill waiting for: " .. table.concat(waiting, " ")) or "")
+    head = T("test-mall", T(final and "test-done" or "test-mall-prefix"), #run.products - #waiting, #run.products,
+      math.floor(t / 60), #waiting > 0 and { "", "\n", T("test-waiting", table.concat(waiting, " ")) } or "")
   elseif t < run.warmup then
-    head = string.format("Test run: warming up %d / %d s (inputs filling the belts)", math.floor(t / 60),
-      math.floor(run.warmup / 60))
+    head = T("test-warmup", math.floor(t / 60), math.floor(run.warmup / 60))
   else
     local got = (cases[1].rates or {})[run.output] or 0
     local pct = run.expected and run.expected > 0 and got / run.expected * 100 or 0
-    head = string.format("%s: %s %.1f/min measured = %.0f%% of the %.1f/min expected%s",
-      final and "Test run done" or "Test run, measuring", sig(run.output or ""), got * 60, pct, (run.expected or 0) * 60,
-      final and string.format(" (over %d s)", math.floor(seconds))
-        or string.format(" (%d / %d s)", math.floor(seconds), math.floor(run.measure / 60)))
+    head = T("test-measured", T(final and "test-done" or "test-measuring"), sig(run.output or ""),
+      string.format("%.1f", got * 60), string.format("%.0f", pct), string.format("%.1f", (run.expected or 0) * 60),
+      { "", " ", final and T("test-over", math.floor(seconds))
+        or T("test-progress", math.floor(seconds), math.floor(run.measure / 60)) })
   end
   local errs = cases[1].errors or {}
-  return head .. "\nMachines: " .. table.concat(machines, ", ")
-    .. (#errs > 0 and ("\n" .. table.concat(errs, "; ")) or ""), starved
+  return join({ head, T("test-machines", table.concat(machines, ", ")), #errs > 0 and table.concat(errs, "; ") or nil },
+    "\n"), starved
 end
 
 local test_series = safe.stored("test_series")  -- player index -> the rate measured each second (the chart)
@@ -2311,7 +2346,7 @@ local function test_view(player, frame, run, final)
   local bar, holder = find(box, "bpgen_test_bar"), find(box, "bpgen_test_graph")
   if not run then
     test_series[player.index] = {}
-    ui.set_progress(bar, 0, "starting")
+    ui.set_progress(bar, 0, T("starting"))
     holder.clear()
     local g = ui.graph(holder, { 0, 0 }, { width = math.max(200, cam_size(player) - 60), height = 56 })
     if g then g.name = "bpgen_test_chart" end
@@ -2324,15 +2359,15 @@ local function test_view(player, frame, run, final)
     local got, n = bench.chest_contents(run), 0
     for _, pr in ipairs(run.products) do if got[pr] then n = n + 1 end end
     frac, rate = n / math.max(1, #run.products), n
-    text = string.format("%d of %d products in their chests", n, #run.products)
+    text = T("test-bar-mall", n, #run.products)
   elseif t < run.warmup then
-    text = string.format("warming up %d / %d s", math.floor(t / 60), math.floor(run.warmup / 60))
+    text = T("test-bar-warmup", math.floor(t / 60), math.floor(run.warmup / 60))
   else
     local _, cases = bench.rates(run)
     local got = ((cases[1] or {}).rates or {})[run.output] or 0
     rate = got * 60
     frac = run.expected and run.expected > 0 and got / run.expected or 0
-    text = string.format("%.0f/min, %.0f%% of expected", rate, frac * 100)
+    text = T("test-bar-rate", string.format("%.0f", rate), string.format("%.0f", frac * 100))
   end
   ui.set_progress(bar, math.min(1, frac), text)
   if rate then
@@ -2356,7 +2391,7 @@ bench.on_progress = function(run)
     test_view(player, frame, run)
   else
     local left = math.ceil((run.warmup + run.measure - (game.tick - run.start)) / 60)
-    status(frame, string.format("Measuring inserters: %d s left, then planning...", left))
+    status(frame, T("measuring-left", left))
   end
 end
 
@@ -2368,26 +2403,26 @@ bench.on_done = function(run, cases)
     return
   end
   local frame = player.gui.screen[NAME]
+  test_speed_off(frame)  -- (the window closed or not: the game back at its own speed)
   if not frame then return end
   local text, starved = describe_test(run, true)
   find(frame, "bpgen_test_status").caption = text
   mark(player, starved)
-  find(frame, "bpgen_test").caption = "Test run"
-  test_speed_off(frame)
+  find(frame, "bpgen_test").caption = T("test-run")
   test_view(player, frame, run, true)
 end
 
 local function to_cursor(player)
   local r = results[player.index]
   if not r then return end
-  if not player.clear_cursor() then return say(player, "Your hand is full") end
+  if not player.clear_cursor() then return say(player, T("hand-full")) end
   player.cursor_stack.set_stack({ name = "blueprint" })
   if player.cursor_stack.import_stack(r.blueprint) == 1 then
     player.clear_cursor()
-    return say(player, "The blueprint string didn't import")
+    return say(player, T("hand-bp-not-imported"))
   end
   close(player)  -- (out of the way of placing it)
-  ui.toast(player, "The blueprint is in your hand")
+  ui.toast(player, T("bp-in-hand"))
 end
 
 --- the ghosts bpgen placed that are still there to remove
@@ -2411,7 +2446,7 @@ local function unplace(player)
   end
   placed[player.index], unmark[player.index] = nil, nil
   local frame = player.gui.screen[NAME]
-  say(player, n .. " placed ghosts removed")
+  say(player, T("ghosts-removed", n))
 end
 ui.on_yes("bpgen_unplace", function(player) unplace(player) end)
 
@@ -2422,20 +2457,18 @@ local function settings(player)
   if not m then return end
   ui.add(m, { type = "label", caption = "bpgen" }, "caption")
   if ui.layouts then
-    ui.add(m, { type = "checkbox", name = "bpgen_docked", caption = "Docked", state = docked(player) == true,
-      tooltip = "The modes, the preview's tools and the blueprint's actions on the window's edges; unticked, all inside it" },
-      "check")
+    ui.add(m, { type = "checkbox", name = "bpgen_docked", caption = { "fstd.docked" },
+      state = docked(player) == true, tooltip = { "fstd.docked-tooltip" } }, "check")
   end
-  ui.add(m, { type = "checkbox", name = "bpgen_only_unlocked", caption = "Only unlocked",
-    state = only_unlocked[player.index] == true,
-    tooltip = "Pickers offer only recipes you can craft and what you can build now" }, "check")
+  ui.add(m, { type = "checkbox", name = "bpgen_only_unlocked", caption = T("only-unlocked"),
+    state = only_unlocked[player.index] == true, tooltip = T("only-unlocked-tip") }, "check")
   local wide = { horizontally_stretchable = true, minimal_width = 0, height = 28 }
   if remote.interfaces["fse-std"] and remote.interfaces["fse-std"].open_theme then
-    ui.add(m, { type = "button", caption = "Theme...", tags = { bpgen = "theme" },
-      tooltip = "How every window using fse-std looks to you (/fse-theme)" }, "button", wide)
+    ui.add(m, { type = "button", caption = { "fstd.theme-button" }, tags = { bpgen = "theme" },
+      tooltip = { "fstd.theme-button-tooltip" } }, "button", wide)
   end
-  ui.add(m, { type = "button", caption = "Reset size and place", tags = { bpgen = "reset_size" },
-    tooltip = "The window back to its first size, in the middle of the screen" }, "button", wide)
+  ui.add(m, { type = "button", caption = { "fstd.reset-place" }, tags = { bpgen = "reset_size" },
+    tooltip = { "fstd.reset-place-tooltip" } }, "button", wide)
 end
 
 local function on_click(e)
@@ -2465,7 +2498,7 @@ local function on_click(e)
     M.plan(player)
   elseif action == "nudge" and r and r.res.mode == "busdesign" then  -- (its head, sideways: planned again)
     bus_shift[player.index] = (bus_shift[player.index] or 0) + (el.tags.dx + el.tags.dy) * BUS_STEP
-    status(frame, "Moving the bus head...")
+    status(frame, T("moving-bus-head"))
     M.plan(player)
   elseif action == "recipe" then  -- a bpgen button in another mod's window (compat.lua)
     M.open(player, { recipe = el.tags.recipe })
@@ -2474,24 +2507,27 @@ local function on_click(e)
     local run = bench.find("test", player.index)
     if run then
       bench.stop(run.id)
-      find(frame, "bpgen_test").caption = "Test run"
-      find(frame, "bpgen_test_status").caption = "Test stopped."
+      find(frame, "bpgen_test").caption = T("test-run")
+      find(frame, "bpgen_test_status").caption = T("test-stopped")
       test_speed_off(frame)
       glow(player, false)
     else
       bench.test(player.index, r.res.test, r.where.origin, r.where.area, PREVIEW)
-      find(frame, "bpgen_test").caption = "Stop test"
-      find(frame, "bpgen_test_status").caption = "Starting..."
+      find(frame, "bpgen_test").caption = T("stop-test")
+      find(frame, "bpgen_test_status").caption = T("starting-dots")
       find(frame, "bpgen_test_speed").visible = not game.is_multiplayer()
       test_view(player, frame)
       glow(player, true)
     end
   elseif action == "test_speed" and not game.is_multiplayer() then
     local b = find(frame, "bpgen_test_speed")
-    local next_ = ({ ["×1"] = 5, ["×5"] = 10, ["×10"] = 1 })[tostring(b.caption)] or 1
+    local tags = b.tags  -- (its step kept in its tags: ×1, ×5, ×10, round again)
+    local next_ = ({ [1] = 5, [5] = 10, [10] = 1 })[tags.speed or 1] or 1
     storage.bpgen_speed_was = storage.bpgen_speed_was or game.speed
     game.speed = next_ == 1 and storage.bpgen_speed_was or next_
     if next_ == 1 then storage.bpgen_speed_was = nil end
+    tags.speed = next_
+    b.tags = tags
     b.caption = "×" .. next_
   elseif action == "cursor" and r then
     ctx.api(player, "history", { add = r.blueprint, mode = r.res.mode }, "history_add")
@@ -2499,7 +2535,7 @@ local function on_click(e)
   elseif action == "copy" and r and safe.has("std") then
     native.call("std", "clipboard_set", r.blueprint)
     ctx.api(player, "history", { add = r.blueprint, mode = r.res.mode }, "history_add")
-    say(player, "Blueprint string copied")
+    say(player, T("bp-copied"))
   elseif action == "short" then
     extra(frame).clear()
     extra(frame).add({ type = "label", caption = "..." })
@@ -2516,25 +2552,25 @@ local function on_click(e)
     if player.clear_cursor() then
       player.cursor_stack.set_stack({ name = "bpgen-move" })
       M.tool_card(player, "bpgen-move")
-      status(frame, "Stand where the section should go, then drag over it with the move tool.")
+      status(frame, T("move-tool-hint"))
     end
   elseif action == "refit" then
     if player.clear_cursor() then
       player.cursor_stack.set_stack({ name = "bpgen-refit" })
       M.tool_card(player, "bpgen-refit")
-      status(frame, "Drag over the area to refit with the refit tool.")
+      status(frame, T("refit-tool-hint"))
     end
   elseif action == "snapshot" then
     if player.clear_cursor() then
       player.cursor_stack.set_stack({ name = "bpgen-snapshot" })
       M.tool_card(player, "bpgen-snapshot")
-      status(frame, "Drag over your base with the snapshot tool, then press Plan.")
+      status(frame, T("snapshot-tool-hint"))
     end
   elseif action == "patches" then
     if player.clear_cursor() then
       player.cursor_stack.set_stack({ name = "bpgen-patches" })
       M.tool_card(player, "bpgen-patches")
-      status(frame, "Drag over each ore patch with the patch tool, then stand where the bus should start and press Plan.")
+      status(frame, T("patch-tool-hint"))
     end
   elseif action == "patches_clear" then
     patch_areas[player.index] = nil
@@ -2546,10 +2582,10 @@ local function on_click(e)
   elseif action == "check_bus" then
     extra(frame).clear()
     local ok, why = ctx.bus_report(player, unlocked(player).belts)
-    status(frame, ok and "Looking at your bus..." or ("Can't: " .. tostring(why)))
+    status(frame, ok and T("looking-at-bus") or T("cant", tostring(why)))
   elseif action == "bus_lane" then
     local ok, why = ctx.add_lane(player, el.tags.item)
-    status(frame, ok and "Laying out a new lane..." or ("Can't: " .. tostring(why)))
+    status(frame, ok and T("laying-lane") or T("cant", tostring(why)))
   elseif action == "bus_make" then
     -- (Extend: that item at that rate, made next to the bus from what it carries)
     set_mode(frame, "extend")
@@ -2565,12 +2601,12 @@ local function on_click(e)
     local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off",
       seed = { x = b[1] + b[3] / 2, y = b[2] + b[4] / 2 },
       turn = turns[player.index], shift = { el.tags.dx * n, el.tags.dy * n }, again = true })
-    status(frame, ok and "Moving it..." or ("Can't: " .. tostring(why)))
+    status(frame, ok and T("moving-it") or T("cant", tostring(why)))
   elseif action == "base_spot" then
     if player.clear_cursor() then
       player.cursor_stack.set_stack({ name = "bpgen-spot" })
       M.tool_card(player, "bpgen-spot")
-      status(frame, "Click where it should go.")
+      status(frame, T("click-where"))
     end
   elseif (action == "base_rotate" or action == "base_redo") and r and r.res.absolute then
     -- (both around where it is now: Rotate turns it there, Redo looks past every spot it was shown on)
@@ -2586,28 +2622,26 @@ local function on_click(e)
     end
     local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off", seed = seed,
       turn = turns[player.index], avoid = avoid, again = true })
-    status(frame, ok and (action == "base_rotate" and "Rotating it..." or "Looking for another spot...")
-      or ("Can't: " .. tostring(why)))
+    status(frame, ok and T(action == "base_rotate" and "rotating" or "looking-another-spot") or T("cant", tostring(why)))
   elseif action == "place_base" and r then
     local sec = find(frame, "bpgen_section")  -- (a starter base: the print picked under the preview)
     turns[player.index], tried[player.index] = nil, nil
     local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off",
       seed = { x = player.position.x, y = player.position.y },
       section = sec.visible and sec.items[sec.selected_index] or nil })
-    status(frame, ok and "Looking around you for a spot next to your base..." or ("Can't: " .. tostring(why)))
+    status(frame, ok and T("looking-around") or T("cant", tostring(why)))
   elseif action == "place" and r and r.where then
     local c = place.find_spot(player, r.w, r.h)
     if not c then
-      status(frame, "No free spot near you for " .. math.ceil(r.w) .. " × " .. math.ceil(r.h) .. " tiles: move somewhere open")
+      status(frame, T("no-free-spot", math.ceil(r.w), math.ceil(r.h)))
     else
       local ghosts, origin, area, marks = place.place(player, r.blueprint, c)
       placed[player.index], unmark[player.index] = ghosts, marks
       if origin then
         local found, missing = place.guide(player, area, origin, r.res.test and r.res.test.case.sources or {},
           r.res.label)
-        say(player, string.format("Placed %d ghosts next to you (outlined). %s", #ghosts,
-          #missing > 0 and ("Nothing of yours nearby carries " .. table.concat(missing, " ")) or
-          (found > 0 and "Dashed lines: where each input can come from." or "")))
+        say(player, T("placed-near", #ghosts, #missing > 0 and T("nothing-carries", table.concat(missing, " "))
+          or found > 0 and T("dashed-lines") or ""))
       end
       ctx.api(player, "history", { add = r.blueprint, mode = r.res.mode }, "history_add")
     end
@@ -2615,10 +2649,9 @@ local function on_click(e)
     -- (a press of the button asks first when there are ghosts to remove; a script's press (tests) doesn't)
     local n = ghosts_left(player)
     if n > 0 and not e.scripted then
-      ui.confirm(player, "bpgen_unplace", { title = "Undo the placement?",
-        text = string.format("Removes the %d ghost%s bpgen put down that aren't built yet%s.", n, n > 1 and "s" or "",
-          #(unmark[player.index] or {}) > 0 and ", and keeps what they were to replace" or ""),
-        yes = "Remove them", no = "Keep" })
+      ui.confirm(player, "bpgen_unplace", { title = T("undo-title"),
+        text = T("undo-text", n, #(unmark[player.index] or {}) > 0 and T("undo-text-keeps") or ""),
+        yes = T("undo-yes"), no = T("undo-no") })
     else
       unplace(player)
     end
@@ -2681,10 +2714,10 @@ end
 local function tree(player, frame)
   local recipe, machine = value(frame, "bpgen_recipe"), value(frame, "bpgen_machine")
   find(frame, "bpgen_also").clear()
-  find(frame, "bpgen_also").add({ type = "label", caption = recipe and "..." or "(pick a recipe)" })
+  find(frame, "bpgen_also").add({ type = "label", caption = recipe and "..." or T("pick-a-recipe") })
   if recipe then ctx.api(player, "siblings", { recipe = recipe, machine = machine and machine.name }, "also") end
   find(frame, "bpgen_make").clear()
-  find(frame, "bpgen_make").add({ type = "label", caption = recipe and "..." or "(pick a recipe)" })
+  find(frame, "bpgen_make").add({ type = "label", caption = recipe and "..." or T("pick-a-recipe") })
   if recipe then ctx.api(player, "recipe_tree", { recipe = recipe, machine = machine and machine.name }, "tree") end
 end
 
@@ -2822,7 +2855,7 @@ if dnd then
       M.plan(player)
     else  -- (shown in the preview, ready to place)
       M.on_result(player, { blueprint = h.blueprint, mode = h.mode, label = h.label,
-        notes = { "From your history: " .. (h.label or "a blueprint") } })
+        notes = { T("from-history", h.label or T("a-blueprint")) } })
     end
   end)
 end
@@ -2897,8 +2930,15 @@ end
 M.handlers = {
   [defines.events.on_tick] = function(e)
     bench.handlers[defines.events.on_tick](e)
+    -- (a fast-forward no test run needs any more, however it ended: a run dropped, a script reloaded: off)
+    if storage.bpgen_speed_was and e.tick % 60 == 0 and not testing() then
+      test_speed_off(nil)
+      for _, p in pairs(game.players) do test_speed_off(p.gui.screen[NAME]) end
+    end
     camera_tick()
   end,
+  -- (a player gone: their test run, and its fast-forward, with them)
+  [defines.events.on_player_left_game] = function(e) test_stop(e.player_index) end,
   [defines.events.on_gui_hover] = function(e)
     if e.element and e.element.valid and e.element.name == "bpgen_grip" then grip_hover[e.player_index] = e.element end
     if e.element and e.element.valid and e.element.name == "bpgen_cam" then
@@ -2940,8 +2980,8 @@ M.handlers = {
     end
     if el and el.valid and el.tags and el.tags.bpgen_make_row then
       local where = el.parent["bpgen_where"]
-      where.caption = el.state and "made here" or "on belt"
-      where.style.font_color = el.state and { 0.5, 0.9, 0.5 } or { 0.6, 0.6, 0.6 }
+      where.caption = T(el.state and "made-here" or "on-belt")
+      note_color(where, el.state)
       return
     end
     local target = el and el.valid and el.tags and el.tags.bpgen_toggle

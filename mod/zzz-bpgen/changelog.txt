@@ -1,0 +1,18 @@
+---------------------------------------------------------------------------------------------------
+Version: 0.20.14
+Date: 2026-10-12
+  Changes:
+    - "Blueprint to cursor" is a plain button until there is a blueprint, then the green main action: disabled, the
+      faded green was hard to read on some themes (dark on dark, pale on Aquilo's white).
+    - The dock's "Next to my base" is now "Place by my base" (the section of that name stays); the dock's buttons are
+      as tight as Copy, so they fit in the monospace themes.
+    - The folds' badges say "None" / "Auto" / "Set"; "Also make" shows its count, and no badge while there's none.
+    - The settings use fse-std's shared texts (Docked, Theme..., Reset size and place).
+  Bugfixes:
+    - Closing the window during a fast-forwarded (×5 / ×10) test run left the game running fast: closing it now stops
+      the test run and puts the game back at its own speed, as does a test run ending with the window closed or the
+      player leaving.
+    - The test run's speed button keeps its step itself instead of reading it back from its caption.
+  Locale:
+    - The window's text (captions, tooltips, status lines, test run and bus reports) is in locale/en/window.cfg, ready
+      for translations.

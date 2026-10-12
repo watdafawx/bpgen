@@ -185,9 +185,11 @@ function M.search(parent, name, hint)
   if theme and theme.search then return theme.search(parent, name, hint) end
 end
 
---- a badge's text
+--- a badge's text (nil: the badge hidden)
 function M.set_badge(badge, text)
-  if badge and badge.valid and badge.children[1] then badge.children[1].caption = text end
+  if not (badge and badge.valid) then return end
+  badge.visible = text ~= nil
+  if text and badge.children[1] then badge.children[1].caption = text end
 end
 
 --- a fold opened or closed (theme.fold's body); a plain section (no fold) stays as it is
