@@ -707,11 +707,16 @@ end
 on_event(defines.events.on_player_joined_game, state_soon)
 on_event(defines.events.on_research_finished, function(e)
   on_research(e.research)
+  window.forget_unlocked(e.research.force)
   state_soon()
 end)
 on_event(defines.events.on_research_reversed, function(e)
   research_cache[e.research.force.index] = nil  -- rare: just start over
+  window.forget_unlocked(e.research.force)
 end)
+-- (what a force has unlocked changed without a research: the window's "Only unlocked" pickers build theirs again)
+on_event(defines.events.on_force_reset, function(e) window.forget_unlocked(e.force) end)
+on_event(defines.events.on_technology_effects_reset, function(e) window.forget_unlocked(e.force) end)
 script.on_configuration_changed(safe.guard("bpgen", function() research_cache, static = {}, nil end))
 on_nth(60, function(e)
   if dirty_tick and e.tick >= dirty_tick then

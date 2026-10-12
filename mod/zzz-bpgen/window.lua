@@ -407,51 +407,90 @@ end
 -- "name"). Its main product, category, subgroup and crafting time, then for each locked recipe still let through
 -- (a has-product filter matches any product: advanced oil processing makes petroleum gas too) one more clause:
 -- something the locked one has and this one doesn't, or the other way round.
+-- what a recipe's prototype says, read once a session (prototypes don't change while the game runs): reading them
+-- through the API for thousands of recipes on every pick took seconds in a big pack
+local facts_of = {}  -- recipe name -> {product, category, subgroup, energy, sig, hidden, ins, outs}
+local function facts(name)
+  local f = facts_of[name]
+  if not f then
+    local p = prototypes.recipe[name]
+    local first = p.products[1]
+    f = { product = first and (first.type .. "/" .. first.name), category = p.category, subgroup = p.subgroup.name,
+          energy = p.energy, hidden = p.hidden }
+    f.sig = table.concat({ f.category, f.subgroup, f.energy }, "|")
+    facts_of[name] = f
+  end
+  return f
+end
+local function sets(name)  -- its ingredients and products as {"item/x" = true}
+  local f = facts(name)
+  if not f.ins then
+    local p = prototypes.recipe[name]
+    f.ins, f.outs = stuff(p.ingredients), stuff(p.products)
+  end
+  return f.ins, f.outs
+end
+
 local function recipe_filters(force)
   local groups, by_sig = {}, {}
-  local function ok(r) return r.enabled and not r.hidden end
-  for _, r in pairs(force.recipes) do
-    local p = ok(r) and r.products[1]
-    if p then
-      local g = { recipe = r, has("product", p.type .. "/" .. p.name),
-                  { filter = "category", category = r.category, mode = "and" },
-                  { filter = "subgroup", subgroup = r.subgroup.name, mode = "and" },
-                  { filter = "energy", comparison = "=", value = r.energy, mode = "and" } }
+  local enabled = {}  -- recipe name -> whether the force has it (one pass: a lookup by name is slow)
+  for name, r in pairs(force.recipes) do enabled[name] = r.enabled end
+  for name, on in pairs(enabled) do
+    local f = on and facts(name)
+    if f and f.product and not f.hidden then
+      local g = { name = name, product = f.product, has("product", f.product),
+                  { filter = "category", category = f.category, mode = "and" },
+                  { filter = "subgroup", subgroup = f.subgroup, mode = "and" },
+                  { filter = "energy", comparison = "=", value = f.energy, mode = "and" } }
       g[1].mode = nil
       groups[#groups + 1] = g
-      local s = table.concat({ r.category, r.subgroup.name, r.energy }, "|")
-      by_sig[s] = by_sig[s] or {}
-      table.insert(by_sig[s], g)
+      by_sig[f.sig] = by_sig[f.sig] or {}
+      table.insert(by_sig[f.sig], g)
     end
   end
   local function flat()
-    local f = {}
-    for _, g in ipairs(groups) do for _, x in ipairs(g) do f[#f + 1] = x end end
-    return f
+    local out = {}
+    for _, g in ipairs(groups) do for _, x in ipairs(g) do out[#out + 1] = x end end
+    return out
   end
-  local f = flat()
-  local leaked = false
-  for name in pairs(#f > 0 and prototypes.get_recipe_filtered(f) or {}) do
-    local l = force.recipes[name]
-    if l and not ok(l) and not l.hidden then
-      leaked = true
-      local li, lp = stuff(l.ingredients), stuff(l.products)
-      for _, g in ipairs(by_sig[table.concat({ l.category, l.subgroup.name, l.energy }, "|")] or {}) do
-        local ri, rp = stuff(g.recipe.ingredients), stuff(g.recipe.products)
-        local clause
-        for k in pairs(li) do if not clause and not ri[k] then clause = has("ingredient", k, true) end end
-        for k in pairs(lp) do if not clause and not rp[k] then clause = has("product", k, true) end end
-        for k in pairs(ri) do if not clause and not li[k] then clause = has("ingredient", k) end end
-        for k in pairs(rp) do if not clause and not lp[k] then clause = has("product", k) end end
-        if clause then g[#g + 1] = clause end
+  -- the locked recipes those groups let through (a has-product filter matches any product: advanced oil processing
+  -- makes petroleum gas too), worked out here: walking prototypes.get_recipe_filtered's answer took about 0.35 ms an
+  -- entry, seconds for thousands of recipes
+  for name, on in pairs(enabled) do
+    local f = not on and facts(name)
+    local list = f and not f.hidden and by_sig[f.sig]
+    if list then
+      local li, lp = sets(name)
+      local through = false
+      for _, g in ipairs(list) do if lp[g.product] then through = true break end end
+      if through then
+        for _, g in ipairs(list) do
+          local ri, rp = sets(g.name)
+          local clause
+          for k in pairs(li) do if not clause and not ri[k] then clause = has("ingredient", k, true) end end
+          for k in pairs(lp) do if not clause and not rp[k] then clause = has("product", k, true) end end
+          for k in pairs(ri) do if not clause and not li[k] then clause = has("ingredient", k) end end
+          for k in pairs(rp) do if not clause and not lp[k] then clause = has("product", k) end end
+          if clause then g[#g + 1] = clause end
+        end
       end
     end
   end
-  return leaked and flat() or f
+  return flat()
 end
 
--- the filters that keep a picker to what the force has unlocked, by its elem_type
+-- the filters that keep a picker to what the force has unlocked, by its elem_type. Built once per force until its
+-- research changes (M.forget_unlocked, from control.lua's research events): a big pack took a second or more to
+-- build them, and every pick in the window built them again, so picking a recipe froze the game
+local unlocked_cache = {}  -- force index -> filters
+
+--- the force's unlocked filters are out of date (nil: every force's)
+function M.forget_unlocked(force)
+  if force then unlocked_cache[force.index] = nil else unlocked_cache = {} end
+end
+
 local function unlocked_filters(force)
+  if unlocked_cache[force.index] then return unlocked_cache[force.index] end
   local items, entities = {}, {}
   local recipe = recipe_filters(force)
   for name in pairs(ctx.craftable(force)) do
@@ -462,8 +501,9 @@ local function unlocked_filters(force)
   end
   local item = { { filter = "name", name = items } }
   local entity = { { filter = "name", name = entities } }
-  return { recipe = recipe, ["recipe-with-quality"] = recipe, item = item, ["item-with-quality"] = item,
-           entity = entity, ["entity-with-quality"] = entity }
+  unlocked_cache[force.index] = { recipe = recipe, ["recipe-with-quality"] = recipe, item = item,
+    ["item-with-quality"] = item, entity = entity, ["entity-with-quality"] = entity }
+  return unlocked_cache[force.index]
 end
 
 local function restrict_el(el, on, names)
