@@ -89,3 +89,16 @@ print("as a base:", [n for n in out["notes"] if "machines" in n or "bus" in n][:
 assert out["absolute"]["clear"], "the old area cleared"
 assert out["absolute"]["taps"] >= 1, "fed from the bus"
 print("ok (base)")
+
+# side by side (the Refit tab's "no circuits" layout): columns between plain belts, nothing wired, every product kept
+req = {"belts": ["transport-belt"], "inserters": ["inserter", "long-handed-inserter", "fast-inserter"],
+       "params": {"mode": "mall", "products": products, "machine": "assembling-machine-2", "belt": "transport-belt",
+                  "snapshot": json.loads(json.dumps(snap)), "refit": {"area": AREA, "add": False, "layout": "grid"}}}
+out = json.loads(ingame.plan(json.dumps(req)))
+assert "error" not in out, out
+assert not ingame._last.get("entities") or not any(
+    e.get("control_behavior", {}).get("circuit_condition") for e in ingame._last["entities"]), "nothing wired"
+assert not any(e.get("circuit_to") for e in ingame._last["entities"]), "no circuit wires"
+assert set(out["mall"]["products"]) == set(products), out["mall"]
+print("side by side:", [n for n in out["notes"] if "columns" in n or "the area had" in n])
+print("ok (side by side)")

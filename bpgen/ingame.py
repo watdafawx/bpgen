@@ -601,6 +601,9 @@ def plan(request: str) -> str:
             elif refit:  # (an area rebuilt as a mall, on a belt loop: any recipes, and its inputs an item each, which
                 # always tap - the grid's two-item input belts sit side by side, nowhere to merge their items)
                 params.update(layout="sushi", bus_feed=True, feed="belt")
+                if refit.get("layout") == "grid":  # (side by side: columns between mixed belts, the parts made at
+                    # the top, nothing wired - no chest limits, no loop to keep from jamming)
+                    params.update(layout="grid", stock=0)
                 clear, had, refit_notes = _refit(s, params)
             if params.get("bus_feed") and params.get("recipe"):
                 bus, bus_notes = _bus_feed(s, params)

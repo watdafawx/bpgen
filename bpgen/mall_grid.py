@@ -258,6 +258,8 @@ def plan_grid(data, products, machine, belt, inputs=None, allowed=None, chest="w
         while i < len(mk):
             part = _result(data, mk[i]["recipe"])
             want = sum(per_s(o["recipe"], part) for o in mk if part in _ings(data, o["recipe"]))
+            if not stock:  # (nothing wired: the products never stop, the first down a lane would take it all)
+                want += sum(per_s(r, part) for s in col["cells"] for r in s if part in _ings(data, r))
             have = sum(per_s(o["recipe"], None) for o in mk if o["recipe"] == mk[i]["recipe"])
             if want > have * 1.05 and sum(o["recipe"] == mk[i]["recipe"] for o in mk) < 4:
                 mk.insert(i + 1, dict(mk[i]))  # (right below it, same lane: still above what uses it)
@@ -368,8 +370,11 @@ def plan_grid(data, products, machine, belt, inputs=None, allowed=None, chest="w
         if chest_out:
             put(near, x0 + 1.5, y0 + 3.5, NORTH)
             put(chest, x0 + 1.5, y0 + 4.5, bar=chest_limit, wire_id=chest_id)
-            if hand_down:
+            if hand_down and stock:
                 put(near, x0 + 1.5, y0 + 5.5, NORTH)
+            elif hand_down:  # (nothing wired: the machine below would empty the chest - fed straight from this
+                # machine instead, beside its output, which keeps a share for the chest)
+                put(long_, x0 + 2.5, y0 + 4.5, NORTH)
         for px in (x0 - 1, x0 + 3):
             put(POLE, px + 0.5, y0 + 4.5)
             if row == 0:  # (the top row's first inserters: out of reach of the pole below them)

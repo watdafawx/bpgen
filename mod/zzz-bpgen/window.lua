@@ -894,6 +894,10 @@ function M.open(player, prefill)
   field(fs, "Refit as", "a mall: the area's products, compact. A base on a bus: the science the area makes (its labs and what feeds them), rebuilt as a main-bus base").add({
     type = "drop-down", name = "bpgen_refit_as", items = { "a mall", "a base on a bus" }, selected_index = 1 })
   fs = fields(sec)
+  field(fs, "Layout", "As a mall: Compact puts every part on one belt loop, its inserters wired so the loop never jams and each chest keeps a few. Side by side: columns of machines between plain belts, parts made at the top and handed straight down, no circuits").add({
+    type = "drop-down", name = "bpgen_refit_layout", items = { "compact loop (circuits)", "side by side (no circuits)" },
+    selected_index = 1 })
+  fs = fields(sec)
   fs.add({ type = "checkbox", name = "bpgen_refit_add", caption = "Add machines", state = false,
     tooltip = "Off: the area's machines only (what none of them makes comes in on the belts). On: the mall makes the parts it needs, more machines" })
 
@@ -1631,7 +1635,8 @@ function M.refit(player, area)
   req.params.machine = try[1] or req.params.machine
   local a = area
   req.params.refit = { area = { a.left_top.x, a.left_top.y, a.right_bottom.x, a.right_bottom.y },
-                       add = find(frame, "bpgen_refit_add").state }
+                       add = find(frame, "bpgen_refit_add").state,
+                       layout = find(frame, "bpgen_refit_layout").selected_index == 2 and "grid" or nil }
   local ok, why = ctx.start(player, req)
   status(frame, ok and "Planning the refit..." or ("Can't plan in game: " .. tostring(why)))
 end
