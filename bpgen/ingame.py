@@ -23,7 +23,20 @@ _sections = {}  # a starter base's prints by name (place() can put one of them n
 # what the job running now has done, for the window's progress bar (read by progress(), without _lock: the job holds
 # it while it works). Appending to a list is atomic in CPython.
 STAGES = ("reading your request", "planning", "placing it next to your base", "finishing")
-_prog = {"stage": 0, "lines": [], "seen": 0, "in_stage": 0}
+_prog = {"stage": 0, "lines": [], "seen": 0, "in_stage": 0, "run": 0}
+
+
+def _post():
+    """the progress for the game thread to read without the GIL (fse 0.17.2+: native.call("py", "_note", ...));
+    a game thread calling progress() instead waits whenever this worker holds the GIL: the game stuttered"""
+    try:
+        import fse
+        note = fse.note
+    except (ImportError, AttributeError):
+        return
+    st = _prog["stage"]
+    frac = min(0.98, (st + min(0.9, 0.12 * _prog["in_stage"])) / len(STAGES))
+    note("bpgen.progress", json.dumps({"run": _prog["run"], "fraction": frac, "step": STAGES[st], "lines": _prog["lines"]}))
 
 
 def _note(text, stage=None):
@@ -32,10 +45,12 @@ def _note(text, stage=None):
         _prog["stage"], _prog["in_stage"] = stage, 0
     _prog["in_stage"] += 1
     _prog["lines"].append(str(text))
+    _post()
 
 
 def _begin():
-    _prog.update(stage=0, lines=[], seen=0, in_stage=0)
+    _prog.update(stage=0, lines=[], seen=0, in_stage=0, run=_prog["run"] + 1)
+    _post()
 
 
 def progress(_: str = "") -> str:

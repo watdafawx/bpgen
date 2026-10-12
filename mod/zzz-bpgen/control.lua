@@ -363,6 +363,28 @@ local function finish(job, out)
   for _, n in ipairs(res.notes or {}) do player.print("[bpgen]   " .. n) end
 end
 
+-- the running plan's progress for the window: {fraction, step, lines = the new ones}. Read from fse's notes (0.17.2+),
+-- which needs no Python: asking bpgen itself waits whenever the planning worker holds Python's lock, and the game
+-- stuttered for as long as that took (up to a second a call)
+local notes, seen_run, seen_lines = nil, nil, 0
+local function progress()
+  if notes ~= false then
+    local text = native.call("py", "_note", "bpgen.progress")
+    notes = text ~= nil
+    if notes then
+      local p = text ~= "" and helpers.json_to_table(text) or nil
+      if not p then return nil end
+      local all = p.lines or {}
+      if p.run ~= seen_run then seen_run, seen_lines = p.run, 0 end  -- (a new plan)
+      p.lines = { table.unpack(all, seen_lines + 1) }
+      seen_lines = #all
+      return p
+    end
+  end
+  local text = native.call("py", "bpgen.ingame:progress", "")  -- (an older fse)
+  return text and helpers.json_to_table(text) or nil
+end
+
 on_nth(6, function()
   local m = measuring()
   for i = #m, 1, -1 do
@@ -403,8 +425,8 @@ on_nth(6, function()
       -- (the plan getting on, in the window: single player only, a GUI only one peer changed would desync)
       local job = storage.bpgen_jobs and storage.bpgen_jobs[n]
       local player = job and job.window and game.get_player(job.player)
-      local p = player and native.call("py", "bpgen.ingame:progress", "")
-      if p then window.on_progress(player, helpers.json_to_table(p) or {}) end
+      local p = player and progress()
+      if p then window.on_progress(player, p) end
     end
   end
   if game.tick % 600 == 0 and storage.bpgen_jobs then -- (a job whose peer left, or never answered)

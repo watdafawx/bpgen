@@ -226,7 +226,8 @@ one machine per product.
 
 ## Tests
 
-`mod\test\run_mp.py` (multiplayer: a headless server and a client; a line planned in the client's Python placed
+`mod\test\stutter_test.py` (planning doesn't stutter the game: the game thread's longest wait while Rust routes run
+on the worker stays under 20 ms; needs fse 0.17.2+), `mod\test\run_mp.py` (multiplayer: a headless server and a client; a line planned in the client's Python placed
 the same on both peers, no desync), `mod\test\run.py`, `extend_test.py` (headless game with the mod; `bus` as its fourth argument: a main bus),
 `bus_extend_test.py` (placement beside a bus, no game), `harness\botmall_test.py` (a robot-fed mall built and
 run), `mod\test\bus_feed_test.py` (a line fed from the bus, no game), `mod\test\mall_bus_test.py` (a grid mall fed

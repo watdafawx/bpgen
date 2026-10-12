@@ -69,12 +69,22 @@ struct Link {
     ug: Option<(Tile, Tile, i64)>,
 }
 
+// (the search runs without the GIL: bpgen plans on a worker thread inside the game, and the game thread's own Python
+// calls - the window's progress - would otherwise wait for a whole search, up to a second: the game froze)
 #[pyfunction]
 #[pyo3(signature = (blocked, starts, goal_tile, goal_dir, bounds, max_underground, spans=None, forbidden_gaps=None, max_expansions=200_000))]
 #[allow(clippy::too_many_arguments)]
-fn route(blocked: HashSet<Tile>, starts: Vec<(Tile, Option<Vec<i64>>)>, goal_tile: Tile, goal_dir: i64,
+fn route(py: Python<'_>, blocked: HashSet<Tile>, starts: Vec<(Tile, Option<Vec<i64>>)>, goal_tile: Tile, goal_dir: i64,
          bounds: (i64, i64, i64, i64), max_underground: i64, spans: Option<HashSet<(i64, i64, i64)>>,
          forbidden_gaps: Option<HashSet<Tile>>, max_expansions: u64) -> PyResult<Vec<(Tile, &'static str, i64)>> {
+    py.allow_threads(move || search(blocked, starts, goal_tile, goal_dir, bounds, max_underground, spans, forbidden_gaps,
+                                    max_expansions))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn search(blocked: HashSet<Tile>, starts: Vec<(Tile, Option<Vec<i64>>)>, goal_tile: Tile, goal_dir: i64,
+          bounds: (i64, i64, i64, i64), max_underground: i64, spans: Option<HashSet<(i64, i64, i64)>>,
+          forbidden_gaps: Option<HashSet<Tile>>, max_expansions: u64) -> PyResult<Vec<(Tile, &'static str, i64)>> {
     let (x1, y1, x2, y2) = bounds;
     let spans = spans.unwrap_or_default();
     let before_goal = step(goal_tile, goal_dir, -1);
