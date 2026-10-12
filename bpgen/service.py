@@ -1494,7 +1494,8 @@ class Service:
                               avoid_ore=params.get("avoid_ore", True), belt=params.get("belt") or "transport-belt",
                               connect=params.get("connect", True), sinks=params.get("sinks") or [],
                               bus=params.get("bus") or "auto", needs=params.get("needs"),
-                              extend_bus=params.get("extend_bus", True), progress=getattr(self, "progress", None))
+                              extend_bus=params.get("extend_bus", True), progress=getattr(self, "progress", None),
+                              turn=params.get("turn") or 0, avoid=params.get("avoid"))
         if params.get("needs"):  # (per minute, what the plan takes from the base)
             placed["notes"] = list(placed["notes"]) + short_notes(
                 {k: v * 60 for k, v in params["needs"].items()}, self.spare())

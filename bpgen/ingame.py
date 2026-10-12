@@ -477,7 +477,8 @@ def place(request: str) -> str:
         with _lock:
             _svc().progress = lambda text: _note(text, 2)
             placed = _svc().extend(dict(_last, bus="here" if _last.get("mode") == "move" else req.get("bus") or "auto",
-                                        seed=req.get("seed"), snapshot=snap))
+                                        seed=req.get("seed"), snapshot=snap, turn=req.get("turn") or 0,
+                                        avoid=req.get("avoid")))
         absolute = _absolute(placed)
         if _last.get("clear"):
             absolute["clear"] = _last["clear"]

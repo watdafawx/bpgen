@@ -79,6 +79,8 @@ local ctx          -- from control.lua: craftable, unlocked, bonuses, start, mea
 local results = safe.stored("results") -- player index -> { blueprint, res, center, zoom }
 local placed = safe.stored("placed")     -- player index -> the ghosts "Place near me" and "Next to my base" made
 local unmark = safe.stored("unmark")     -- player index -> what those pastes marked for deconstruction (Undo unmarks it)
+local turns = safe.stored("turns")       -- player index -> quarter turns Rotate added to the plan next to the base
+local tried = safe.stored("tried")       -- player index -> the boxes Redo looked past ({x, y, w, h} each)
 -- (the preview's drag, zoom and size grip: momentary, not saved)
 local cam_hover, drags, wheel_seen, left_during = {}, {}, {}, {}
 local grip_hover, resizing, resized_at = {}, {}, {}
@@ -1140,6 +1142,10 @@ function M.open(player, prefill)
     tags = { bpgen = "nudge", d = -1 }, tooltip = "Move it back along your bus (or west), then look again" })
   tools.add({ type = "button", name = "bpgen_nudge_fwd", caption = "▶", style = "tool_button", visible = false,
     tags = { bpgen = "nudge", d = 1 }, tooltip = "Move it on along your bus (or east), then look again" })
+  tools.add({ type = "button", name = "bpgen_base_rotate", caption = "⟳", style = "tool_button", visible = false,
+    tags = { bpgen = "base_rotate" }, tooltip = "Rotate it a quarter turn where it is, its belts and power connected again" })
+  tools.add({ type = "button", name = "bpgen_base_redo", caption = "Redo", visible = false, tags = { bpgen = "base_redo" },
+    tooltip = "Look again: another spot next to your base, not one it already showed" })
   ui.add(tools, { type = "button", caption = "Undo", tags = { bpgen = "unplace" },
     tooltip = "Removes the ghosts bpgen put down (still unbuilt)" }, "button", small)
   ui.add(tools, { type = "button", caption = "History", tags = { bpgen = "history" },
@@ -1795,6 +1801,8 @@ function M.on_result(player, res)
   local fixed = res.mode == "lane"  -- (where it is is the point: no arrows; a bus design's move its head sideways)
   find(frame, "bpgen_nudge_back").visible = res.absolute ~= nil and not fixed
   find(frame, "bpgen_nudge_fwd").visible = res.absolute ~= nil and not fixed
+  find(frame, "bpgen_base_rotate").visible = res.absolute ~= nil and not fixed
+  find(frame, "bpgen_base_redo").visible = res.absolute ~= nil and not fixed
   local tb = find(frame, "bpgen_test")
   tb.enabled = res.test ~= nil and where ~= nil
   tb.caption = "Test run"
@@ -2453,10 +2461,28 @@ local function on_click(e)
     local along = axis == 0 and b[4] or b[3]
     local step = el.tags.d * math.max(8, math.ceil(along / 2))
     local seed = { x = b[1] + b[3] / 2 + (axis == 0 and 0 or step), y = b[2] + b[4] / 2 + (axis == 0 and step or 0) }
-    local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off", seed = seed })
+    local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off", seed = seed,
+      turn = turns[player.index] })
     status(frame, ok and "Moving it..." or ("Can't: " .. tostring(why)))
+  elseif (action == "base_rotate" or action == "base_redo") and r and r.res.absolute then
+    -- (both around where it is now: Rotate turns it there, Redo looks past every spot it was shown on)
+    local b = r.res.absolute.box
+    local seed = { x = b[1] + b[3] / 2, y = b[2] + b[4] / 2 }
+    local avoid
+    if action == "base_rotate" then
+      turns[player.index] = ((turns[player.index] or 0) + 1) % 4
+    else
+      tried[player.index] = tried[player.index] or {}
+      table.insert(tried[player.index], { b[1], b[2], b[3], b[4] })
+      avoid = tried[player.index]
+    end
+    local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off", seed = seed,
+      turn = turns[player.index], avoid = avoid })
+    status(frame, ok and (action == "base_rotate" and "Rotating it..." or "Looking for another spot...")
+      or ("Can't: " .. tostring(why)))
   elseif action == "place_base" and r then
     local sec = find(frame, "bpgen_section")  -- (a starter base: the print picked under the preview)
+    turns[player.index], tried[player.index] = nil, nil
     local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off",
       seed = { x = player.position.x, y = player.position.y },
       section = sec.visible and sec.items[sec.selected_index] or nil })

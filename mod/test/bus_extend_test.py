@@ -140,4 +140,24 @@ gas = [t for t in r["taps"] if t["items"] == "petroleum-gas"]
 print("fluid taps", [(t["from"], t["belts"]) for t in gas])
 assert len(gas) == 2 and all(t["from"]["x"] == 24.5 and t["belts"] <= 6 for t in gas), "gas off the bus pipe, short"
 assert sum(1 for t in r["taps"] if t["items"] == "coal") == 2
+# the window's Rotate and Redo: a quarter turn on top of facing the bus (still fed), and another spot past the one shown
+ents = [{"name": "transport-belt", "type": "transport-belt", "position": {"x": 20 + 2 * i + 0.5, "y": y + 0.5},
+         "direction": 8, "lanes": [it, it]} for i, it in enumerate(bus_items) for y in range(0, 80)]
+for bus in ("auto", "off"):
+    def at(**kw):
+        return extend.place(s.data, extend.Ground({"area": [0, 0, 110, 110], "entities": ents}), res["entities"],
+                            res.get("sources") or [], sinks=sinks, seed=(45, 40), bus=bus, **kw)
+
+    def box(r):
+        t = extend.plan_tiles([e for e in r["entities"] if e["name"] == "assembling-machine-2"])
+        return min(x for x, _ in t), min(y for _, y in t), max(x for x, _ in t) + 1, max(y for _, y in t) + 1
+    r0, r1 = at(), at(turn=1)
+    print("rotate", bus, r0["turn"], r1["turn"], len(r1["taps"]))
+    assert r1["turn"] == (r0["turn"] + 1) % 4 and len(r1["taps"]) == len(r0["taps"]), "turned, still fed"
+    x1, y1, x2, y2 = box(r0)
+    r2 = at(avoid=[[x1, y1, x2 - x1, y2 - y1]])
+    a, b = box(r2), (x1, y1, x2, y2)
+    print("redo", bus, b, a)
+    assert a[2] <= b[0] or a[0] >= b[2] or a[3] <= b[1] or a[1] >= b[3], "another spot, not on the one shown"
+    assert len(r2["taps"]) == len(r0["taps"]), "still fed"
 print("ok")

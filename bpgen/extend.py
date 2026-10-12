@@ -834,14 +834,15 @@ def path_entities(path, belt_name, ug_name):
 
 
 def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt="transport-belt", connect=True,
-          sinks=None, bus="auto", needs=None, extend_bus=True, progress=None):
+          sinks=None, bus="auto", needs=None, extend_bus=True, progress=None, turn=0, avoid=None):
     """bus: "auto" (build beside a main bus when the snapshot has one), "on" (the same, saying so when there is
     none), "here" (at the seed - a refit, in the area it replaces - its inputs still taken off the bus's lanes) or
     "off" (free ground nearest the seed, taps from any belt). needs: {item: items/s the build really takes}
     (a source's "rates" are what its belt is sized for, more than that): the sources' rates scaled to it, for the
     bus lanes' load. extend_bus: a bus that ends before the build's far edge (or its new lanes') gets its lanes
     continued that far, the ones ending in the open (BUS_PAST at most).
-    With a bus the plan is turned so its inputs face it.
+    With a bus the plan is turned so its inputs face it. turn: quarter turns clockwise on top of that (the
+    window's Rotate). avoid: [x, y, w, h] boxes it must not land on (spots the window's Redo already showed).
     -> dict(offset (of the plan as turned), turn (quarter turns clockwise), entities (new, world coords), taps,
     deliveries, outputs (where its sinks landed), notes, bus (what was found, or None))"""
     notes = []
@@ -851,7 +852,7 @@ def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt=
         side = bus_side(main, plan_entities, sources, seed)
         f = facing(plan_entities, sources)
         want = (-side, 0) if main["axis"] == 0 else (0, -side)  # (inputs toward the bus)
-        k = next((n for n in range(4) if f and turned(f[0], f[1], n) == want), 0)
+        k = (next((n for n in range(4) if f and turned(f[0], f[1], n) == want), 0) + turn) % 4
         plan_entities, sources, sinks = turn_plan(plan_entities, sources, sinks, k)
         if bus != "here":
             seed, keep_clear = bus_spot(main, plan_entities, side, seed)
@@ -864,7 +865,14 @@ def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt=
     elif bus == "on":
         notes.append("no main bus found in the snapshot (3+ long straight belts side by side, flowing the same way); "
                      "placed near the belts it taps instead")
+    if not main and turn % 4:
+        k = turn % 4
+        plan_entities, sources, sinks = turn_plan(plan_entities, sources, sinks, k)
     turn = k
+    if avoid:  # (spots already shown: kept clear by the spot search only, the taps may still cross them)
+        keep_clear = set(keep_clear) | {(x, y) for ax, ay, aw, ah in avoid
+                                        for x in range(math.floor(ax), math.ceil(ax + aw))
+                                        for y in range(math.floor(ay), math.ceil(ay + ah))}
     if seed is None:  # near the belts carrying what the plan needs, else the middle of the snapshot
         pts = [c[0] for s in sources if s.get("kind") == "belt" for i in (s.get("lanes") or []) if i
                for c in tap_candidates(ground, {i})]
