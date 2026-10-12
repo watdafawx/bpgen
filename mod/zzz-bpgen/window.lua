@@ -431,31 +431,64 @@ local function sets(name)  -- its ingredients and products as {"item/x" = true}
   return f.ins, f.outs
 end
 
+-- The filters are kept small: the game checks every recipe against all of them each time a picker opens, and one
+-- group per recipe (21,000 clauses in a big pack) made opening the picker stutter. Most recipes go into one group
+-- per crafting category and product type: "has a product among these" and "in this category". A product that a
+-- locked recipe of that category also makes can't go there; its recipes get a group each, told apart from the
+-- locked ones by category, subgroup, time and, where needed, an ingredient or product (fine groups).
 local function recipe_filters(force)
-  local groups, by_sig = {}, {}
   local enabled = {}  -- recipe name -> whether the force has it (one pass: a lookup by name is slow)
   for name, r in pairs(force.recipes) do enabled[name] = r.enabled end
+  local unlocked, listed = {}, {}  -- listed: category -> {"item/x" = true} of the unlocked recipes' main products
   for name, on in pairs(enabled) do
     local f = on and facts(name)
     if f and f.product and not f.hidden then
+      unlocked[#unlocked + 1] = name
+      listed[f.category] = listed[f.category] or {}
+      listed[f.category][f.product] = true
+    end
+  end
+  -- every product a locked recipe of the same category makes: off the coarse lists
+  local taken = {}  -- category -> {"item/x" = true}
+  for name, on in pairs(enabled) do
+    local f = not on and facts(name)
+    local mine = f and not f.hidden and listed[f.category]
+    if mine then
+      local _, outs = sets(name)
+      for k in pairs(outs) do
+        if mine[k] then
+          taken[f.category] = taken[f.category] or {}
+          taken[f.category][k] = true
+        end
+      end
+    end
+  end
+
+  local coarse, fine, by_sig = {}, {}, {}  -- coarse: category -> type -> {names}
+  for _, name in ipairs(unlocked) do
+    local f = facts(name)
+    local t, item = f.product:match("^(%a+)/(.+)$")
+    if (t == "item" or t == "fluid") and not (taken[f.category] and taken[f.category][f.product]) then
+      coarse[f.category] = coarse[f.category] or {}
+      local list = coarse[f.category][t] or {}
+      coarse[f.category][t] = list
+      if not list[item] then
+        list[item] = true
+        list[#list + 1] = item
+      end
+    else
       local g = { name = name, product = f.product, has("product", f.product),
                   { filter = "category", category = f.category, mode = "and" },
                   { filter = "subgroup", subgroup = f.subgroup, mode = "and" },
                   { filter = "energy", comparison = "=", value = f.energy, mode = "and" } }
       g[1].mode = nil
-      groups[#groups + 1] = g
+      fine[#fine + 1] = g
       by_sig[f.sig] = by_sig[f.sig] or {}
       table.insert(by_sig[f.sig], g)
     end
   end
-  local function flat()
-    local out = {}
-    for _, g in ipairs(groups) do for _, x in ipairs(g) do out[#out + 1] = x end end
-    return out
-  end
-  -- the locked recipes those groups let through (a has-product filter matches any product: advanced oil processing
-  -- makes petroleum gas too), worked out here: walking prototypes.get_recipe_filtered's answer took about 0.35 ms an
-  -- entry, seconds for thousands of recipes
+  -- the locked recipes the fine groups still let through (a has-product filter matches any product: advanced oil
+  -- processing makes petroleum gas too), each kept out by one more clause in the groups it slips into
   for name, on in pairs(enabled) do
     local f = not on and facts(name)
     local list = f and not f.hidden and by_sig[f.sig]
@@ -476,7 +509,18 @@ local function recipe_filters(force)
       end
     end
   end
-  return flat()
+
+  local out = {}
+  for category, types in pairs(coarse) do
+    for t, list in pairs(types) do
+      local names = {}  -- (the list without its lookup keys)
+      for i = 1, #list do names[i] = list[i] end
+      out[#out + 1] = { filter = "has-product-" .. t, elem_filters = { { filter = "name", name = names } } }
+      out[#out + 1] = { filter = "category", category = category, mode = "and" }
+    end
+  end
+  for _, g in ipairs(fine) do for _, x in ipairs(g) do out[#out + 1] = x end end
+  return out
 end
 
 -- the filters that keep a picker to what the force has unlocked, by its elem_type. Built once per force until its
