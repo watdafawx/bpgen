@@ -199,6 +199,7 @@ end
 local bench = require("bench")
 local safe = require("safe")
 local place = require("place")
+local sandbox = require("sandbox")
 local ctx          -- from control.lua: craftable, unlocked, bonuses, start, measured
 -- (per-player state in storage: in multiplayer every peer must show and place the same; see safe.stored)
 local results = safe.stored("results") -- player index -> { blueprint, res, center, zoom }
@@ -206,12 +207,19 @@ local placed = safe.stored("placed")     -- player index -> the ghosts "Place ne
 local unmark = safe.stored("unmark")     -- player index -> what those pastes marked for deconstruction (Undo unmarks it)
 local turns = safe.stored("turns")       -- player index -> quarter turns Rotate added to the plan next to the base
 local tried = safe.stored("tried")       -- player index -> the boxes Redo looked past ({x, y, w, h} each)
+local to_sandbox = safe.stored("to_sandbox")  -- player index -> true: "Try in sandbox" waits for Place by my base
 -- (the preview's drag, zoom and size grip: momentary, not saved)
 local cam_hover, drags, wheel_seen, left_during = {}, {}, {}, {}
 local grip_hover, resizing, resized_at = {}, {}, {}
-local unlocks = safe.stored("unlocks") -- player index -> what the force can build (read once per window)
+-- player index -> what the force can build: read once until the force's research changes (M.forget_unlocked) or the
+-- player changes force; 19,000 recipes read on every open took 15 ms in a big pack (in storage: the same on every peer)
+local unlocks = safe.stored("unlocks")
 
 function M.setup(c) ctx = c end
+
+local force_pass  -- (below)
+--- the items some enabled recipe of the force makes (control.lua's craftable), with which recipes it has enabled
+local function craftable(force) return force_pass(force).items end
 
 local function find_in(el, name)
   if el.name == name then return el end
@@ -241,10 +249,11 @@ end
 
 local function unlocked(player)
   local u = unlocks[player.index]
-  if not u then
-    local made = ctx.craftable(player.force)
+  if not u or u.force ~= player.force.index then
+    local made = craftable(player.force)
     u = { machines = ctx.unlocked(made, { "assembling-machine", "furnace" }), belts = ctx.unlocked(made, { "transport-belt" }),
-          inserters = ctx.unlocked(made, { "inserter" }), poles = ctx.unlocked(made, { "electric-pole" }) }
+          inserters = ctx.unlocked(made, { "inserter" }), poles = ctx.unlocked(made, { "electric-pole" }),
+          force = player.force.index }
     unlocks[player.index] = u
   end
   return u
@@ -564,14 +573,59 @@ local function sets(name)  -- its ingredients and products as {"item/x" = true}
   return f.ins, f.outs
 end
 
+-- One pass over the force's recipes (15 ms in a big pack; reading every recipe's products too took as long again):
+-- which it has enabled, and the items the enabled ones make (control.lua's craftable: not hidden, not recycling;
+-- their products as the prototypes have them). Once a tick at most: opening the window asked for it three times.
+local pass_at = {}  -- force index -> {tick, enabled, items}
+function force_pass(force)
+  local m = pass_at[force.index]
+  if m and m.tick == game.tick then return m end
+  local enabled, items = {}, {}
+  for name, r in pairs(force.recipes) do
+    local on = r.enabled
+    enabled[name] = on
+    if on and not r.hidden and r.category ~= "recycling" then
+      local _, outs = sets(name)
+      for k in pairs(outs) do
+        local t, item = k:match("^(%a+)/(.+)$")
+        if t == "item" then items[item] = true end
+      end
+    end
+  end
+  m = { tick = game.tick, enabled = enabled, items = items }
+  pass_at[force.index] = m
+  return m
+end
+
+-- (the facts read ahead, a few hundred recipes a tick, when the window may open soon with "Only unlocked" on: the
+-- first build of its filters read 19,000 recipes at once, 100 ms of its 140)
+local warming  -- {names, i}
+local WARM_PER_TICK = 400
+function M.warm(player)
+  if warming ~= nil or not only_unlocked[player.index] then return end
+  local names = {}
+  for name in pairs(prototypes.recipe) do names[#names + 1] = name end
+  warming = { names = names, i = 1 }
+end
+local function warm_tick()
+  local w = warming
+  if not w or not w.names then return end
+  local stop = math.min(#w.names, w.i + WARM_PER_TICK - 1)
+  for i = w.i, stop do
+    local f = facts(w.names[i])
+    if not f.hidden and f.product then sets(w.names[i]) end
+  end
+  w.i = stop + 1
+  if w.i > #w.names then warming = { done = true } end
+end
+
 -- The filters are kept small: the game checks every recipe against all of them each time a picker opens, and one
 -- group per recipe (21,000 clauses in a big pack) made opening the picker stutter. Most recipes go into one group
 -- per crafting category and product type: "has a product among these" and "in this category". A product that a
 -- locked recipe of that category also makes can't go there; its recipes get a group each, told apart from the
 -- locked ones by category, subgroup, time and, where needed, an ingredient or product (fine groups).
 local function recipe_filters(force)
-  local enabled = {}  -- recipe name -> whether the force has it (one pass: a lookup by name is slow)
-  for name, r in pairs(force.recipes) do enabled[name] = r.enabled end
+  local enabled = force_pass(force).enabled  -- recipe name -> whether the force has it (a lookup by name is slow)
   local unlocked, listed = {}, {}  -- listed: category -> {"item/x" = true} of the unlocked recipes' main products
   for name, on in pairs(enabled) do
     local f = on and facts(name)
@@ -663,14 +717,17 @@ local unlocked_cache = {}  -- force index -> filters
 
 --- the force's unlocked filters are out of date (nil: every force's)
 function M.forget_unlocked(force)
-  if force then unlocked_cache[force.index] = nil else unlocked_cache = {} end
+  if force then unlocked_cache[force.index], pass_at[force.index] = nil, nil else unlocked_cache, pass_at = {}, {} end
+  for i, u in pairs(unlocks) do
+    if not force or u.force == force.index then unlocks[i] = nil end
+  end
 end
 
 local function unlocked_filters(force)
   if unlocked_cache[force.index] then return unlocked_cache[force.index] end
   local items, entities = {}, {}
   local recipe = recipe_filters(force)
-  for name in pairs(ctx.craftable(force)) do
+  for name in pairs(craftable(force)) do
     items[#items + 1] = name
     local proto = prototypes.item[name]
     local place = proto and proto.place_result
@@ -1055,7 +1112,6 @@ end
 
 function M.open(player, prefill)
   prefill = prefill or {}
-  unlocks[player.index] = nil
   local screen = player.gui.screen
   -- (the web window: this Lua window, hidden, is its model; the shell stays open when it was)
   local as_web = web.use(player)
@@ -1467,6 +1523,8 @@ function M.open(player, prefill)
     enabled = false, tooltip = T("place-near-tip") }, "button", small)
   ui.add(tools, { type = "button", name = "bpgen_place_base", caption = T("place-base"), tags = { bpgen = "place_base" },
     enabled = false, tooltip = T("place-base-tip") }, "button", small)
+  ui.add(tools, { type = "button", name = "bpgen_sandbox", caption = T("sandbox"), tags = { bpgen = "sandbox" },
+    enabled = false, tooltip = T("sandbox-tip") }, "button", small)
   ui.add(tools, { type = "button", name = "bpgen_base_spot", caption = T("pick-spot"), visible = false,
     tags = { bpgen = "base_spot" }, tooltip = T("pick-spot-tip") }, "button", small)
   for _, a in ipairs({ { "left", "◀", -1, 0 }, { "up", "▲", 0, -1 }, { "down", "▼", 0, 1 }, { "right", "▶", 1, 0 } }) do
@@ -1556,7 +1614,7 @@ function M.open(player, prefill)
     find(frame, "bpgen_also").add({ type = "label", caption = "..." })
     ctx.api(player, "siblings", { recipe = prefill.recipe, machine = m }, "also")
   end
-  if as_web and not web.attach(player, frame) then  -- (the shell didn't open: the Lua window)
+  if as_web and not web.attach(player, frame, not prefill.rebuilt) then  -- (the shell didn't open: the Lua window)
     return M.open(player, prefill)
   end
   M.restrict(player)
@@ -1590,7 +1648,7 @@ end
 
 local function best_of_type(player, t, category)
   local best, best_speed
-  for _, name in ipairs(ctx.unlocked(ctx.craftable(player.force), { t })) do
+  for _, name in ipairs(ctx.unlocked(craftable(player.force), { t })) do
     local p = prototypes.entity[name]
     if not powerless(p) and (not category or (p.crafting_categories and p.crafting_categories[category])) then
       local sp = p.crafting_categories and speed(p) or (p.get_researching_speed and p.get_researching_speed() or 1)
@@ -1805,6 +1863,55 @@ function M.place_absolute(player)
     (a.deliveries or 0) > 0 and T("placed-next-deliveries", a.deliveries) or "",
     (a.new_lanes or 0) > 0 and T("placed-next-lanes", a.new_lanes) or "" }))
   ctx.api(player, "history", { add = r.blueprint, mode = r.res.mode }, "history_add")
+end
+
+--- "Try in sandbox": the plan built in a lab of the player's (their base round it copied in, kept fed) and the player
+--- taken there; an absolute plan at its box, any other at a free spot near them (as Place near me)
+local function try_sandbox(player)
+  local frame = player.gui.screen[NAME]
+  local r = results[player.index]
+  if not (frame and r and r.blueprint) then return end
+  local why = sandbox.cant(player)
+  if why then return say(player, T(why)) end
+  local plan = { blueprint = r.blueprint }
+  local a = r.res.absolute
+  if a then
+    local b = a.box
+    plan.box, plan.clear, plan.area = b, a.clear, { b[1], b[2], b[1] + b[3], b[2] + b[4] }
+  elseif r.where then
+    local c = place.find_spot(player, r.w, r.h)
+    if not c then return status(frame, T("no-free-spot", math.ceil(r.w), math.ceil(r.h))) end
+    plan.center, plan.area = c, { c.x - r.w / 2, c.y - r.h / 2, c.x + r.w / 2, c.y + r.h / 2 }
+  else
+    return
+  end
+  sandbox.enter(player, plan)
+end
+
+local SANDBOX_CARD = "bpgen_sandbox_card"
+--- the card shown in the sandbox (the window hidden meanwhile): Place in base, Discard
+local function sandbox_card(player, on)
+  local screen = player.gui.screen
+  if screen[SANDBOX_CARD] then screen[SANDBOX_CARD].destroy() end
+  if not on then return end
+  local card = screen.add({ type = "frame", name = SANDBOX_CARD, direction = "vertical" })
+  card.style.padding = 10
+  card.style.width = 380
+  ui.add(card, { type = "label", caption = T("sandbox-title") }, "caption")
+  local text = ui.add(card, { type = "label", caption = T("sandbox-text") }, "text")
+  text.style.single_line = false
+  text.style.maximal_width = 356
+  local row = card.add({ type = "flow", direction = "horizontal" })
+  row.style.top_margin = 6
+  row.style.vertical_align = "center"
+  row.add({ type = "empty-widget" }).style.horizontally_stretchable = true
+  ui.add(row, { type = "button", name = "bpgen_sandbox_place", caption = T("sandbox-place"),
+    tags = { bpgen = "sandbox_place" }, tooltip = T("sandbox-place-tip") }, "ok")
+  ui.add(row, { type = "button", name = "bpgen_sandbox_discard", caption = T("sandbox-discard"),
+    tags = { bpgen = "sandbox_discard" }, tooltip = T("sandbox-discard-tip") }, "button")
+  ui.adopt(card)
+  local scale = player.display_scale * ui.scale_of(card)
+  card.location = { math.max(0, (player.display_resolution.width - 380 * scale) / 2), math.floor(60 * scale) }
 end
 
 --- belt_speed a belt-like entity needs to carry `per_s` items a second on both lanes
@@ -2106,6 +2213,7 @@ function M.on_result(player, res)
     if log_ then log_.caption = "" end
   end
   if not res.blueprint then
+    if not res.measure then to_sandbox[player.index] = nil end
     if res.measure and not M.measuring(player) then
       -- (inserter setups bpgen hasn't measured: measured here and now, live, then planned again)
       preview_surface()
@@ -2151,6 +2259,7 @@ function M.on_result(player, res)
   find(frame, "bpgen_place").enabled = where ~= nil
   find(frame, "bpgen_place_base").enabled = res.absolute == nil and (res.mode == "line" or res.mode == "mall"
     or res.mode == "base")
+  find(frame, "bpgen_sandbox").enabled = (where ~= nil or res.absolute ~= nil) and res.mode ~= "ship"
   local pb = find(frame, "bpgen_place")
   pb.caption = T(res.absolute and "place-it" or "place-near")
   pb.tooltip = T(res.absolute and "place-it-tip" or "place-near-tip")
@@ -2253,6 +2362,10 @@ function M.on_result(player, res)
   if s.recipe and s.machine then
     ctx.api(player, "module_ideas", { recipe = s.recipe, machine = s.machine, belt = s.belt,
       rate_per_min = s.expected and s.expected * 60, belts = unlocked(player).belts }, "ideas")
+  end
+  if to_sandbox[player.index] then  -- ("Try in sandbox" asked for it by the base first: there now, on to the lab)
+    to_sandbox[player.index] = nil
+    if res.absolute then try_sandbox(player) end
   end
   return true
 end
@@ -2821,6 +2934,23 @@ local function on_click(e)
     show_patches(frame, player)
   elseif action == "place" and r and r.res.absolute then
     M.place_absolute(player)
+  elseif action == "sandbox" and r then
+    if not r.res.absolute and frame and find(frame, "bpgen_place_base").enabled and not sandbox.cant(player) then
+      -- (a line, a mall, a base: put by the base first, as Place by my base; the lab follows when it's there)
+      local sec = find(frame, "bpgen_section")
+      turns[player.index], tried[player.index] = nil, nil
+      local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off",
+        seed = { x = player.position.x, y = player.position.y },
+        section = sec.visible and sec.items[sec.selected_index] or nil })
+      to_sandbox[player.index] = ok or nil
+      status(frame, ok and T("looking-around") or T("cant", tostring(why)))
+    else
+      try_sandbox(player)
+    end
+  elseif action == "sandbox_place" then
+    sandbox.place(player)
+  elseif action == "sandbox_discard" then
+    sandbox.discard(player)
   elseif action == "tab" then
     set_mode(frame, el.tags.mode)
   elseif action == "check_bus" then
@@ -3197,7 +3327,7 @@ function M.rebuild(player)
   local mode = mode_of(frame)
   local recipe, machine = value(frame, "bpgen_recipe"), value(frame, "bpgen_machine")
   M.open(player, { mode = mode, recipe = recipe, machine = machine and machine.name,
-    machine_quality = machine and machine.quality })
+    machine_quality = machine and machine.quality, rebuilt = true })
   local r = results[player.index]
   if r and r.blueprint and r.res then M.on_result(player, r.res) end
 end
@@ -3224,6 +3354,7 @@ end
 M.handlers = {
   [defines.events.on_tick] = function(e)
     bench.handlers[defines.events.on_tick](e)
+    warm_tick()
     -- (a fast-forward no test run needs any more, however it ended: a run dropped, a script reloaded: off)
     if storage.bpgen_speed_was and e.tick % 60 == 0 and not testing() then
       test_speed_off(nil)
@@ -3323,7 +3454,8 @@ M.handlers = {
     if e.setting == "fstd-window-scale" and e.player_index then reflow(game.get_player(e.player_index)) end
     if e.setting == "bpgen-web-window" and e.player_index then  -- (the web window or the Lua one: built again so)
       local player = game.get_player(e.player_index)
-      if player.gui.screen[NAME] then M.rebuild_any(player) end
+      if player.gui.screen[NAME] then M.rebuild_any(player)
+      elseif not web.wanted(player) then web.close(player, true) end  -- (a shell kept hidden for it: closed)
     end
   end,
   [defines.events.on_lua_shortcut] = function(e)
@@ -3389,6 +3521,24 @@ function M.view_resized(player)
   local cam = find(player.gui.screen[NAME], "bpgen_cam")
   if cam and old and math.abs(cam.zoom - old) < 1e-6 then cam.zoom = r.zoom end
 end
+
+-- the sandbox's view of this file
+sandbox.setup({
+  shown = function(player, on) window_shown(player, on) end,
+  card = sandbox_card,
+  placed = function(player, ghosts, marks, area, removed)
+    for _, e in ipairs(removed) do marks[#marks + 1] = e end
+    placed[player.index], unmark[player.index] = ghosts, marks
+    local n = 0
+    for _, g in pairs(ghosts) do
+      if g.valid and (g.type == "entity-ghost" or g.type == "tile-ghost") then n = n + 1 end
+    end
+    place.outline(player, { { area[1], area[2] }, { area[3], area[4] } }, T("from-sandbox"))
+    say(player, T("sandbox-placed", n, #removed))
+    local r = results[player.index]
+    if r and r.blueprint then ctx.api(player, "history", { add = r.blueprint, mode = r.res.mode }, "history_add") end
+  end,
+})
 
 -- the web window's view of this file
 M.NAME = NAME

@@ -1,7 +1,7 @@
 -- Writes files in script-output/bpgen/ for the external bpgen tool (mods can only write files, not read them):
 --   request.json   hover an assembler + Ctrl+Shift+B: plan a line for its recipe
 --   state.json     what's researched and what the factory makes / uses per minute (on join, after research, every 5 min)
---   snapshot.json  an area of the base picked with the snapshot tool (shortcut bar, Ctrl+Shift+N)
+--   snapshot.json  an area of the base picked with the snapshot tool (the window's Extend tab)
 
 local safe = require("safe")
 -- (every handler guarded: an error never takes the game down)
@@ -200,6 +200,13 @@ end
 local window = require("window")
 local compat = require("compat")
 local web = require("web")  -- (the window as a web page: fse's shells)
+local sandbox = require("sandbox")  -- ("Try in sandbox": the plan in a lab with the base round it)
+-- (a bpgen button in Recipe Book / Factory Planner: the window may be opened from it soon, so the web window's page
+-- loads ahead, hidden, and what "Only unlocked" needs is read ahead a little each tick)
+compat.on_button = function(player)
+  web.prewarm(player)
+  window.warm(player)
+end
 window.setup({
   craftable = craftable, unlocked = unlocked, bonuses = bonuses,
   start = function(player, request)
@@ -726,7 +733,10 @@ end)
 -- (what a force has unlocked changed without a research: the window's "Only unlocked" pickers build theirs again)
 on_event(defines.events.on_force_reset, function(e) window.forget_unlocked(e.force) end)
 on_event(defines.events.on_technology_effects_reset, function(e) window.forget_unlocked(e.force) end)
-script.on_configuration_changed(safe.guard("bpgen", function() research_cache, static = {}, nil end))
+script.on_configuration_changed(safe.guard("bpgen", function()
+  research_cache, static = {}, nil
+  window.forget_unlocked()  -- (other mods, other recipes and machines)
+end))
 on_nth(60, function(e)
   if dirty_tick and e.tick >= dirty_tick then
     dirty_tick = nil
@@ -1000,6 +1010,20 @@ remote.add_interface("bpgen", {
     return snapshot(fake, area)
   end,
   -- the same, with the belts' flows measured: snapshot.json is written MEASURE_TICKS later
+  -- the sandbox without a player: a lab of `plan` (see sandbox.open) -> its surface and edges; then what pasting it
+  -- back would place (ghost names and positions) and remove, the lab closed
+  sandbox_open = function(index, surface_name, force_name, plan)
+    local st = sandbox.open(index, game.get_surface(surface_name), game.forces[force_name], plan)
+    return { surface = st.surface, area = st.area, feeds = #st.feeds, drains = #st.drains, pipes = #st.pipes }
+  end,
+  sandbox_paste = function(index)
+    local ghosts, marks, removed = sandbox.paste(sandbox.state(index))
+    sandbox.close(index)
+    local g, r = {}, {}
+    for _, e in pairs(ghosts) do if e.valid then g[#g + 1] = { name = e.ghost_name or e.name, position = e.position } end end
+    for _, e in pairs(removed) do r[#r + 1] = { name = e.name, position = e.position } end
+    return { ghosts = g, removed = r, marks = #marks }
+  end,
   measure_area = function(surface_name, area, force_name)
     local fake = { surface = game.surfaces[surface_name or "nauvis"], force = game.forces[force_name or "player"] }
     measure(fake, area, "measure_area")
@@ -1007,6 +1031,8 @@ remote.add_interface("bpgen", {
 })
 
 for event, handler in pairs(window.handlers) do on_event(event, handler) end
+-- (the sandbox: its edges fed, god mode's instant building; after the others, onto them)
+safe.chain("bpgen", { sandbox.handlers })
 -- bpgen buttons in Recipe Book's and Factory Planner's windows (with in-game planning: they open the bpgen window)
 on_nth(compat.RESCAN, function()
   if not in_game() then return end

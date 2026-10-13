@@ -52,29 +52,45 @@ local function recipe_book(screen)
   local kind, name = tostring(title.sprite):match("^(%a+)/(.+)$")
   local r = recipe_of(title) or ((kind == "item" or kind == "fluid") and made_by(kind, name))
   if r then button(title.parent, r) elseif title.parent[BUTTON] then title.parent[BUTTON].destroy() end
+  return r and true or false
 end
 
 -- FP's main window shows recipe icons only in the production table, each alone in its table cell's flow
 local function fp_walk(el)
+  local any = false
   for _, c in pairs(el.children) do
     local r = c.type == "sprite-button" and c.name ~= BUTTON and recipe_of(c)
     if r then
       button(c.parent, r)
+      any = true
     elseif c.name ~= BUTTON then
-      fp_walk(c)
+      any = fp_walk(c) or any
     end
   end
+  return any
 end
 
 local function factory_planner(screen)
   local w = screen.fp_frame_main_dialog
-  if w and w.visible then fp_walk(w) end
+  return w and w.visible and fp_walk(w) or false
 end
+
+--- (set by control.lua) a bpgen button shows: the window may be opened from it soon (the web window's shell then
+--- loads ahead, hidden)
+M.on_button = nil
 
 function M.scan(player)
   local screen = player.gui.screen
-  if script.active_mods["RecipeBook"] or script.active_mods["RecipeBookFork"] then pcall(recipe_book, screen) end
-  if script.active_mods["factoryplanner"] then pcall(factory_planner, screen) end
+  local shown = false
+  if script.active_mods["RecipeBook"] or script.active_mods["RecipeBookFork"] then
+    local ok, r = pcall(recipe_book, screen)
+    shown = ok and r == true
+  end
+  if script.active_mods["factoryplanner"] then
+    local ok, r = pcall(factory_planner, screen)
+    shown = shown or (ok and r == true)
+  end
+  if shown and M.on_button then M.on_button(player) end
 end
 
 -- the recipe under the cursor for Ctrl+Shift+B: one shown with its tooltip (Recipe Book, Factoriopedia, crafting

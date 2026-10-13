@@ -358,7 +358,7 @@
       if (a.tip) el.dataset.tipLs = JSON.stringify(a.tip);
     };
     setBtn("a-cursor", act.cursor); setBtn("a-copy", act.copy); setBtn("a-place", act.place, { caption: true });
-    setBtn("a-place_base", act.place_base); setBtn("a-base_spot", act.base_spot);
+    setBtn("a-place_base", act.place_base); setBtn("a-sandbox", act.sandbox); setBtn("a-base_spot", act.base_spot);
     setBtn("a-base_redo", act.base_redo); setBtn("a-base_rotate", act.base_rotate);
     $("nudges").hidden = !(act.nudge_left && act.nudge_left.vis);
     setBtn("test-btn", act.test, { caption: true, vis: false });
@@ -783,9 +783,23 @@
     }
     return v;
   }
+  // a page shown again (the window closed and opened: the mod keeps the page loaded, hidden): as it was when loaded
+  function fresh() {
+    closePicker();
+    closeDrawer();
+    menu(false);
+    $("modal").hidden = true; $("win").classList.remove("modal-on");
+    $("tooltip").hidden = true;
+    $("toasts").innerHTML = "";
+    for (const f of document.querySelectorAll(".sec.fold")) { f.classList.remove("open"); delete f.dataset.user; }
+    $("hsearch").value = "";
+    $("scroll").scrollTop = 0;
+    Object.assign(S, { st: null, drawer: null, tab: "result", lastJson: {}, histN: 0, planKey: "", running: false });
+  }
   fse.on((m) => {
     if (!m) return;
     m = lists(m);
+    if (m.fresh) fresh();
     if (m.icons && P.data) setTimeout(() => paintIcons($("picker")), 0);
     if (m.icons) {
       for (const [k, v] of Object.entries(m.icons)) takeIcon(k, v);
@@ -806,6 +820,7 @@
       const lang = m.state.locale || "en";
       if (lang !== S.lang) { S.lang = lang; loadLocale(lang); }
       render(m.state);
+      if (m.fresh) { filterHistory(); send({ cmd: "shown" }); }   // (the mod shows the page now)
     }
   });
 

@@ -47,6 +47,7 @@ local function st(index)
 end
 
 local dirty, last, gen, seen_gen = {}, {}, {}, {}   -- (this session: a snapshot to send, the last one sent, filters)
+local fresh = {}                                    -- (player index -> the next snapshot goes to a page shown again)
 local failed = {}                                   -- (player index -> the shell couldn't open: the Lua window then)
 local pending = {}                                  -- (translation id -> key)
 local dict_out = {}                                 -- (player index -> {key = text} to send)
@@ -344,7 +345,7 @@ local function snapshot(player, frame)
   out.preview = { on = cam ~= nil and cam.visible, empty = named.bpgen_empty and ls(named.bpgen_empty.caption) }
   -- the actions
   local act = {}
-  for _, n in ipairs({ "cursor", "copy", "place", "place_base", "base_spot", "base_rotate", "base_redo", "nudge_left",
+  for _, n in ipairs({ "cursor", "copy", "place", "place_base", "sandbox", "base_spot", "base_rotate", "base_redo", "nudge_left",
                        "test", "test_speed", "plan" }) do
     local el = named["bpgen_" .. n]
     if el then act[n] = { en = el.enabled, vis = el.visible, c = ls(el.caption), tip = ls(el.tooltip) } end
@@ -391,9 +392,20 @@ local function push(player)
   local snap, picks = snapshot(player, frame)
   if shell.remove_island then drop_old_islands(player) end
   local text = helpers.table_to_json(snap)
-  if text == last[player.index] then return end
+  if text == last[player.index] and not fresh[player.index] then return end
   last[player.index] = text
-  shell.send(player, SHELL, { state = snap })
+  -- (a page kept hidden since the window closed: it drops what it showed then (pickers, drawers) and says when it
+  -- shows this state, then it's shown)
+  shell.send(player, SHELL, { state = snap, fresh = fresh[player.index] or nil })
+  fresh[player.index] = nil
+end
+
+--- a page kept hidden, shown again: once it has the window's new state (it says so), or after half a second anyway
+local function reveal(player)
+  local s = st(player.index)
+  if not s.reveal then return end
+  s.reveal = nil
+  if shell.is_open(player, SHELL) then shell.show(player, SHELL, true) end
 end
 
 -- ---- the page's actions ------------------------------------------------------------------------------------------
@@ -615,14 +627,18 @@ local function handle(player, m)
   elseif cmd == "seen" then  -- (the page's own state, for tests: what it shows)
     st(player.index).seen = m.what
     return
+  elseif cmd == "shown" then  -- (a page shown again: it shows the new state now)
+    reveal(player)
+    return
   end
   dirty[player.index] = true
 end
 
 -- ---- opening and closing -----------------------------------------------------------------------------------------
 
---- the shell opened (or kept) over the hidden window just built: the preview's island, a snapshot on the next tick
-function M.attach(player, frame)
+--- the shell opened (or kept) over the hidden window just built: the preview's island, a snapshot on the next tick;
+--- `front`: opened by the player (not built again): shown over the GUI they have open (a button in Recipe Book)
+function M.attach(player, frame, front)
   frame.visible = false
   -- (the Lua window's own camera goes: the island's is the preview, found by the same name)
   local function find_in(el)
@@ -633,6 +649,15 @@ function M.attach(player, frame)
   if own then own.destroy() end
   local s = st(player.index)
   local was_open = shell.is_open(player, SHELL)
+  -- (the shell kept hidden since the window closed, or opened ahead (prewarm): its WebView2 and page are loaded, so
+  -- it shows at once with the new state instead of starting a browser and loading the page again, about half a second)
+  if was_open and s.hidden then
+    s.reveal = game.tick
+    fresh[player.index] = true
+  elseif was_open and front then
+    shell.show(player, SHELL, true)  -- (it may have made way for the window it's opened from)
+  end
+  s.hidden = nil
   if not was_open then
     local ok = shell.open(player, { name = SHELL, page = PAGE, rect = rect_for(player), esc = false, yield = true,
       radius = 8, scale = s.scale })
@@ -657,20 +682,40 @@ end
 
 local closing = false  -- (this file closes the shell: on_close isn't the player's)
 
---- the shell closed (the window closes, or opens as the Lua one): where it was kept for next time
-function M.close(player)
+--- the window closed (or opens as the Lua one): the shell hidden, kept for the next time it opens (opening a shell
+--- starts a browser and loads the page: half a second); closed when the web window isn't wanted any more (`hard`)
+function M.close(player, hard)
   local s = storage.bpgen_web and storage.bpgen_web[player.index]
   if s then
-    s.on, s.picks, s.view = nil, {}, nil
+    s.on, s.picks = nil, {}
     s.history_n = nil
+    s.reveal = nil
   end
   if shell and shell.is_open(player, SHELL) then
     if s then s.rect = shell.rect and shell.rect(player, SHELL) or s.rect end
-    closing = true
-    shell.close(player, SHELL)
-    closing = false
+    if not hard and M.use(player) then
+      shell.show(player, SHELL, false)
+      st(player.index).hidden = true
+    else
+      closing = true
+      shell.close(player, SHELL)
+      closing = false
+    end
   end
-  last[player.index], dirty[player.index] = nil, nil
+  if s and not (shell and shell.is_open(player, SHELL)) then s.hidden, s.view = nil, nil end
+  last[player.index], dirty[player.index], fresh[player.index] = nil, nil, nil
+end
+
+--- the shell opened ahead, hidden (a bpgen button showed in another mod's window): the first open is quick too
+local prewarmed = {}  -- (player index -> tried this session)
+function M.prewarm(player)
+  if prewarmed[player.index] or not (M.use(player) and player.connected) or shell.is_open(player, SHELL) then return end
+  prewarmed[player.index] = true
+  local s = st(player.index)
+  if shell.open(player, { name = SHELL, page = PAGE, rect = rect_for(player), esc = false, yield = true, radius = 8,
+      scale = s.scale, visible = false }) then
+    s.hidden = true
+  end
 end
 
 -- ---- events ------------------------------------------------------------------------------------------------------
@@ -720,6 +765,7 @@ M.handlers = {
             dirty[index] = nil
             push(player)
           end
+          if s.reveal and e.tick - s.reveal >= 30 then reveal(player) end
           if dict_out[index] then
             if shell.is_open(player, SHELL) then shell.send(player, SHELL, { dict = dict_out[index] }) end
             dict_out[index] = nil

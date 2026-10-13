@@ -1,7 +1,7 @@
 data:extend({
   { type = "custom-input", name = "bpgen-request", key_sequence = "CONTROL + SHIFT + B", consuming = "game-only",
     include_selected_prototype = true },
-  -- drag over part of the base: writes it to script-output/bpgen/snapshot.json for bpgen to build next to
+  -- drag over part of the base (the window's Extend tab, "Pick base area"): bpgen builds next to it
   {
     type = "selection-tool",
     name = "bpgen-snapshot",
@@ -63,19 +63,6 @@ data:extend({
     select = { border_color = { 1, 0.85, 0.2 }, cursor_box_type = "copy", mode = { "any-tile" } },
     alt_select = { border_color = { 1, 0.85, 0.2 }, cursor_box_type = "copy", mode = { "any-tile" } },
   },
-  { type = "custom-input", name = "bpgen-snapshot", key_sequence = "CONTROL + SHIFT + N", action = "spawn-item",
-    item_to_spawn = "bpgen-snapshot", consuming = "game-only" },
-  {
-    type = "shortcut",
-    name = "bpgen-snapshot",
-    action = "spawn-item",
-    item_to_spawn = "bpgen-snapshot",
-    associated_control_input = "bpgen-snapshot",
-    icon = "__base__/graphics/icons/blueprint.png",
-    icon_size = 64,
-    small_icon = "__base__/graphics/icons/blueprint.png",
-    small_icon_size = 64,
-  },
   -- the bpgen window (planning in game needs the fse loader)
   { type = "custom-input", name = "bpgen-window", key_sequence = "CONTROL + ALT + B", consuming = "game-only" },
   {
@@ -89,3 +76,25 @@ data:extend({
     small_icon_size = 64,
   },
 })
+
+-- "Try in sandbox": the lab's power, one on each of its electric networks (under a pole: no collision, not
+-- selectable, never in a blueprint)
+local power = table.deepcopy(data.raw["electric-energy-interface"]["electric-energy-interface"])
+power.name = "bpgen-sandbox-power"
+power.hidden = true
+power.flags = { "not-blueprintable", "not-deconstructable", "not-on-map", "placeable-off-grid", "not-upgradable",
+  "no-copy-paste", "not-in-kill-statistics", "hide-alt-info" }
+power.minable = nil
+power.selection_box = nil
+power.collision_box = { { -0.1, -0.1 }, { 0.1, 0.1 } }
+power.collision_mask = { layers = {} }
+power.picture, power.pictures, power.animation, power.animations = nil, nil, nil, nil
+power.integration_patch = nil
+power.picture = { filename = "__core__/graphics/empty.png", size = 1 }
+power.gui_mode = "none"
+power.energy_source = { type = "electric", buffer_capacity = "1TJ", usage_priority = "primary-output",
+  input_flow_limit = "0W", output_flow_limit = "1TW" }
+power.energy_production = "1TW"
+power.continuous_animation = nil
+power.working_sound = nil
+data:extend({ power })

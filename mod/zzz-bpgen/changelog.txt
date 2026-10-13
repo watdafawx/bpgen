@@ -1,4 +1,20 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.23.1
+Date: 2026-10-13
+  Bugfixes:
+    - The web window opened from Recipe Book's (or Factory Planner's) bpgen button stayed hidden until that window was
+      closed: it stepped aside for the window it was opened from. It now shows over it at once (and still steps aside
+      for a window opened after it). Needs fse-std 0.8.2.
+  Optimizations:
+    - The web window opens in a few hundredths of a second instead of about half a second: closing it hides its page
+      instead of closing it, and the first Recipe Book / Factory Planner button shown loads the page ahead, hidden (a
+      save keeps it, so it is loaded again with the game). Opened again, the page starts as it did when loaded: pickers,
+      drawers and menus closed.
+    - Opening the window no longer reads every recipe of the force each time: what the force can build is kept until
+      its research changes, one pass over its recipes serves the whole open, and with "Only unlocked" on, the recipes'
+      facts its filters need are read ahead a little each tick once a bpgen button shows. In a 400-mod game the first
+      open from Recipe Book took 200 ms of script, now about 80.
+---------------------------------------------------------------------------------------------------
 Version: 0.22.0
 Date: 2026-10-13
   Features:

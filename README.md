@@ -63,11 +63,19 @@ places the same (no desyncs). The window's mouse-dragged preview works with its 
 - **Starter bases**: science per minute up to labs, with a mall. Laid out compact (blocks in columns, belts routed
   between them) or as a **main bus**: one column of blocks beside a bus of belts, each block taking what it needs and
   putting back what it makes, the mall taking from the same bus.
-- **Extensions**: select part of your base with the snapshot tool and bpgen builds next to it. When the area has a
+- **Extensions**: bpgen looks at the base around you (or the part you pick with "Pick base area" in the Extend tab) and builds next to it. When the area has a
   main bus (3+ long straight belts side by side, flowing the same way) it builds beside the bus instead: splitters
   branch off its lanes, the lanes in between dive underground under each branch, and an output the bus doesn't carry
   yet gets a new lane of its own beside it. Auto by default; "Build from my main bus" in the window turns it off.
   Any line or mall goes the same way: plan it, stand by your base and press **Place by my base**.
+- **Try in sandbox** (the window's dock): the plan built for real in a lab surface of your own, with your base round
+  it (48 tiles each side) copied in and kept running: belts coming in get what their real twins get (all they take
+  while the real one is backed up), belts going out are emptied, pipes across the edge hold what the real ones hold,
+  and each power network gets a hidden source. You go there in god mode with cheat mode on a force of its own (your
+  research, copied): ghosts and blueprints build at once, the deconstruction and upgrade planners act at once.
+  **Place in base** takes you back and pastes the area as ghosts (unchanged entities are skipped, what you took
+  away is marked for removal; Undo takes it back); **Discard** only takes you back. Either way the lab is deleted.
+  A line, mall or base not yet placed goes by your base first (as Place by my base).
   Or set a line's **Feed** to *my main bus*: stand by your bus and press Plan; what the bus carries is tapped from
   it, the other ingredients are made in the blueprint, and the line lands beside the bus.
 - **Starter base tiers**: every main-bus starter base has a C of stone brick over its bus head and snaps to a 64-tile
