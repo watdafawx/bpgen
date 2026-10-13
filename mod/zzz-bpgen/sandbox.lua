@@ -1,8 +1,9 @@
 -- "Try in sandbox": the window's plan built for real on a lab surface of the player's own, with the base round it
 -- copied in (contents, power, what the belts carry) and kept fed from the real base while it runs. The player goes
 -- there in god mode with cheat mode (everything at hand, free; ghosts and blueprints build at once, the
--- deconstruction and upgrade planners act at once) on a force of its own (the real one's research, copied), and
--- changes what they like. "Place in base" takes them back and pastes the area over the base as ghosts (what is
+-- deconstruction and upgrade planners act at once) and changes what they like. The lab is on the player's own force
+-- (the surface hidden from it, the lab's labs switched off so it researches nothing): changing a player's force sets
+-- off other mods' handlers (Blueprint Sandboxes syncs a whole force of its own for it, a minute's freeze). "Place in base" takes them back and pastes the area over the base as ghosts (what is
 -- unchanged is skipped, as any paste does; what they took away is marked for removal); "Discard" only takes them
 -- back. Either way the lab goes.
 --
@@ -39,14 +40,9 @@ local function key(e)
     e.position.y, e.direction or 0)
 end
 
---- the force a lab of `home` builds with: its research, recipes and bonuses (copied again each time)
-local function lab_force(home)
-  local name = PREFIX .. home.name
-  local f = game.forces[name] or game.create_force(name)
-  f.copy_from(home)
-  f.research_queue = {}
-  pcall(f.cancel_current_research)
-  return f
+--- a lab's entity kept from touching the real base: its labs research nothing (the lab is on the real force)
+local function tame(e)
+  if e.valid and e.type == "lab" then pcall(function() e.disabled_by_script = true end) end
 end
 
 local function lab_surface(index)
@@ -99,6 +95,7 @@ local function revive(ghosts)
     if g.valid and (g.type == "entity-ghost" or g.type == "tile-ghost") then
       local plans = g.type == "entity-ghost" and g.insert_plan or nil
       local _, ent, proxy = g.silent_revive({ return_item_request_proxy = true })
+      if ent then tame(ent) end
       if ent and plans then bench.insert_plans(ent, plans) end
       if proxy and proxy.valid then proxy.destroy() end
     end
@@ -224,17 +221,18 @@ function M.open(index, home_surface, home_force, plan)
   local a = plan.area
   a = { math.floor(a[1] - MARGIN), math.floor(a[2] - MARGIN), math.ceil(a[3] + MARGIN), math.ceil(a[4] + MARGIN) }
   local s = lab_surface(index)
-  local force = lab_force(home_force)
+  local force = home_force
   pcall(home_force.set_surface_hidden, s, true)
   bench.ground(s, a[1] - 8, a[2] - 8, a[3] + 8, a[4] + 8)
   for _, e in pairs(s.find_entities_filtered({ area = box(a) })) do e.destroy() end
   home_surface.clone_area({ source_area = box(a), destination_area = box(a), destination_surface = s,
-    destination_force = force, clone_tiles = true, clone_entities = true, clone_decoratives = false,
+    clone_tiles = true, clone_entities = true, clone_decoratives = false,
     clear_destination_entities = true, expand_map = true, create_build_effect_smoke = false })
   for _, e in pairs(s.find_entities_filtered({ area = box(a), type = { "character", "unit", "unit-spawner", "turret",
       "character-corpse", "item-request-proxy" } })) do
     if e.valid then e.destroy() end
   end
+  for _, e in pairs(s.find_entities_filtered({ area = box(a), type = "lab" })) do tame(e) end
   for _, c in ipairs(plan.clear or {}) do  -- (a refit's, a move's: the old part goes)
     for _, e in pairs(s.find_entities_filtered({ name = c.name, position = c.position })) do e.destroy() end
   end
@@ -361,9 +359,8 @@ function M.enter(player, plan)
   if character.valid and not character.associated_player then player.associate_character(character) end
   local a = plan.area
   player.teleport({ (a[1] + a[3]) / 2, (a[2] + a[4]) / 2 }, game.surfaces[st.surface])
-  player.force = st.force
   player.cheat_mode = true
-  player.game_view_settings.show_surface_list = false  -- (no remote view to the real base with the lab's force)
+  player.game_view_settings.show_surface_list = false  -- (no remote view to the real base with cheat mode on)
   if cb.shown then cb.shown(player, false) end
   if cb.card then cb.card(player, true) end
   return true
@@ -375,7 +372,7 @@ local function leave(player, st)
   local main = player.get_main_inventory()
   if main then main.clear() end
   player.cheat_mode = false
-  player.force = st.home_force
+  if player.force.name ~= st.home_force then player.force = st.home_force end  -- (a lab from before 0.24.2)
   player.game_view_settings.show_surface_list = st.surface_list ~= false
   local character = st.character
   if character and character.valid then
@@ -424,7 +421,8 @@ M.handlers = {
   end,
   -- (god mode builds at once: a ghost (shift-placed, a blueprint) built for real)
   [defines.events.on_built_entity] = function(e)
-    if in_lab(e.entity) and (e.entity.type == "entity-ghost" or e.entity.type == "tile-ghost") then revive({ e.entity }) end
+    if not in_lab(e.entity) then return end
+    if e.entity.type == "entity-ghost" or e.entity.type == "tile-ghost" then revive({ e.entity }) else tame(e.entity) end
   end,
   [defines.events.on_marked_for_deconstruction] = function(e)
     local ent = e.entity

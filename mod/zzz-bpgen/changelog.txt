@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.24.2
+Date: 2026-10-13
+  Bugfixes:
+    - Try in sandbox and Discard no longer freeze the game for up to a minute with Blueprint Sandboxes installed. The
+      player keeps their own force in the lab (changing it made that mod set up a whole force each time); the lab's
+      labs are switched off so it researches nothing.
+---------------------------------------------------------------------------------------------------
 Version: 0.24.1
 Date: 2026-10-13
   Features:
