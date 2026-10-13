@@ -123,6 +123,35 @@ With `fse-std` the window follows each player's theme (`/fse-theme`) and this la
 
 Without `fse-std`, the same in one window in the game's own styles, everything inside it.
 
+### Web window (pilot)
+
+With the fse loader in single player (fse-std 0.8's shells, WebView2) the window is a **web page over the game**:
+`zzz-bpgen/web/bpgen.html` (+ `bpgen.css`, `bpgen.js`), the blueprint preview showing through a hole in it (an engine
+island: the game draws it). Its pickers are its own: the item groups as tabs, a search over the names, the game's icons (mods' too), favourites
+(right click) and the last picks on top, the keyboard (type, arrows, Enter, Esc), the quality as chips; they offer
+what the game's picker would (its popup would open under the page). The modes in a column on the left, the mode's settings beside them (rarely used sections
+fold and open smoothly, badges saying what's in them), Plan pinned under them; the preview fills the rest, its tools
+(zoom, Fit, the arrows, Test run) above it, the blueprint's actions below it. The result, the test run and History are
+a drawer at the preview's right that slides in when they have something to show (the preview narrows with it): the
+result's tiles and badges, the test run's live chart (the rate each second, the rate expected dashed, ×1 / ×5 / ×10),
+History with search and drag (a row onto the preview shows it again, onto the Recipe slot plans it again). Its own
+tooltips, toasts and Undo question (the game's would be under the page), the game's icons in its texts, the player's
+fse-std theme and Window size (its own Size in the gear's menu). It stays open while you play and steps aside while
+another window is open (the inventory, a machine, a picker).
+
+How: `web.lua` keeps the Lua window as the model, hidden: every path (planning, Python jobs, test runs, placing) runs
+as for the Lua window. The page gets a snapshot of it (`shell.send`) whenever something changed, with captions as
+LocalisedStrings it formats with the mod's own locale files (other mods' keys, prototype names, are translated by the
+mod once); its actions come back as messages that set the hidden window's fields (then the handler the game's event
+would run) or press its buttons. Pickers: the prototypes the hidden choose-elem button's `elem_filters` let through
+(`prototypes.get_*_filtered`, "Only unlocked" included), a pick written to it and handled as the player's change. Icons: the data stage lists each prototype's icon file
+(mod-data `bpgen-icons`); the page shows them from the game's data folder or an unzipped mod (fse's web server).
+Saved, the page reloads in the game (live).
+
+Off ("Game window" in its gear, the per-player mod setting "bpgen: web window (pilot)", multiplayer, no loader): the
+Lua window as above; its gear has "Web window (pilot)" to switch back. `fse\test\run_bpgen_shell.py` checks it in a
+real client (screenshots in `run\keep\web-*.png`).
+
 ## Getting started: in game
 
 ### 1. Install FSE

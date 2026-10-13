@@ -199,6 +199,7 @@ end
 
 local window = require("window")
 local compat = require("compat")
+local web = require("web")  -- (the window as a web page: fse's shells)
 window.setup({
   craftable = craftable, unlocked = unlocked, bonuses = bonuses,
   start = function(player, request)
@@ -976,6 +977,14 @@ remote.add_interface("bpgen", {
   -- (tests) "Docked" ticked or not
   docked = function(player_index, on) window.set_docked(game.get_player(player_index), on) end,
   hover_camera = function(player_index) return window.test_hover_camera(player_index) end,
+  -- (tests) the web window: its state (the shell, its islands, what the page reported), the setting switched
+  web_state = function(player_index) return web.state(game.get_player(player_index)) end,
+  web_pick = function(player_index, ref, value) return web.test_pick(game.get_player(player_index), ref, value) end,
+  web_wanted = function(player_index, on)
+    local player = game.get_player(player_index)
+    web.set_wanted(player, on)
+    window.rebuild_any(player)
+  end,
   last_absolute = function(player_index) return window.last_absolute(player_index) end,
   hover_grip = function(player_index) window.test_hover_grip(player_index) end,
   compat_scan = function(player_index) compat.scan(game.get_player(player_index)) end,
@@ -1008,4 +1017,7 @@ if script.active_mods["fse-std"] then
   safe.chain("bpgen", { require("__fse-std__/input").handlers, require("__fse-std__/window").handlers,
     require("ui").handlers,  -- (the theme: restyled when a player picks another, folds, toasts)
     require("__fse-std__/dnd").handlers })  -- (History's rows dragged onto the preview)
+  -- (the web window: fse-std's shells, when this fse-std has them)
+  local web_shell = web.shell
+  if web_shell then safe.chain("bpgen", { web_shell.handlers }) end
 end

@@ -1,4 +1,30 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.22.0
+Date: 2026-10-13
+  Features:
+    - Web window (pilot): with the fse loader in single player the bpgen window is a web page over the game (fse's
+      shells), the blueprint preview showing through it (the game draws it: an engine island). Modes in a column on the left, the
+      mode's settings beside them with Plan pinned under them, the preview filling the rest; the result, the test run
+      and History in a drawer at the preview's right that slides in when there is something to show (the preview
+      narrows with it); zoom, fit and the arrows above the preview, the blueprint's actions below it.
+    - The test run's chart is drawn by the page: the rate each second, the rate it should reach dashed, the rate now in
+      big numbers, ×1 / ×5 / ×10 beside it.
+    - Pickers of its own: the item groups as tabs, a search over the names (as the game translates them), the game's
+      icons (layered and tinted ones composed, mods' icons too), your favourites (right click) and last picks on top,
+      the keyboard (type to search, arrows, Enter, Esc), the quality as chips, Clear. They offer what the game's picker
+      would (its filters, "Only unlocked" included). The game's own picker would open under the page.
+    - The page's own tooltips, toasts in its title bar, Undo's question in the page, History's search and drag (a row
+      onto the preview shows it again, onto the Recipe slot plans it again), the game's icons in the texts.
+    - Follows the player's fse-std theme and Window size; its own Size in the gear's menu, with Only unlocked, Theme...,
+      Reset size and place and "Game window" (the game's own bpgen window; its gear has "Web window (pilot)" back).
+      Also a per-player mod setting, "bpgen: web window (pilot)", on by default.
+    - A companion as before: it stays open while you play, steps aside while another window is open (the inventory, a
+      machine, a picker) and comes back after.
+  Changes:
+    - The Lua window is unchanged without the shell (no loader, multiplayer, the setting off, no WebView2). Under the
+      web window it is the model: planning, Python jobs, test runs and placing run exactly as for the Lua window.
+    - The data stage lists the prototypes' and item groups' icon files (mod-data "bpgen-icons") for the web window.
+---------------------------------------------------------------------------------------------------
 Version: 0.21.0
 Date: 2026-10-13
   Features:

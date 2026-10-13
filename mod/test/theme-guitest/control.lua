@@ -94,6 +94,9 @@ steps = {
       helpers.write_file("theme-gui.txt", "", false)
       if p().controller_type == defines.controllers.cutscene then p().exit_cutscene() end
       p().force.research_all_technologies()
+      -- (the game's own bpgen window: this test checks it; the web window has run_bpgen_shell.py)
+      -- (a mod can't set another mod's setting: bpgen's remote call does)
+      if remote.interfaces["bpgen"].web_wanted then remote.call("bpgen", "web_wanted", 1, false) end
       set_theme("vanilla")
     end, ticks = 30 },
   { run = function()

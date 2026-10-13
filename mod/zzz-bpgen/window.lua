@@ -14,6 +14,7 @@ local stdwin = script.active_mods["fse-std"] and require("__fse-std__/window") o
 local stdinput = stdwin and require("__fse-std__/input") or nil
 local dnd = stdwin and require("__fse-std__/dnd") or nil  -- (History's rows dragged onto the preview)
 local ui = require("ui")
+local web = require("web")  -- (the window as a web page over the game: fse's shells)
 
 --- the window's words: a line of [bpgen-window] in locale/en/window.cfg, with its parameters
 local function T(key, ...) return { "bpgen-window." .. key, ... } end
@@ -225,10 +226,12 @@ function find(el, name)
   if not (el and el.valid) then return nil end
   local f = find_in(el, name)
   if f or el.name ~= NAME or el.parent ~= game.get_player(el.player_index).gui.screen then return f end
-  for _, c in pairs(ui.attached(game.get_player(el.player_index), NAME)) do
+  local player = game.get_player(el.player_index)
+  for _, c in pairs(ui.attached(player, NAME)) do
     f = find_in(c, name)
     if f then return f end
   end
+  return web.find(player, name)  -- (the web window: the preview's camera in its island)
 end
 
 local function speed(proto, quality)
@@ -426,11 +429,19 @@ function M.preview(player, bp)
   return { center = center, w = w, h = h, built = count, where = where }
 end
 
-local function fit(player, w, h)
-  -- (the preview's pixels: its size in GUI units at 100 %, times the window's scale and the game's)
+--- the preview's size in pixels: the web window's island, else its size in GUI units at 100 % times the window's
+--- scale and the game's
+local function view_px(player)
+  local ww, wh = web.view(player)
+  if ww then return ww, wh end
   local scale = player.display_scale * ui.scale_of(player.gui.screen[NAME])
   local cw, ch = cam_size(player)
-  local z = math.min(cw * scale / ((w + 2) * 32), ch * scale / ((h + 2) * 32))
+  return cw * scale, ch * scale
+end
+
+local function fit(player, w, h)
+  local pw, ph = view_px(player)
+  local z = math.min(pw / ((w + 2) * 32), ph / ((h + 2) * 32))
   return math.max(0.05, math.min(2, z))
 end
 
@@ -508,7 +519,7 @@ local only_unlocked = safe.stored("only_unlocked")  -- player index -> true
 -- "Docked" (the checkbox by it, per player): the modes, the preview's tools and the actions on frames stuck to the
 -- window's edges (fse-std's layouts); unticked, all of it inside the window
 local inside = safe.stored("inside")  -- player index -> true: inside the window
-function docked(player) return ui.layouts and not inside[player.index] end
+function docked(player) return ui.layouts and not inside[player.index] and not web.model(player) end
 
 -- {"item/iron-plate" = true, ...} of a recipe's ingredients or products
 local function stuff(list)
@@ -732,6 +743,7 @@ function M.restrict(player)
   if not frame then return end
   local on = only_unlocked[player.index] == true
   restrict_el(frame, on, on and unlocked_filters(player.force) or {})
+  web.filters_changed(player)  -- (the web window's pickers: their mirrors get them)
 end
 
 local function set_machine_filter(frame, recipe)
@@ -749,12 +761,14 @@ end
 local function status(frame, text)
   local s = find(frame, "bpgen_status")
   if s then s.caption = text or "" end
+  if frame and frame.valid then web.dirty(game.get_player(frame.player_index)) end
 end
 
 --- what an action did: in the status line and as a toast (a message at the top that goes away by itself)
 local function say(player, text)
   local frame = player.gui.screen[NAME]
   if frame then status(frame, text) end
+  if web.model(player) then return web.toast(player, text) end  -- (the page shows it)
   ui.toast(player, text)
 end
 
@@ -836,11 +850,13 @@ local function test_stop(player_index)
   if not testing() then test_speed_off(nil) end
 end
 
---- the window closed, and what's stuck to it (its test run stops: nothing would show it)
-local function close(player)
+--- the window closed, and what's stuck to it (its test run stops: nothing would show it); the web window's shell too,
+--- unless `keep_shell` (it opens again at once, as the web window: the page stays)
+local function close(player, keep_shell)
   test_stop(player.index)
   for _, c in pairs(ui.attached(player, NAME)) do c.destroy() end
   if player.gui.screen[NAME] then player.gui.screen[NAME].destroy() end
+  if not keep_shell then web.close(player) end
 end
 M.close = close
 
@@ -851,6 +867,7 @@ local function stale(player, on)
   if not (plan and note) then return end
   note.visible = on
   ui.set_role(plan, on and "pulse" or "ok")
+  web.dirty(player)
 end
 
 --- the folds' badges: what's set in them
@@ -870,6 +887,8 @@ local glows = safe.stored("glows")  -- player index -> the preview's glow (fse-s
 local function glow(player, on)
   ui.unglow(glows[player.index])
   glows[player.index] = nil
+  web.dirty(player)
+  if web.model(player) then return end  -- (the page shows it)
   local cam = on and find(player.gui.screen[NAME], "bpgen_cam")
   if cam then glows[player.index] = ui.glow(cam) end
 end
@@ -878,7 +897,7 @@ end
 local function changed(e)
   local el = e.element
   if not (el and el.valid) or el.name == "bpgen_only_unlocked" or el.name == "bpgen_section"
-    or el.name == "bpgen_docked" then return end
+    or el.name == "bpgen_docked" or el.name == "bpgen_web" then return end
   local root = el
   while root.parent and root.parent.parent do root = root.parent end
   if root.name ~= NAME or not results[e.player_index] then return end
@@ -907,6 +926,7 @@ local function set_mode(frame, mode)
     if m == mode then find(frame, "bpgen_mode_tip").caption = T("mode-" .. m .. "-tip") end
   end
   M.steps(frame)
+  web.dirty(game.get_player(frame.player_index))
 end
 
 --- the step bar: 1 What (a mode, always), 2 How (until there is a plan), 3 Where (a plan to place)
@@ -938,6 +958,7 @@ local function show_patches(frame, player)
     lines[#lines + 1] = T("patch-line", i, #t > 0 and table.concat(t, "  ") or T("no-ore"))
   end
   note.caption = #lines > 0 and join(lines, "\n") or T("no-patches")
+  web.dirty(player)
 end
 
 -- a bpgen tool in hand: the window (and what's stuck to it) out of the way, a small card at the top says what to
@@ -960,7 +981,9 @@ end
 --- the window and its stuck frames shown or hidden
 local function window_shown(player, on)
   local frame = player.gui.screen[NAME]
-  if frame then frame.visible = on end
+  local as_web = web.model(player)
+  if frame then frame.visible = on and not as_web end  -- (the web window's Lua one stays hidden: the shell hides)
+  if as_web then web.show(player, on) end
   for _, c in pairs(ui.attached(player, NAME)) do
     c.visible = on and (c.name ~= NAME .. "__test" or c.tags.bpgen_open == true)
   end
@@ -1034,9 +1057,12 @@ function M.open(player, prefill)
   prefill = prefill or {}
   unlocks[player.index] = nil
   local screen = player.gui.screen
-  close(player)
+  -- (the web window: this Lua window, hidden, is its model; the shell stays open when it was)
+  local as_web = web.use(player)
+  close(player, as_web)
+  web.set_model(player, as_web)
   local frame, holder
-  if stdwin then
+  if stdwin and not as_web then
     -- (made at the size that fits the room it has at its scale: never drawn smaller for a size it won't keep)
     local max_w, max_h, min_h = room(player)
     local ww, wh = wanted_size(player)
@@ -1490,7 +1516,7 @@ function M.open(player, prefill)
   end
 
   fit_panel(left)
-  adopt(player)  -- (the game's styles it was built with: each player's theme)
+  if not as_web then adopt(player) end  -- (the game's styles it was built with: each player's theme)
   if dnd then  -- (History's rows dropped on the preview or the Recipe slot)
     dnd.droppable(cam, "bpgen_history")
     dnd.droppable(find(frame, "bpgen_recipe"), "bpgen_history")
@@ -1529,6 +1555,9 @@ function M.open(player, prefill)
     find(frame, "bpgen_also").clear()
     find(frame, "bpgen_also").add({ type = "label", caption = "..." })
     ctx.api(player, "siblings", { recipe = prefill.recipe, machine = m }, "also")
+  end
+  if as_web and not web.attach(player, frame) then  -- (the shell didn't open: the Lua window)
+    return M.open(player, prefill)
   end
   M.restrict(player)
   return frame
@@ -1996,6 +2025,7 @@ function M.on_progress(player, p)
   local frame = player.gui.screen[NAME]
   local box = frame and find(frame, "bpgen_progress")
   if not box then return end
+  web.dirty(player)
   box.visible = true
   local bar = find(box, "bpgen_progress_bar")
   if bar then ui.set_progress(bar, p.fraction or 0, p.step or "") end
@@ -2068,6 +2098,7 @@ end
 function M.on_result(player, res)
   local frame = player.gui.screen[NAME]
   if not frame then return false end
+  web.dirty(player)
   local prog = find(frame, "bpgen_progress")
   if prog and not res.measure then
     prog.visible = false
@@ -2420,6 +2451,7 @@ local function on_api(player, tag, out)
   elseif tag == "ideas" and r then show_ideas(frame, r)
   elseif tag == "history" and r then
     histories[player.index] = r
+    if web.model(player) then return web.history(player) end  -- (the page's History drawer shows it)
     show_history(frame, r)
   elseif tag == "also" and r then
     local box = find(frame, "bpgen_also")
@@ -2531,7 +2563,8 @@ local function test_view(player, frame, run, final)
     test_series[player.index] = {}
     ui.set_progress(bar, 0, T("starting"))
     holder.clear()
-    local g = ui.graph(holder, { 0, 0 }, { width = TEST_W - 40, height = 56 })
+    -- (the web window draws its own chart: a graph on a hidden window would draw over the game)
+    local g = not web.model(player) and ui.graph(holder, { 0, 0 }, { width = TEST_W - 40, height = 56 })
     if g then g.name = "bpgen_test_chart" end
     adopt(player)
     return
@@ -2574,6 +2607,7 @@ bench.on_progress = function(run)
   local player = game.get_player(run.player)
   local frame = player and player.gui.screen[NAME]
   if not frame then return end
+  web.dirty(player)
   if run.kind == "test" then
     local text, starved = describe_test(run, false)
     find(frame, "bpgen_test_status").caption = text
@@ -2595,6 +2629,7 @@ bench.on_done = function(run, cases)
   local frame = player.gui.screen[NAME]
   test_speed_off(frame)  -- (the window closed or not: the game back at its own speed)
   if not frame then return end
+  web.dirty(player)
   local text, starved = describe_test(run, true)
   find(frame, "bpgen_test_status").caption = text
   mark(player, starved)
@@ -2645,9 +2680,15 @@ ui.on_yes("bpgen_unplace", function(player) unplace(player) end)
 local function settings(player)
   local frame = player.gui.screen[NAME]
   local sized = stdwin and stdwin.size_setting ~= nil  -- (fse-std 0.8+: the window's own Size)
-  local m = frame and ui.menu(frame, { size = { 250, (ui.layouts and 196 or 164) + (sized and 58 or 0) } })
+  local can_web = web.available()
+  local m = frame and ui.menu(frame, { size = { 250, (ui.layouts and 196 or 164) + (sized and 58 or 0)
+    + (can_web and 32 or 0) } })
   if not m then return end
   ui.add(m, { type = "label", caption = "bpgen" }, "caption")
+  if can_web then  -- (the web window instead: fse's shells, single player)
+    ui.add(m, { type = "checkbox", name = "bpgen_web", caption = T("web-window"), state = false,
+      tooltip = T("web-window-tip") }, "check")
+  end
   if ui.layouts then
     ui.add(m, { type = "checkbox", name = "bpgen_docked", caption = { "fstd.docked" },
       state = docked(player) == true, tooltip = { "fstd.docked-tooltip" } }, "check")
@@ -2902,7 +2943,7 @@ local function on_click(e)
     end
   elseif action == "pan" and r and r.zoom then
     local cam = find(frame, "bpgen_cam")
-    local step = cam_size(player) * player.display_scale * ui.scale_of(frame) / (32 * cam.zoom) / 4  -- (a quarter of the view)
+    local step = view_px(player) / (32 * cam.zoom) / 4  -- (a quarter of the view)
     cam.position = { x = cam.position.x + el.tags.dx * step, y = cam.position.y + el.tags.dy * step }
   elseif (action == "zoom" or action == "fit") and r and r.zoom then
     local cam = find(frame, "bpgen_cam")
@@ -2926,6 +2967,7 @@ end
 
 -- (pickers an answer adds follow "Only unlocked" too)
 function M.on_api(player, tag, out)
+  web.dirty(player)
   local r = on_api(player, tag, out)
   M.restrict(player)
   local frame = player.gui.screen[NAME]
@@ -3040,6 +3082,7 @@ end
 local refitting = {}
 local function reflow(player)
   local frame = player.gui.screen[NAME]
+  if frame and frame.valid and web.model(player) then return M.view_resized(player) end  -- (the page lays itself out)
   if not (frame and frame.valid and stdwin) or refitting[player.index] then return end
   refitting[player.index] = true
   local ok, err = pcall(function()
@@ -3071,23 +3114,30 @@ ui.on_search("bpgen_history", function(player, text)
   end
 end)
 
+--- History's row `i` dropped onto the Recipe slot ("recipe": planned again) or the preview (shown, ready to place)
+local function history_use(player, i, target)
+  local h = (histories[player.index] or {})[i]
+  local frame = player.gui.screen[NAME]
+  if not (h and frame) then return end
+  if target == "recipe" and h.recipe and prototypes.recipe[h.recipe] then  -- (planned again)
+    set_mode(frame, "line")
+    find(frame, "bpgen_recipe").elem_value = h.recipe
+    set_machine_filter(frame, h.recipe)
+    local m = best_machine(player, h.recipe)
+    find(frame, "bpgen_machine").elem_value = m and { name = m, quality = "normal" } or nil
+    M.plan(player)
+  else  -- (shown in the preview, ready to place)
+    M.on_result(player, { blueprint = h.blueprint, mode = h.mode, label = h.label,
+      notes = { T("from-history", h.label or T("a-blueprint")) } })
+  end
+end
+M.history_use = history_use
+
 if dnd then
   dnd.on_drop(function(player, payload, target)
     if type(payload) ~= "table" or payload.kind ~= "bpgen_history" then return end
-    local h = (histories[player.index] or {})[payload.i]
-    local frame = player.gui.screen[NAME]
-    if not (h and frame and target and target.valid) then return end
-    if target.name == "bpgen_recipe" and h.recipe and prototypes.recipe[h.recipe] then  -- (planned again)
-      set_mode(frame, "line")
-      target.elem_value = h.recipe
-      set_machine_filter(frame, h.recipe)
-      local m = best_machine(player, h.recipe)
-      find(frame, "bpgen_machine").elem_value = m and { name = m, quality = "normal" } or nil
-      M.plan(player)
-    else  -- (shown in the preview, ready to place)
-      M.on_result(player, { blueprint = h.blueprint, mode = h.mode, label = h.label,
-        notes = { T("from-history", h.label or T("a-blueprint")) } })
-    end
+    if not (target and target.valid) then return end
+    history_use(player, payload.i, target.name == "bpgen_recipe" and "recipe" or "preview")
   end)
 end
 
@@ -3222,6 +3272,11 @@ M.handlers = {
     if el and el.valid and el.name == "bpgen_docked" then
       return M.set_docked(game.get_player(e.player_index), el.state)
     end
+    if el and el.valid and el.name == "bpgen_web" then  -- (the web window instead, or back)
+      local player = game.get_player(e.player_index)
+      web.set_wanted(player, el.state)
+      return M.rebuild_any(player)
+    end
     if el and el.valid and el.tags and el.tags.bpgen_make_row then
       local where = el.parent["bpgen_where"]
       where.caption = T(el.state and "made-here" or "on-belt")
@@ -3266,18 +3321,23 @@ M.handlers = {
   [defines.events.on_player_display_resolution_changed] = function(e) reflow(game.get_player(e.player_index)) end,
   [defines.events.on_runtime_mod_setting_changed] = function(e)
     if e.setting == "fstd-window-scale" and e.player_index then reflow(game.get_player(e.player_index)) end
+    if e.setting == "bpgen-web-window" and e.player_index then  -- (the web window or the Lua one: built again so)
+      local player = game.get_player(e.player_index)
+      if player.gui.screen[NAME] then M.rebuild_any(player) end
+    end
   end,
   [defines.events.on_lua_shortcut] = function(e)
     if e.prototype_name ~= "bpgen-window" then return end
     local player = game.get_player(e.player_index)
     local f = player.gui.screen[NAME]
-    if f and not f.visible then player.clear_cursor() M.tool_done(player)
+    -- (a tool in hand: its card shows, the window hides; back with the tool put away)
+    if f and player.gui.screen[CARD] then player.clear_cursor() M.tool_done(player)
     elseif f then close(player) else M.open(player) end
   end,
   ["bpgen-window"] = function(e)
     local player = game.get_player(e.player_index)
     local f = player.gui.screen[NAME]
-    if f and not f.visible then player.clear_cursor() M.tool_done(player)
+    if f and player.gui.screen[CARD] then player.clear_cursor() M.tool_done(player)
     elseif f then close(player) else M.open(player) end
   end,
 }
@@ -3309,6 +3369,38 @@ function M.place_plan(player, res)
   local ghosts = place.place(player, res.blueprint, not box and player.position or nil, box)
   placed[player.index] = ghosts
   return #ghosts, box
+end
+
+--- the window built again as it should be now (the web page or the Lua window: the setting, the shell there or not),
+--- its mode, recipe and last plan kept
+function M.rebuild_any(player)
+  if player.gui.screen[NAME] then return M.rebuild(player) end
+  web.close(player)
+  web.set_model(player, false)
+end
+
+--- the preview got another size (the web window's island, the window's scale): Fit's zoom follows, and the view too
+--- while it shows the whole plan
+function M.view_resized(player)
+  local r = results[player.index]
+  if not (r and r.w) then return end
+  local old = r.zoom
+  r.zoom = fit(player, r.w, r.h)
+  local cam = find(player.gui.screen[NAME], "bpgen_cam")
+  if cam and old and math.abs(cam.zoom - old) < 1e-6 then cam.zoom = r.zoom end
+end
+
+-- the web window's view of this file
+M.NAME = NAME
+web.setup({ NAME = NAME, find = find, on_click = on_click, handlers = M.handlers, results = results,
+  test_series = test_series, histories = histories, ghosts_left = ghosts_left, close = close,
+  set_only_unlocked = function(player, on) M.set_only_unlocked(player, on) end,
+  history_use = history_use, view_resized = function(player) M.view_resized(player) end,
+  rebuild_any = function(player) M.rebuild_any(player) end })
+-- (its events, after the window's own)
+for ev, fn in pairs(web.handlers) do
+  local own = M.handlers[ev]
+  M.handlers[ev] = own and function(e) own(e) fn(e) end or fn
 end
 
 return M

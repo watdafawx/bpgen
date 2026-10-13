@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>bpgen</title>
+<!-- bpgen's window as a web page over the game (fse's shells): the controls, results, test run and history are the
+     page's; the blueprint preview and the game's pickers show through it (engine islands). State comes from the mod
+     (web.lua: a snapshot of its Lua window, the model), actions go back as messages. Saved, it reloads in the game. -->
+<link rel="stylesheet" href="/shell/shell.css">
+<script src="/shell/shell.js"></script>
+<link rel="stylesheet" href="bpgen.css">
+</head>
+<body>
+<div id="win" class="win" data-fse-solid>
+  <header class="bar" data-fse-drag>
+    <div class="brand"><span class="logo" aria-hidden="true"></span><b>bpgen</b></div>
+    <div class="tip" id="tip"></div>
+    <div class="toasts" id="toasts"></div>
+    <span class="pill" id="unlocked-pill" hidden data-t="unlocked-badge" data-tip="unlocked-badge-tip">only unlocked</span>
+    <button class="icon-btn" id="gear" data-tip="web-settings" data-test="gear" aria-label="Settings">&#9881;</button>
+    <button class="icon-btn" id="close" data-tip="web-close" data-test="close" aria-label="Close">&#10005;</button>
+  </header>
+
+  <div class="body">
+    <nav class="modes" id="modes" data-test="modes"></nav>
+
+    <aside class="controls">
+      <div class="scroll" id="scroll"></div>
+      <footer class="foot">
+        <div class="progress" id="progress" hidden>
+          <div class="prow"><span data-t="planning">Planning</span><span class="ptext" id="ptext"></span></div>
+          <div class="meter"><i id="pbar"></i></div>
+          <details class="log"><summary data-t="web-log">Log</summary><pre id="plog"></pre></details>
+        </div>
+        <div class="status" id="status"></div>
+        <div class="stale" id="stale" hidden data-t="stale">Changed since the last plan: Plan again.</div>
+        <button class="primary plan" id="plan" data-test="plan" data-click='{"bpgen":"plan"}' data-t="plan">Plan</button>
+        <div class="row2" id="base-tools">
+          <button class="btn" data-click='{"bpgen":"short"}' data-t="short" data-tip="short-tip">What's short?</button>
+          <button class="btn" data-click='{"bpgen":"check_bus"}' data-t="check-bus" data-tip="check-bus-tip">Check my bus</button>
+        </div>
+      </footer>
+    </aside>
+
+    <main class="stage" id="stage">
+      <div class="toolbar">
+        <div class="seg">
+          <button class="tool" data-click='{"bpgen":"zoom","f":0.8}' data-tip="zoom-out" data-test="zoom_out">&#8722;</button>
+          <button class="tool" data-click='{"bpgen":"zoom","f":1.25}' data-tip="zoom-in" data-test="zoom_in">+</button>
+          <button class="tool wide" data-click='{"bpgen":"fit"}' data-t="fit" data-tip="fit-tip" data-test="fit">Fit</button>
+        </div>
+        <div class="seg">
+          <button class="tool" data-click='{"bpgen":"pan","dx":-1,"dy":0}' data-tip="pan-tip">&#9664;</button>
+          <button class="tool" data-click='{"bpgen":"pan","dx":0,"dy":-1}' data-tip="pan-tip">&#9650;</button>
+          <button class="tool" data-click='{"bpgen":"pan","dx":0,"dy":1}' data-tip="pan-tip">&#9660;</button>
+          <button class="tool" data-click='{"bpgen":"pan","dx":1,"dy":0}' data-tip="pan-tip">&#9654;</button>
+        </div>
+        <div class="dims" id="dims"></div>
+        <div class="grow"></div>
+        <button class="btn test-btn" id="test-btn" data-test="test" data-click='{"bpgen":"test"}'>Test run</button>
+        <div class="seg tabs" id="tabs">
+          <button class="tool tab" data-drawer="result" data-t="web-results" data-test="tab_result">Result</button>
+          <button class="tool tab" data-drawer="test" data-t="web-test" data-test="tab_test">Test run</button>
+          <button class="tool tab" data-drawer="history" data-t="web-history" data-test="tab_history">History</button>
+        </div>
+      </div>
+
+      <div class="view">
+        <div class="hole-ring" id="ring">
+          <engine-island id="preview" data-test="preview"></engine-island>
+          <div class="empty" id="empty">
+            <div class="blueprint-art" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="empty-head" data-t="web-preview-empty-head">Nothing planned yet</div>
+            <div class="empty-text" id="empty-text"></div>
+          </div>
+          <div class="covered"></div>
+        </div>
+        <aside class="drawer" id="drawer">
+          <div class="drawer-in">
+            <section class="pane" data-pane="result" id="pane-result"></section>
+            <section class="pane" data-pane="test" id="pane-test">
+              <div class="test-head">
+                <div class="test-rate" id="test-rate"></div>
+                <button class="tool speed" id="speed" data-click='{"bpgen":"test_speed"}' data-tip="test-speed-tip" data-test="speed">&#215;1</button>
+              </div>
+              <div class="meter big"><i id="tbar"></i></div>
+              <div class="ttext" id="ttext"></div>
+              <svg class="chart" id="chart" viewBox="0 0 300 140" preserveAspectRatio="none" data-test="chart">
+                <defs><linearGradient id="fillg" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0" stop-color="currentColor" stop-opacity=".45"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/>
+                </linearGradient></defs>
+                <g class="grid" id="grid"></g>
+                <path class="area" id="area" d=""/>
+                <path class="line" id="line" d=""/>
+                <line class="exp" id="exp" x1="0" x2="300" y1="-10" y2="-10"/>
+                <circle class="dot" id="dot" r="3" cx="-10" cy="-10"/>
+              </svg>
+              <div class="chart-legend"><span class="sw line"></span><span data-t="web-rate">per minute</span><span class="sw exp"></span><span data-t="web-expected">expected</span></div>
+              <div class="tstatus" id="tstatus"></div>
+            </section>
+            <section class="pane" data-pane="history" id="pane-history">
+              <input class="search" id="hsearch" type="search" data-ph="search-history" placeholder="Search your blueprints">
+              <div class="hlist" id="hlist"></div>
+              <div class="hint" data-t="web-history-hint">Drag a row onto the preview to see it again, or onto the Recipe slot to plan it again.</div>
+            </section>
+          </div>
+          <button class="drawer-x" id="drawer-x" data-tip="web-drawer-close" data-test="drawer_close">&#10095;</button>
+        </aside>
+      </div>
+
+      <div class="dock" id="dock">
+        <button class="primary" id="a-cursor" data-click='{"bpgen":"cursor"}' data-t="to-cursor" data-test="cursor">Blueprint to cursor</button>
+        <button class="btn" id="a-copy" data-click='{"bpgen":"copy"}' data-t="copy" data-tip="copy-tip" data-test="copy">Copy</button>
+        <button class="btn" id="a-place" data-click='{"bpgen":"place"}' data-test="place">Place near me</button>
+        <button class="btn" id="a-place_base" data-click='{"bpgen":"place_base"}' data-t="place-base" data-tip="place-base-tip" data-test="place_base">Place by my base</button>
+        <button class="btn" id="a-base_spot" data-click='{"bpgen":"base_spot"}' data-t="pick-spot" data-tip="pick-spot-tip">Pick spot</button>
+        <span class="seg nudges" id="nudges">
+          <button class="tool" data-click='{"bpgen":"nudge","dx":-1,"dy":0}' data-tip="web-place-move">&#9664;</button>
+          <button class="tool" data-click='{"bpgen":"nudge","dx":0,"dy":-1}' data-tip="web-place-move">&#9650;</button>
+          <button class="tool" data-click='{"bpgen":"nudge","dx":0,"dy":1}' data-tip="web-place-move">&#9660;</button>
+          <button class="tool" data-click='{"bpgen":"nudge","dx":1,"dy":0}' data-tip="web-place-move">&#9654;</button>
+          <button class="tool" id="a-base_rotate" data-click='{"bpgen":"base_rotate"}' data-tip="rotate-tip">&#10227;</button>
+        </span>
+        <button class="btn" id="a-base_redo" data-click='{"bpgen":"base_redo"}' data-t="redo" data-tip="redo-tip">Redo</button>
+        <div class="grow"></div>
+        <button class="btn" id="a-undo" data-test="undo" data-t="undo" data-tip="undo-tip">Undo</button>
+        <button class="btn" id="a-history" data-test="history" data-click='{"bpgen":"history"}' data-t="history" data-tip="history-tip">History</button>
+      </div>
+    </main>
+  </div>
+  <div class="grip" data-fse-resize aria-hidden="true"></div>
+
+  <div class="pop" id="menu" hidden data-test="menu">
+    <label class="check"><input type="checkbox" id="m-unlocked"><span data-t="only-unlocked">Only unlocked</span></label>
+    <label class="field"><span data-t="web-size">Size</span><select id="m-size"></select></label>
+    <button class="btn" id="m-theme" data-t="web-theme">Theme...</button>
+    <button class="btn" id="m-reset" data-t="web-reset">Reset size and place</button>
+    <button class="btn" id="m-lua" data-t="web-lua" data-tip="web-lua-tip" data-test="lua">Game window</button>
+  </div>
+  <div class="picker" id="picker" hidden data-test="picker">
+    <div class="pk-head"><b id="pk-title"></b><input class="search" id="pk-search" type="search" data-ph="web-pick-search" placeholder="Search" data-test="pick_search">
+      <button class="icon-btn" id="pk-x" aria-label="Close">&#10005;</button></div>
+    <div class="pk-groups" id="pk-groups"></div>
+    <div class="pk-grid" id="pk-grid"></div>
+    <div class="pk-foot"><span class="pk-q" id="pk-q"></span><span class="grow"></span><span class="pk-name" id="pk-name"></span>
+      <button class="btn" id="pk-clear" data-t="web-pick-clear" data-test="pick_clear">Clear</button></div>
+  </div>
+  <div class="modal" id="modal" hidden>
+    <div class="dialog">
+      <h3 id="q-title"></h3>
+      <p id="q-text"></p>
+      <div class="q-row"><button class="btn" id="q-no"></button><button class="primary danger" id="q-yes" data-test="confirm_yes"></button></div>
+    </div>
+  </div>
+  <div class="ghost" id="ghost" hidden></div>
+  <div class="tooltip" id="tooltip" hidden></div>
+</div>
+<script src="bpgen.js"></script>
+</body>
+</html>
