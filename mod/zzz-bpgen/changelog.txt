@@ -1,4 +1,28 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.21.0
+Date: 2026-10-13
+  Features:
+    - The preview takes the window's whole right side. The result (its numbers as tiles, three a row, its badges, the
+      details folded) is under Plan in the left panel, in a scroll area of its own; the test run is in a drawer out of
+      the window's right edge under the preview's tools (over the preview's right part when the screen has no room
+      beside the window), with its speed button and a close button. Test run opens it; while a run goes on the button
+      says how far it got ("Stop · 60 %") and opens the drawer again when it was closed. Not docked (or without
+      fse-std), the test run sits above the result under Plan, the tools and actions in rows under the preview.
+    - The window follows fse-std 0.8's window scale: the Window size setting, or its own Size in the settings (the gear:
+      Docked, Size, Only unlocked, Theme..., Reset size and place).
+    - At a bigger scale or on a smaller screen the preview shrinks so the window fits at the scale it wants, instead of
+      the whole window being drawn smaller; it grows back to the size you gave it when there's room again.
+  Changes:
+    - The window, its rails and its dock stay clear of the hotbar band and, when that still leaves the preview its
+      smallest width, of the minimap and research box: a new window is centred in that free area. On a short screen
+      (a big game UI scale) the preview may get as low as 340 instead of 420.
+    - "Reset size and place" keeps the window's Size.
+    - A preview size kept from before is made taller by what the rows under it took, so the window stays as tall.
+    - The result's "made" tile shows whole numbers from 100/min on; badges go two a row.
+  Bugfixes:
+    - At a game UI scale of 200 % on 2560x1440 the dock overlapped the hotbar and the right rail covered the minimap.
+    - The preview's fit, zoom and pan steps and the tool card's place count the window's scale.
+---------------------------------------------------------------------------------------------------
 Version: 0.20.14
 Date: 2026-10-12
   Changes:

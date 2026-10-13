@@ -95,11 +95,33 @@ In game, after each plan you see whether your save can build it (missing researc
 modules would change, and what your factory is short of. **Test run** runs the preview for real (powered, fed and
 drained) and shows the rate it reaches. **Place near me** puts it down as ghosts at the nearest free spot.
 
-With `fse-std` the window follows each player's theme (`/fse-theme`): the modes are tabs on its left edge, the
-blueprint's actions hang below it, the preview's zoom, arrows and Test run are tabs on its right edge,
-History opens as a drawer under them (search it, drag a row onto the preview or the Recipe slot), and Plan stays
-in sight under the settings, breathing when you changed something since the last plan. Without it, the same in
-one window in the game's own styles.
+## The window
+
+![The bpgen window: modes on the left rail, settings, Plan and the result in the left panel, the preview, its tools on the right rail with a test run's drawer open, the actions docked below](images/window.jpg)
+
+With `fse-std` the window follows each player's theme (`/fse-theme`) and this layout:
+
+- **Left panel**: the mode's settings, then **Plan** pinned in sight (breathing when you changed something since the
+  last plan) with What's short? and Check my bus, then the **Result** in a scroll area of its own: its numbers as
+  tiles (size, machines, made), badges (inputs needed, planning time, "can't build it yet"), the details folded.
+- **The preview** takes the whole right side; its corner grip resizes it.
+- **Rails and dock**: the modes (Line, Mall, Extend, Base, Bus, Refit, Move, Ship) on a rail out of the left edge;
+  the preview's tools (Zoom in, Zoom out, Fit, the arrows, Test run) on a rail out of the right edge; the
+  blueprint's actions (Blueprint to cursor, Copy, Place near me, Place by my base, Pick spot, Undo, History) docked
+  below.
+- **Drawers**: Test run and History open a drawer out of the right edge, under the tools (over the preview's right
+  part when the screen has no room beside the window). The test run's drawer has its speed button and a close
+  button; while a run goes on, Test run says how far it got ("Stop · 60 %") and opens the drawer again when it was
+  closed. History: search it, drag a row onto the preview to see it again or onto the Recipe slot to plan it again.
+- **The gear**: Docked, Size, Only unlocked, Theme..., Reset size and place (it keeps the Size). Docked off: the
+  modes as tabs on top, the tools and the actions in rows under the preview, the test run above the result.
+- **Scale** (fse-std 0.8): drawn at fse-std's Window size setting, or at its own Size. At a bigger scale or on a
+  smaller screen the preview shrinks so the window fits, and grows back to the size you gave it when there's room;
+  the window, its rails and its dock keep clear of the hotbar (and of the minimap when the preview can spare it).
+- It stays open while you use the game's own windows (Esc doesn't close it; the X does). Closing it during a test
+  run stops the run and puts the game back at its own speed.
+
+Without `fse-std`, the same in one window in the game's own styles, everything inside it.
 
 ## Getting started: in game
 
@@ -239,9 +261,10 @@ placed exactly, then ore to science packs in a game), `harness\busdesign_check.p
 [direction]` (bus design built on made-up patches and run: every lane's rate, the balancers even). They use the same `run\` folder as the web app.
 `mod\test\run_compat.py` opens a real game with Recipe Book and Factory Planner (from your mods folder) and checks
 bpgen's buttons in their windows.
-`mod	estun_theme_gui.py [--plain]` opens a real game through the fse launcher and shoots the bpgen window in five
-of fse-std's themes (`--plain`: without fse-std, in the game's own styles), with its progress bar and Undo's
-confirm dialog.
+`mod\test\run_theme_gui.py [--plain] [--scale 2]` opens a real game through the fse launcher and shoots the bpgen
+window in five of fse-std's themes (`--plain`: without fse-std, in the game's own styles; `--scale 2`: the game's
+GUI at 200 %), with its progress bar, Undo's confirm dialog, the test run and History drawers, and the window at
+fse-std's window scale 150 %.
 
 ## License
 

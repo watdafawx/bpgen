@@ -223,6 +223,23 @@ function M.confirm(player, name, opts)
   if fn then fn(player, opts.data) end
 end
 
+-- the window's own scale (fse-std 0.8+: a per-window Size and a Window size setting on top of the game's UI scale);
+-- without it everything is drawn as designed (1)
+
+--- the scale an element is drawn at (its window's; 1 = as designed)
+function M.scale_of(el)
+  if theme and theme.scale_of and el and el.valid then return theme.scale_of(el) end
+  return 1
+end
+
+--- style values given at 100 % on an element built earlier: written at its window's scale (and kept through a
+--- restyle); without fse-std 0.8 written as they are
+function M.style(el, t)
+  if theme and theme.style then return theme.style(el, t) end
+  for k, v in pairs(t) do el.style[k] = v end
+  return el
+end
+
 M.handlers = theme and theme.handlers or {}
 
 return M

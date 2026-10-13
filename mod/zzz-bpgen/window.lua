@@ -33,61 +33,166 @@ local function join(list, sep)
   return { "", table.unpack(flat) }
 end
 
-local FRAME_W, FRAME_H = 360, 366  -- (the window around the preview: the tabs, the left panel, the rows under it)
+local OLD_FRAME_H = 366  -- (before 0.21: the window's height besides the preview, its rows under it included)
 -- (with fse-std's layouts, what sticks out of the window: the rails left and right, the dock below; GUI units)
 local OUT_SIDE, OUT_BELOW = 106, 32
-local INFO_H = 220                   -- (the scroll area under the preview, at most)
+local DOCK_W, DOCK_H = 720, 44                                  -- (the blueprint's actions, below the window)
+local MAP_H = 390                    -- (the minimap and research box's height, the game's GUI units)
+local TEST_W, TEST_H = 300, 330      -- (the test run's drawer on the right edge, under the preview's tools)
 local LEFT_W = 344                   -- (the library window's width besides the preview: the left panel, borders)
--- the preview's size: the player's own (resized), else a share of the screen; three presets for the size button
-local PRESETS = { { 0.45, 0.5 }, { 0.6, 0.66 }, { 0.75, 0.78 } }
-local function cam_size(player)
+-- (the game's own GUI the window keeps clear of, in the game's GUI units (times display_scale): the hotbar band at
+-- the bottom (quick bar, shortcut bar, the character's guns), the minimap and research box in the top right corner)
+local HOTBAR_H, MAP_W = 100, 262
+-- (the preview's smallest; on a short screen, this tall: the window's height is the left panel's too, which needs
+-- room for its settings, Plan and the result)
+local CAM_MIN_W, CAM_MIN_H, CAM_TIGHT_H = 420, 420, 340
+local find  -- (below)
+local docked  -- (below: does this player's window have its tabs and toolbars outside it)
+--- the window's height besides the preview (GUI units at 100 %): its title and the mode's line; inside the window
+--- (not docked) also the mode tabs and the rows of tools and actions under the preview
+local function frame_h(player) return docked(player) and 100 or 234 end
+-- the preview's size: the player's own (resized), else a share of the screen; three presets for the size button.
+-- Kept as the player asked for it (storage.bpgen_cam: w, h); shown at what fits now (sw, sh), so a bigger window
+-- scale or a smaller screen shrinks the preview, and it grows back when there's room again
+local PRESETS = { { 0.45, 0.68 }, { 0.6, 0.8 }, { 0.75, 0.86 } }
+local function wanted_size(player)
   storage.bpgen_cam = storage.bpgen_cam or {}
   local s = storage.bpgen_cam[player.index]
+  if s and not s.v then  -- (kept before 0.21: the preview takes the window's whole height now, as tall a window)
+    s.h, s.v, s.sw, s.sh = s.h + OLD_FRAME_H - frame_h(player), 2, nil, nil
+  end
   if s then return s.w, s.h end
   local res, scale = player.display_resolution, player.display_scale
   return math.max(520, math.floor(res.width / scale * PRESETS[1][1])), math.max(380, math.floor(res.height / scale * PRESETS[1][2]))
 end
+--- the preview's size as shown (GUI units at 100 %)
+local function cam_size(player)
+  local s = storage.bpgen_cam and storage.bpgen_cam[player.index]
+  if s and s.sw then return s.sw, s.sh end
+  return wanted_size(player)
+end
 
-local find  -- (below)
-local docked  -- (below: does this player's window have its tabs and toolbars outside it)
---- the preview (and what's sized by it) at w x h, kept for this player
-local function apply_size(player, frame, w, h)
-  -- (never bigger than the screen leaves room for: the left panel and the rows under the preview)
-  local res, scale = player.display_resolution, player.display_scale
+--- the scale the window wants: its Size, else the player's Window size (fse-std 0.8+), else 1
+local function want_scale(player)
+  if not (stdwin and stdwin.scale) then return 1 end
+  local _, want = stdwin.scale(player, NAME)
+  return want or 1
+end
+
+
+--- the most the result's scroll area under Plan takes of a window `height` tall (GUI units at 100 %)
+--- (a short window: less of it, the settings above keep room to show a section)
+local function info_h(height)
+  return math.max(110, math.min(300, math.floor(height * (height < 700 and 0.24 or 0.4))))
+end
+
+--- the room the window has at the scale it wants: the screen less the hotbar band, and less the minimap's column
+--- when the preview still gets its smallest width without it. -> max_w, max_h (the preview's), min_h, the space
+--- {sc = pixels a GUI unit, side, below, right = the free area's right edge in pixels, bottom = its bottom}
+local function room(player)
+  local res, ds = player.display_resolution, player.display_scale
   local out = docked(player)
   local side, below = out and OUT_SIDE or 0, out and OUT_BELOW or 0
-  local max_w = res.width / scale - LEFT_W - 2 * side - 8
-  local max_h = res.height / scale - FRAME_H - below - 20
-  w, h = math.max(420, math.floor(math.min(w, max_w))), math.max(300, math.floor(math.min(h, max_h)))
-  -- (the library's window: kept to that size too, the frames stuck to it following)
+  local right, bottom = res.width, res.height - HOTBAR_H * ds
+  -- (the scale it wants; when even its smallest size doesn't fit the free area at that, the largest step at which it
+  -- does: the library caps it there (the dock reserves the hotbar band below it), so the preview fills that room)
+  local f = want_scale(player)
+  local S = ui.theme and ui.theme.scale
+  if S and S.snap then
+    local g = math.min((right - 16) / ((CAM_MIN_W + LEFT_W + 2 * side) * ds),
+      (bottom - 16) / ((CAM_TIGHT_H + frame_h(player) + below) * ds))
+    if g < f then f = math.max(S.snap(g), 0.5) end
+  end
+  local sc = ds * f
+  local max_w = right / sc - LEFT_W - 2 * side - 16
+  local max_h = bottom / sc - frame_h(player) - below - 16
+  if max_w - MAP_W * ds / sc >= CAM_MIN_W then  -- (the rail on the right clear of the minimap)
+    right = res.width - MAP_W * ds
+    max_w = max_w - MAP_W * ds / sc
+  end
+  local min_h = max_h < CAM_MIN_H and CAM_TIGHT_H or CAM_MIN_H
+  return max_w, max_h, min_h, { sc = sc, f = f, side = side, below = below, right = right, bottom = bottom }
+end
+
+--- the dock (docked: a toolbar below the window) also reserves the hotbar band under it: what the library counts as
+--- sticking out below the window (keeping it on the screen, capping its scale) keeps the window above the hotbar
+local function reserve_below(player, f)
+  local dock = player.gui.screen[NAME .. "__bottom"]
+  local tags = dock and dock.tags
+  local a = tags and tags.fstd_attach
+  if not a then return end
+  local h = DOCK_H + math.ceil(HOTBAR_H / f)
+  if a.h ~= h then
+    a.h = h
+    dock.tags = tags
+  end
+end
+
+--- the preview (and what's sized by it) at w x h; kept for this player as what they asked for unless `keep` (a
+--- refit: the scale or the screen changed, what they asked for stays)
+local function apply_size(player, frame, w, h, keep)
+  -- (never bigger than the screen leaves room for at the window's scale: the left panel and the rows under the
+  -- preview, the rails and the dock, clear of the hotbar and the minimap)
+  local max_w, max_h, min_h, sp = room(player)
+  reserve_below(player, sp.f)
+  storage.bpgen_cam = storage.bpgen_cam or {}
+  if not keep then storage.bpgen_cam[player.index] = { w = math.floor(w), h = math.floor(h), v = 2 } end
+  w, h = math.max(CAM_MIN_W, math.floor(math.min(w, max_w))), math.max(min_h, math.floor(math.min(h, max_h)))
+  local kept = storage.bpgen_cam[player.index]
+  if not kept then  -- (no size of the player's own yet: the default share of the screen stays what's asked for)
+    local dw, dh = wanted_size(player)
+    kept = { w = dw, h = dh, v = 2 }
+  end
+  kept.sw, kept.sh = w, h
+  storage.bpgen_cam[player.index] = kept
+  -- (the library's window: that size, the frames stuck to it following)
   local tw = stdwin and frame.tags.fstd_tweak
-  if tw and (tw.width > w + LEFT_W or tw.height > h + FRAME_H) then
-    local W, H = math.min(tw.width, w + LEFT_W), math.min(tw.height, h + FRAME_H)
+  if tw and (tw.width ~= w + LEFT_W or tw.height ~= h + frame_h(player)) then
+    local W, H = w + LEFT_W, h + frame_h(player)
     local saved = storage.fstd_windows and storage.fstd_windows[player.index] and storage.fstd_windows[player.index][NAME]
     if saved then saved.width, saved.height = W, H end
-    frame.style.width, frame.style.height = W, H
-    local tags = frame.tags
-    tags.fstd_tweak = { width = W, height = H }
-    frame.tags = tags
+    if ui.theme and ui.theme.style then
+      ui.theme.style(frame, { width = W, height = H })  -- (drawn at its scale, kept as its tweak)
+    else
+      frame.style.width, frame.style.height = W, H
+      local tags = frame.tags
+      tags.fstd_tweak = { width = W, height = H }
+      frame.tags = tags
+    end
+    if ui.theme and ui.theme.follow then ui.theme.follow(frame) end
   end
-  storage.bpgen_cam = storage.bpgen_cam or {}
-  storage.bpgen_cam[player.index] = { w = w, h = h }
   for _, n in ipairs({ "bpgen_cam", "bpgen_empty" }) do
     local el = find(frame, n)
     -- (in the library's window the preview stretches into what the window leaves it, both ways)
     if el and not stdwin then el.style.width, el.style.height = w, h end
+    if el and stdwin then ui.style(el, { minimal_width = CAM_MIN_W, minimal_height = min_h }) end
   end
-  for n, d in pairs({ bpgen_test_status = 40, bpgen_stats = 48, bpgen_extra = 24, bpgen_notes = 40 }) do
-    local el = find(frame, n)
-    if el then el.style.maximal_width = w - d end
-  end
-  -- (and back on the screen if it grew past its edge: the rails and the dock too)
+  -- (the result under Plan: up to a share of the window's height, the settings above it keep the rest)
+  local info = find(frame, "bpgen_info")
+  if info then ui.style(info, { maximal_height = info_h(h + frame_h(player)) }) end
+  -- (and inside the free area if it grew past its edge: the rails and the dock too; pixels at the window's scale)
   local loc = frame.location
   if loc then
-    local x = math.max(side * scale, math.min(loc.x, res.width - (w + LEFT_W + side) * scale))
-    local y = math.max(0, math.min(loc.y, res.height - (h + FRAME_H + below) * scale))
-    if x ~= loc.x or y ~= loc.y then frame.location = { x = x, y = y } end
+    local sc = player.display_scale * ui.scale_of(frame)
+    local x = math.max(sp.side * sc, math.min(loc.x, sp.right - (w + LEFT_W + sp.side) * sc))
+    local y = math.max(0, math.min(loc.y, sp.bottom - (h + frame_h(player) + sp.below) * sc))
+    x, y = math.floor(x), math.floor(y)
+    if x ~= loc.x or y ~= loc.y then
+      frame.location = { x = x, y = y }
+      local saved = storage.fstd_windows and storage.fstd_windows[player.index] and storage.fstd_windows[player.index][NAME]
+      if saved and saved.location then saved.location = frame.location end
+      if ui.theme and ui.theme.follow then ui.theme.follow(frame) end
+    end
   end
+end
+
+--- where a new window of a w x h preview goes: centred in the free area (above the hotbar, left of the minimap when
+--- that leaves room for it), at the scale it wants
+local function place_new(player, w, h)
+  local _, _, _, sp = room(player)
+  local sc = sp.sc
+  local W, H = (w + LEFT_W + 2 * sp.side) * sc, (h + frame_h(player) + sp.below) * sc
+  return { x = math.floor(math.max(0, (sp.right - W) / 2) + sp.side * sc), y = math.floor(math.max(0, (sp.bottom - H) / 2)) }
 end
 
 local bench = require("bench")
@@ -322,7 +427,8 @@ function M.preview(player, bp)
 end
 
 local function fit(player, w, h)
-  local scale = player.display_scale
+  -- (the preview's pixels: its size in GUI units at 100 %, times the window's scale and the game's)
+  local scale = player.display_scale * ui.scale_of(player.gui.screen[NAME])
   local cw, ch = cam_size(player)
   local z = math.min(cw * scale / ((w + 2) * 32), ch * scale / ((h + 2) * 32))
   return math.max(0.05, math.min(2, z))
@@ -336,7 +442,6 @@ end
 local MODES = { "line", "mall", "extend", "base", "busdesign", "refit", "move", "ship" }
 local GROUP_START = { base = true, refit = true, ship = true }  -- (a gap above them on the rail)
 local RAIL_W, RAIL_H = 112, #MODES * 34 + 3 * 12 + 8          -- (the rail of mode tabs, GUI units)
-local DOCK_W, DOCK_H = 720, 44                                  -- (the blueprint's actions, below the window)
 local TOOLS_H = 4 * 34 + 12 + 34 + 8                          -- (the preview's tools, a rail on the right)
 local BUS_DIRS = { "north", "east", "south", "west" }
 local patch_areas = safe.stored("patch_areas")  -- player index -> {{area, counts = {resource = tiles}}}: the ore patches picked for a bus design
@@ -661,6 +766,45 @@ local function adopt(player)
   for _, c in pairs(ui.attached(player, NAME)) do ui.adopt(c) end
 end
 
+--- a drawer stuck to the window's right edge (the test run's, History) beside it when the screen has room for it
+--- there (clear of the minimap), else over the preview's right part, inside the window
+local function place_drawer(player, frame, drawer)
+  local tags = drawer and drawer.valid and drawer.tags
+  local a = tags and tags.fstd_attach
+  local loc, tw = frame.location, frame.tags.fstd_tweak
+  if not (a and loc and type(tw) == "table" and tw.width) then return end
+  local ds, res = player.display_scale, player.display_resolution
+  local sc = ds * ui.scale_of(frame)
+  local top = loc.y + (a.along or 0) * sc
+  local edge = top < MAP_H * ds and res.width - MAP_W * ds or res.width
+  local beside = loc.x + (tw.width - 8 + a.w) * sc <= edge
+  local overlap = beside and 8 or a.w + 8
+  if a.overlap ~= overlap then
+    a.overlap = overlap
+    drawer.tags = tags
+  end
+  if ui.theme and ui.theme.follow then ui.theme.follow(frame) end
+end
+
+--- the test run's drawer (docked: out of the window's right edge) or its section (inside) shown or hidden; History's
+--- drawer makes way for it
+local function test_shown(player, frame, on)
+  local box = find(frame, "bpgen_test_box")
+  if box then box.visible = on end
+  local drawer = player.gui.screen[NAME .. "__test"]
+  if not drawer then return end
+  local tags = drawer.tags
+  tags.bpgen_open = on or nil
+  drawer.tags = tags
+  drawer.visible = on and frame.visible
+  if on then
+    local hist = player.gui.screen[NAME .. "__right"]
+    if hist then hist.destroy() end
+    place_drawer(player, frame, drawer)
+    drawer.bring_to_front()
+  end
+end
+
 --- the test run's fast-forward off: the game's speed as it was (the ×5 / ×10 button back at ×1)
 local function test_speed_off(frame)
   if storage.bpgen_speed_was then
@@ -817,7 +961,9 @@ end
 local function window_shown(player, on)
   local frame = player.gui.screen[NAME]
   if frame then frame.visible = on end
-  for _, c in pairs(ui.attached(player, NAME)) do c.visible = on end
+  for _, c in pairs(ui.attached(player, NAME)) do
+    c.visible = on and (c.name ~= NAME .. "__test" or c.tags.bpgen_open == true)
+  end
   local menu = player.gui.screen[NAME .. "__menu"]
   if menu and not on then menu.destroy() end
 end
@@ -850,7 +996,7 @@ function M.tool_card(player, item)
   end
   ui.add(row, { type = "button", caption = T("cancel"), tags = { bpgen = "tool_done" } }, "button")
   ui.adopt(card)
-  local scale = player.display_scale
+  local scale = player.display_scale * ui.scale_of(card)  -- (drawn at the Window size: adopt scaled it)
   card.location = { math.max(0, (player.display_resolution.width - 380 * scale) / 2), math.floor(60 * scale) }
 end
 
@@ -891,9 +1037,19 @@ function M.open(player, prefill)
   close(player)
   local frame, holder
   if stdwin then
-    local cw, ch = cam_size(player)
-    frame, holder = stdwin.create(player, { name = NAME, title = "bpgen", width = cw + LEFT_W, height = ch + FRAME_H,
-      min_width = 420 + LEFT_W, min_height = 300 + FRAME_H, themed = ui.themed, settings = ui.menus,
+    -- (made at the size that fits the room it has at its scale: never drawn smaller for a size it won't keep)
+    local max_w, max_h, min_h = room(player)
+    local ww, wh = wanted_size(player)
+    local cw, ch = math.max(CAM_MIN_W, math.floor(math.min(ww, max_w))), math.max(min_h, math.floor(math.min(wh, max_h)))
+    storage.fstd_windows = storage.fstd_windows or {}
+    storage.fstd_windows[player.index] = storage.fstd_windows[player.index] or {}
+    local saved = storage.fstd_windows[player.index][NAME] or {}
+    storage.fstd_windows[player.index][NAME] = saved
+    saved.width, saved.height = cw + LEFT_W, ch + frame_h(player)
+    -- (a new window: placed by us, not centred on the whole screen by the library)
+    if not saved.location then saved.location = place_new(player, cw, ch) end
+    frame, holder = stdwin.create(player, { name = NAME, title = "bpgen", width = cw + LEFT_W, height = ch + frame_h(player),
+      min_width = CAM_MIN_W + LEFT_W, min_height = min_h + frame_h(player), themed = ui.themed, settings = ui.menus,
       esc = false })  -- (a companion: it stays open while the player uses the game's own windows)
     holder.style.padding = 0
   else
@@ -910,7 +1066,9 @@ function M.open(player, prefill)
 
   -- the modes: a rail of tabs out of the window's left edge (fse-std's layouts), else a row of them in the window
   local out = docked(player)
-  local rail = out and ui.attach(frame, "left", { size = { RAIL_W, RAIL_H }, along = 40, overlap = 6, role = "inset",
+  -- (drawn at another scale, the tabs' spacing rounds up a little: some slack so the last one isn't cut)
+  local rail = out and ui.attach(frame, "left", { size = { RAIL_W, RAIL_H + (ui.scale_of(frame) ~= 1 and 20 or 0) },
+    along = 40, overlap = 6, role = "inset",
     direction = "vertical", padding = 4 })
   local tabs
   if rail then
@@ -1166,13 +1324,18 @@ function M.open(player, prefill)
   ui.add(go, { type = "button", caption = T("check-bus"), tags = { bpgen = "check_bus" }, tooltip = T("check-bus-tip") },
     "button", { horizontally_stretchable = true, minimal_width = 0, height = 28 })
 
+  -- (what the plan comes to and the test run: under Plan in the left panel, in a scroll area of their own (up to a
+  -- share of the window's height), the preview taking the whole right side)
+  local info = outer.add({ type = "scroll-pane", name = "bpgen_info", horizontal_scroll_policy = "never" })
+  info.style.maximal_height = info_h(wanted_size(player) + frame_h(player))
+  info.style.horizontally_stretchable = true
+  info.style.padding = { 0, 8, 8, 8 }
   local right = body.add({ type = "frame", style = "inside_deep_frame", direction = "vertical" })
   local cam = right.add({ type = "camera", name = "bpgen_cam", position = { 0, 0 }, surface_index = player.surface.index, zoom = 1,
     raise_hover_events = true, tooltip = safe.has("std") and T("cam-tip") or nil })
-  local CAM_W, CAM_H = cam_size(player)
-  -- what the plan comes to: a few numbers under the preview
-  local res, scale = player.display_resolution, player.display_scale  -- (a size kept from a bigger screen: fit it)
-  CAM_W, CAM_H = math.min(CAM_W, res.width / scale - 380), math.min(CAM_H, res.height / scale - FRAME_H - 20)
+  local CAM_W, CAM_H = wanted_size(player)
+  local max_w, max_h, min_h = room(player)
+  CAM_W, CAM_H = math.max(CAM_MIN_W, math.min(CAM_W, max_w)), math.max(min_h, math.min(CAM_H, max_h))
   if not stdwin then
     cam.style.width = CAM_W
     cam.style.height = CAM_H
@@ -1185,10 +1348,10 @@ function M.open(player, prefill)
   end
   empty.style.horizontal_align = "center"
   empty.style.vertical_align = "center"
-  local under = right.add({ type = "flow", direction = "vertical" })
+  -- (not docked: the preview's tools and the blueprint's actions in rows under the preview)
+  local under = right.add({ type = "flow", direction = "vertical", visible = not out })
   under.style.padding = 8
   under.style.vertical_spacing = 6
-  -- the preview's tools: toolbars over the camera (fse-std's over(), with the fse loader), else a row under it
   -- the preview's tools: a rail out of the window's right edge, as the modes' on the left (fse-std's layouts), else a
   -- row under the preview
   local vrail = out and ui.attach(frame, "right", { size = { RAIL_W, TOOLS_H }, along = 40, overlap = 6, role = "inset",
@@ -1220,24 +1383,43 @@ function M.open(player, prefill)
   tools.add({ type = "button", name = "bpgen_grip", caption = "⇲", style = "tool_button", tags = { bpgen = "size" },
     raise_hover_events = true, tooltip = safe.has("std") and T("grip-tip") or T("grip-tip-plain") })
   if not vrail then tools.add({ type = "empty-widget" }).style.horizontally_stretchable = true end
+  -- (Test run: starts a run and opens its drawer; while it runs, the button says how far it got)
   ui.add(tools, { type = "button", name = "bpgen_test", caption = T("test-run"), tags = { bpgen = "test" }, enabled = false,
     tooltip = T("test-run-tip") },
     vrail and "rtab" or "button", vrail and { width = RAIL_W - 8, height = 30, top_margin = 12 } or nil)
-  -- the test run, live: the rate it reaches (a bar red to green by the share of the expected), a chart of it
-  local tb = section(under, nil, nil, "bpgen_test_box")
-  tb.visible = false
+  -- the test run, live: the rate it reaches (a bar red to green by the share of the expected), a chart of it; in a
+  -- drawer out of the window's right edge under the preview's tools (docked), else at the top of the result's area
+  local fh = stdwin and select(2, stdwin.size(player, NAME))
+  local test_h = math.max(220, math.min(TEST_H, (fh or 600) - 40 - TOOLS_H - 12 - 12))
+  local drawer = out and ui.attach(frame, "right", { size = { TEST_W, test_h }, along = 40 + TOOLS_H + 12, overlap = 8,
+    role = "toast", direction = "vertical", padding = 8, name = NAME .. "__test" })
+  local tb
+  if drawer then
+    drawer.visible = false
+    tb = drawer.add({ type = "flow", name = "bpgen_test_box", direction = "vertical" })
+    tb.style.vertical_spacing = 6
+    tb.style.horizontally_stretchable = true
+  else
+    tb = section(info, nil, nil, "bpgen_test_box")
+    tb.visible = false
+  end
   local th = tb.add({ type = "flow", direction = "horizontal" })  -- (its heading, the fast-forward beside it)
   th.style.vertical_align = "center"
+  th.style.horizontally_stretchable = true
   ui.add(th, { type = "label", caption = T("test-run") }, "caption")
   th.add({ type = "empty-widget" }).style.horizontally_stretchable = true
   ui.add(th, { type = "button", name = "bpgen_test_speed", caption = "×1", tags = { bpgen = "test_speed", speed = 1 },
     visible = false, tooltip = T("test-speed-tip") },
     "tool", { width = 44 })
+  if drawer then
+    ui.add(th, { type = "button", caption = "×", tags = { bpgen = "test_close" }, tooltip = T("test-close-tip") }, "tool",
+      { width = 28 })
+  end
   local tbar = ui.progress(tb, 0, { caption = T("measured"), text = "", auto = true })
   tbar.name = "bpgen_test_bar"
   tbar.parent.style.horizontally_stretchable = true
   tb.add({ type = "flow", name = "bpgen_test_graph", direction = "vertical" })
-  ui.add(tb, { type = "label", name = "bpgen_test_status" }, "dim", { single_line = false, maximal_width = CAM_W - 24 })
+  ui.add(tb, { type = "label", name = "bpgen_test_status" }, "dim", { single_line = false, maximal_width = TEST_W - 30 })
   -- the blueprint's actions: a toolbar hanging below the window (fse-std's dock), else a row under the preview
   local dock = out and ui.theme.dock(frame, { size = { DOCK_W, DOCK_H } }) or nil
   if dock then
@@ -1274,39 +1456,35 @@ function M.open(player, prefill)
     small)
   ui.add(tools, { type = "button", caption = T("history"), tags = { bpgen = "history" }, tooltip = T("history-tip") },
     "button", small)
-  -- (what's said about the plan, in one scroll area of a fixed height: the preview gets the rest of the window)
-  local info = under.add({ type = "scroll-pane", name = "bpgen_info", horizontal_scroll_policy = "never" })
-  info.style.maximal_height = INFO_H  -- (as tall as what it says, up to this: the preview takes the rest)
-  info.style.horizontally_stretchable = true
-  -- the plan's result: badges, its notes, the book's prints, the details folded
+  -- the plan's result: its numbers as tiles (three a row), badges for the rest, its notes, the book's prints, the
+  -- details folded
   local result = section(info, T("result"), nil, "bpgen_result")
   result.visible = false
-  -- (its numbers as tiles, then badges three a row for the rest: nothing runs past the preview's width)
-  local tiles = result.add({ type = "flow", name = "bpgen_tiles", direction = "horizontal", visible = false })
-  tiles.style.horizontal_spacing = 6
+  local tiles = result.add({ type = "table", name = "bpgen_tiles", column_count = 3, visible = false })
+  tiles.style.horizontal_spacing, tiles.style.vertical_spacing = 4, 4
   result.add({ type = "flow", name = "bpgen_badges", direction = "vertical" }).style.vertical_spacing = 4
-  ui.add(result, { type = "label", name = "bpgen_notes" }, "dim", { single_line = false, maximal_width = CAM_W - 40 })
+  ui.add(result, { type = "label", name = "bpgen_notes" }, "dim", { single_line = false, maximal_width = 266 })
   result.add({ type = "drop-down", name = "bpgen_section", items = {}, visible = false, tags = { bpgen_section = true },
     tooltip = T("section-tip") })
   local dets = ui.fold(result, T("details"), false)
-  ui.add(dets, { type = "label", name = "bpgen_stats" }, "text", { single_line = false, maximal_width = CAM_W - 40 })
+  ui.add(dets, { type = "label", name = "bpgen_stats" }, "text", { single_line = false, maximal_width = 256 })
   -- (after a plan: can your save build it, and what modules would do; or the history list)
   local extra = info.add({ type = "flow", name = "bpgen_extra", direction = "vertical" })
-  extra.style.maximal_width = CAM_W - 24
+  extra.style.maximal_width = 290
   if stdwin then
     -- (the library keeps the window's size and place: the preview stretches into what the window leaves it)
     find(frame, "bpgen_grip").visible = false
     for _, n in ipairs({ "bpgen_cam", "bpgen_empty" }) do
       local el = find(frame, n)
-      el.style.minimal_width, el.style.minimal_height = 420, 300
+      el.style.minimal_width, el.style.minimal_height = CAM_MIN_W, select(3, room(player))
       el.style.horizontally_stretchable, el.style.vertically_stretchable = true, true
     end
     body.style.vertically_stretchable, body.style.horizontally_stretchable = true, true
     -- (a flow ignores its stretch here: a natural width past the screen's makes it fill the window, which caps it)
     body.style.natural_width = math.floor(player.display_resolution.width / player.display_scale)
     right.style.vertically_stretchable, right.style.horizontally_stretchable = true, true
-    local fw, fh = stdwin.size(player, NAME)
-    if fw then apply_size(player, frame, fw - LEFT_W, fh - FRAME_H) end
+    local ww, wh = wanted_size(player)
+    apply_size(player, frame, ww, wh, true)
   else
     frame.force_auto_center()
   end
@@ -1839,14 +2017,17 @@ local function show_tiles(frame, res, w, h)
   local a, sm = res.absolute or {}, res.summary or {}
   local function tile(v, caption)
     if v then ui.stat(row, type(v) == "table" and v or tostring(v), T(caption), { horizontally_stretchable = false,
-      minimal_width = 96 }) end
+      minimal_width = 84 }) end
   end
   if a.box then tile(a.box[3] .. " × " .. a.box[4], "tile-size")
   elseif type(w) == "number" then tile(math.floor(w) .. " × " .. math.floor(h), "tile-size") end
   tile(sm.machines or (res.mall and res.mall.machines), "tile-machines")
   if a.taps then tile(a.taps, "tile-taps") end
   if a.inputs and #a.inputs > 0 then tile(#a.inputs, "tile-by-hand") end
-  if res.expected then tile(T("per-min", string.format("%.1f", res.expected * 60)), "tile-made") end
+  if res.expected then  -- (whole numbers from 100 on: three tiles fit the left panel's width)
+    local m = res.expected * 60
+    tile(T("per-min", string.format(m >= 100 and "%.0f" or "%.1f", m)), "tile-made")
+  end
   row.visible = #row.children > 0
 end
 
@@ -1855,7 +2036,7 @@ local function add_badge(frame, text, tip)
   local rows = find(frame, "bpgen_badges")
   if not rows then return nil end
   local row = rows.children[#rows.children]
-  if not row or #row.children >= 3 then
+  if not row or #row.children >= 2 then
     row = rows.add({ type = "flow", direction = "horizontal" })
     row.style.horizontal_spacing = 6
   end
@@ -1930,7 +2111,7 @@ function M.on_result(player, res)
   show_tiles(frame, res, w, h)
   glow(player, false)
   stale(player, false)
-  find(frame, "bpgen_test_box").visible = false
+  test_shown(player, frame, false)
   M.steps(frame)
   local cursor = find(frame, "bpgen_cursor")
   cursor.enabled = true
@@ -2079,7 +2260,7 @@ local function show_check(frame, r)
   end
   local l = box.add({ type = "label", caption = { "", "[img=utility/warning_icon] ", join(lines, "\n") } })
   l.style.single_line = false
-  l.style.maximal_width = cam_size(game.get_player(frame.player_index)) - 24
+  l.style.maximal_width = 280
 end
 
 local function show_ideas(frame, r)
@@ -2104,11 +2285,13 @@ end
 local function history_drawer(player, frame)
   local d = player.gui.screen[NAME .. "__right"]
   if d then d.destroy() return nil end
+  test_shown(player, frame, false)
   local _, h = stdwin.size(player, NAME)
   d = ui.attach(frame, "right", { size = { 300, math.max(200, (h or 500) - TOOLS_H - 110) }, along = 40 + TOOLS_H + 12,
     overlap = 8,
     role = "toast", direction = "vertical", padding = 8 })
   if not d then return nil end
+  place_drawer(player, frame, d)
   ui.add(d, { type = "label", caption = T("history") }, "caption")
   ui.search(d, "bpgen_history", T("search-history"))
   local list = ui.add(d, { type = "scroll-pane", name = "bpgen_history_list", horizontal_scroll_policy = "never" },
@@ -2342,13 +2525,13 @@ local test_series = safe.stored("test_series")  -- player index -> the rate meas
 local function test_view(player, frame, run, final)
   local box = find(frame, "bpgen_test_box")
   if not box then return end
-  box.visible = true
+  if not run then test_shown(player, frame, true) end  -- (a run starting: its drawer opens; later it stays as left)
   local bar, holder = find(box, "bpgen_test_bar"), find(box, "bpgen_test_graph")
   if not run then
     test_series[player.index] = {}
     ui.set_progress(bar, 0, T("starting"))
     holder.clear()
-    local g = ui.graph(holder, { 0, 0 }, { width = math.max(200, cam_size(player) - 60), height = 56 })
+    local g = ui.graph(holder, { 0, 0 }, { width = TEST_W - 40, height = 56 })
     if g then g.name = "bpgen_test_chart" end
     adopt(player)
     return
@@ -2370,6 +2553,13 @@ local function test_view(player, frame, run, final)
     text = T("test-bar-rate", string.format("%.0f", rate), string.format("%.0f", frac * 100))
   end
   ui.set_progress(bar, math.min(1, frac), text)
+  -- (the Test run button says how far it got: seen with the drawer closed)
+  local button = find(frame, "bpgen_test")
+  if button and not final then
+    button.caption = run.products and T("test-live-mall", math.floor(frac * #run.products + 0.5), #run.products)
+      or t < run.warmup and T("test-live-warmup") or T("test-live", string.format("%.0f", frac * 100))
+    button.tooltip = { "", T("test-live-tip"), "\n", text }
+  end
   if rate then
     local list = test_series[player.index] or {}
     list[#list + 1] = rate
@@ -2409,6 +2599,7 @@ bench.on_done = function(run, cases)
   find(frame, "bpgen_test_status").caption = text
   mark(player, starved)
   find(frame, "bpgen_test").caption = T("test-run")
+  find(frame, "bpgen_test").tooltip = T("test-run-tip")
   test_view(player, frame, run, true)
 end
 
@@ -2453,13 +2644,15 @@ ui.on_yes("bpgen_unplace", function(player) unplace(player) end)
 --- the window's settings (the gear by its close button): opened, or closed when they were open
 local function settings(player)
   local frame = player.gui.screen[NAME]
-  local m = frame and ui.menu(frame, { size = { 250, ui.layouts and 196 or 164 } })
+  local sized = stdwin and stdwin.size_setting ~= nil  -- (fse-std 0.8+: the window's own Size)
+  local m = frame and ui.menu(frame, { size = { 250, (ui.layouts and 196 or 164) + (sized and 58 or 0) } })
   if not m then return end
   ui.add(m, { type = "label", caption = "bpgen" }, "caption")
   if ui.layouts then
     ui.add(m, { type = "checkbox", name = "bpgen_docked", caption = { "fstd.docked" },
       state = docked(player) == true, tooltip = { "fstd.docked-tooltip" } }, "check")
   end
+  if sized then stdwin.size_setting(m, NAME).name = "bpgen_size" end
   ui.add(m, { type = "checkbox", name = "bpgen_only_unlocked", caption = T("only-unlocked"),
     state = only_unlocked[player.index] == true, tooltip = T("only-unlocked-tip") }, "check")
   local wide = { horizontally_stretchable = true, minimal_width = 0, height = 28 }
@@ -2490,7 +2683,11 @@ local function on_click(e)
     if menu then menu.destroy() end
     remote.call("fse-std", "open_theme", player.index)
   elseif action == "reset_size" then
-    if storage.fstd_windows and storage.fstd_windows[player.index] then storage.fstd_windows[player.index][NAME] = nil end
+    if stdwin and stdwin.reset_place then
+      stdwin.reset_place(player, NAME)  -- (its place and size; its Size stays)
+    elseif storage.fstd_windows and storage.fstd_windows[player.index] then
+      storage.fstd_windows[player.index][NAME] = nil
+    end
     if storage.bpgen_cam then storage.bpgen_cam[player.index] = nil end
     M.rebuild(player)
   elseif action == "plan" then
@@ -2505,9 +2702,13 @@ local function on_click(e)
     M.plan(player)
   elseif action == "test" and r and r.res.test and r.where then
     local run = bench.find("test", player.index)
-    if run then
+    local drawer = player.gui.screen[NAME .. "__test"]
+    if run and drawer and not drawer.tags.bpgen_open then  -- (a run going on, its drawer closed: opened again)
+      test_shown(player, frame, true)
+    elseif run then
       bench.stop(run.id)
       find(frame, "bpgen_test").caption = T("test-run")
+      find(frame, "bpgen_test").tooltip = T("test-run-tip")
       find(frame, "bpgen_test_status").caption = T("test-stopped")
       test_speed_off(frame)
       glow(player, false)
@@ -2519,6 +2720,8 @@ local function on_click(e)
       test_view(player, frame)
       glow(player, true)
     end
+  elseif action == "test_close" then  -- (the drawer closed; a run goes on, its button says how far)
+    test_shown(player, frame, false)
   elseif action == "test_speed" and not game.is_multiplayer() then
     local b = find(frame, "bpgen_test_speed")
     local tags = b.tags  -- (its step kept in its tags: ×1, ×5, ×10, round again)
@@ -2699,7 +2902,7 @@ local function on_click(e)
     end
   elseif action == "pan" and r and r.zoom then
     local cam = find(frame, "bpgen_cam")
-    local step = cam_size(player) * player.display_scale / (32 * cam.zoom) / 4  -- (a quarter of the view)
+    local step = cam_size(player) * player.display_scale * ui.scale_of(frame) / (32 * cam.zoom) / 4  -- (a quarter of the view)
     cam.position = { x = cam.position.x + el.tags.dx * step, y = cam.position.y + el.tags.dy * step }
   elseif (action == "zoom" or action == "fit") and r and r.zoom then
     local cam = find(frame, "bpgen_cam")
@@ -2828,7 +3031,35 @@ if stdwin then
   stdwin.on_resize(function(player, name, w, h)
     if name ~= NAME then return end
     local frame = player.gui.screen[NAME]
-    if frame then apply_size(player, frame, w - LEFT_W, h - FRAME_H) end
+    if frame then apply_size(player, frame, w - LEFT_W, h - frame_h(player)) end
+  end)
+end
+
+--- the window fitted again to the room it has (its scale, the game's UI scale or the screen changed): the preview
+--- shrinks to fit (or grows back to what the player asked for), then the library checks its scale once more
+local refitting = {}
+local function reflow(player)
+  local frame = player.gui.screen[NAME]
+  if not (frame and frame.valid and stdwin) or refitting[player.index] then return end
+  refitting[player.index] = true
+  local ok, err = pcall(function()
+    local w, h = wanted_size(player)
+    apply_size(player, frame, w, h, true)
+    if ui.theme and ui.theme.refit then ui.theme.refit(player, frame) end  -- (does it fit at its scale now?)
+    for _, n in ipairs({ "__test", "__right" }) do
+      local d = player.gui.screen[NAME .. n]
+      if d and d.visible then place_drawer(player, frame, d) end
+    end
+    local r = results[player.index]
+    if r and r.w then r.zoom = fit(player, r.w, r.h) end
+  end)
+  refitting[player.index] = nil
+  if not ok then error(err) end
+end
+M.reflow = reflow
+if stdwin and stdwin.on_scale then
+  stdwin.on_scale(function(player, name)
+    if name == NAME then reflow(player) end
   end)
 end
 
@@ -2891,12 +3122,16 @@ function M.test_resize(player_index, w, h)
   if not (stdwin and frame) then return end
   local saved = storage.fstd_windows and storage.fstd_windows[player_index] and storage.fstd_windows[player_index][NAME]
   if saved then saved.width, saved.height = w, h end
-  frame.style.width, frame.style.height = w, h
-  local tags = frame.tags
-  tags.fstd_tweak = { width = w, height = h }
-  frame.tags = tags
+  if ui.theme and ui.theme.style then
+    ui.theme.style(frame, { width = w, height = h })
+  else
+    frame.style.width, frame.style.height = w, h
+    local tags = frame.tags
+    tags.fstd_tweak = { width = w, height = h }
+    frame.tags = tags
+  end
   if ui.theme then ui.theme.follow(frame) end
-  apply_size(player, frame, w - LEFT_W, h - FRAME_H)
+  apply_size(player, frame, w - LEFT_W, h - frame_h(player))
 end
 
 --- "Docked" on or off: the window built again that way
@@ -2920,6 +3155,15 @@ end
 -- (tests: a setting changed, as if by the player)
 function M.touch(player_index, name)
   changed({ element = find(game.get_player(player_index).gui.screen[NAME], name), player_index = player_index })
+end
+
+-- (tests: a drop-down's item picked by the player, by the element's name (in the window or a frame stuck to it))
+function M.pick(player_index, name, index)
+  local el = find(game.get_player(player_index).gui.screen[NAME], name)
+  if not el then return false end
+  el.selected_index = index
+  M.handlers[defines.events.on_gui_selection_state_changed]({ element = el, player_index = player_index })
+  return true
 end
 
 -- (tests: a button press, as its tags)
@@ -2994,6 +3238,13 @@ M.handlers = {
   [defines.events.on_gui_selection_state_changed] = function(e)
     changed(e)
     local el = e.element
+    if el and el.valid and el.name == "bpgen_size" and el.tags.fstd_scale_pick == NAME and stdwin.set_scale then
+      -- (the window's Size: drawn at it, the preview fitted to the room it leaves; the library hears it after us)
+      local c = ui.theme.themes.SCALE_CHOICES[el.selected_index - 1]
+      local player = game.get_player(e.player_index)
+      stdwin.set_scale(player, NAME, c and c / 100 or nil)
+      return reflow(player)
+    end
     if el and el.valid and el.tags and el.tags.bpgen_section then
       -- (another print of the book in the preview)
       local player = game.get_player(e.player_index)
@@ -3010,6 +3261,12 @@ M.handlers = {
       return
     end
   end,
+  -- (the room the window has changed: the game's UI scale, the screen, the Window size setting)
+  [defines.events.on_player_display_scale_changed] = function(e) reflow(game.get_player(e.player_index)) end,
+  [defines.events.on_player_display_resolution_changed] = function(e) reflow(game.get_player(e.player_index)) end,
+  [defines.events.on_runtime_mod_setting_changed] = function(e)
+    if e.setting == "fstd-window-scale" and e.player_index then reflow(game.get_player(e.player_index)) end
+  end,
   [defines.events.on_lua_shortcut] = function(e)
     if e.prototype_name ~= "bpgen-window" then return end
     local player = game.get_player(e.player_index)
@@ -3024,6 +3281,11 @@ M.handlers = {
     elseif f then close(player) else M.open(player) end
   end,
 }
+
+-- (fse-std 0.8+: the theme window's Window size, or a script's set_window_scale)
+if stdwin and stdwin.on_scale then
+  M.handlers["fstd-scale-changed"] = function(e) reflow(game.get_player(e.player_index)) end
+end
 
 --- for other mods (AI Crew's goals): Extend's request for a line of `item` at `rate` a minute next to the base
 function M.extend_request(player, item, rate)

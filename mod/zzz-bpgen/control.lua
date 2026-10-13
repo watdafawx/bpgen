@@ -969,6 +969,8 @@ remote.add_interface("bpgen", {
   progress = function(player_index, p) window.on_progress(game.get_player(player_index), p) end,
   -- (tests) a setting changed by the player (scripts raise no GUI events), by its element's name
   touch = function(player_index, name) window.touch(player_index, name) end,
+  -- (tests) a drop-down's item picked, by its element's name (the window's settings too)
+  pick = function(player_index, name, index) return window.pick(player_index, name, index) end,
   -- (tests) the window resized (GUI units), as by its corner grip
   resize = function(player_index, w, h) window.test_resize(player_index, w, h) end,
   -- (tests) "Docked" ticked or not

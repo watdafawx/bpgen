@@ -1,5 +1,6 @@
 """Real client: the bpgen window on fse-std's themed components (fse-std from fse/mods), shot in five themes, its
-progress bar, Undo asking first. --plain: without fse-std, the game's own styles (Undo at once). Started through the
+progress bar, Undo asking first. --plain: without fse-std, the game's own styles (Undo at once). --scale 2: the
+game's GUI scale (a config of its own: config-scale.ini). Started through the
 fse launcher (FSE_DIR, else an fse/dist above this folder): planning runs in game. Prints theme-gui.txt; shots in
 run/script-output/theme-gui-*.png; exit code 1 when a check failed. Don't run it while you play."""
 import json
@@ -16,6 +17,7 @@ sys.path.insert(0, str(ROOT))
 from bpgen.config import PATHS  # noqa: E402
 
 PLAIN = "--plain" in sys.argv
+SCALE = sys.argv[sys.argv.index("--scale") + 1] if "--scale" in sys.argv else None
 FSE = Path(os.environ.get("FSE_DIR") or next((d / "fse" / "dist" for d in ROOT.parents
                                               if (d / "fse" / "dist" / "fse-launcher.exe").exists()), ROOT / "fse"))
 STD = next((d / "fse" / "mods" / "fse-std" for d in [ROOT] + list(ROOT.parents) if (d / "fse" / "mods" / "fse-std").exists()))
@@ -52,6 +54,11 @@ names = ["base", "elevated-rails", "quality", "space-age", "zzz-bpgen", "theme-g
 OUT.mkdir(exist_ok=True)
 for f in OUT.glob("theme-gui*"):
     f.unlink()
+if SCALE:  # (the game's GUI scale: a config of its own, the usual one untouched)
+    scaled = RUN / "config-scale.ini"
+    scaled.write_text(ini.read_text(encoding="utf-8").rstrip() + f"\n[interface]\nui-scale-mode=manual-pixels\n"
+                      f"custom-ui-scale={SCALE}\n", encoding="utf-8")
+    ini = scaled
 launch = [str(FSE / "fse-launcher.exe"), "--config", str(ini), "--mod-directory", str(MODS)]
 save = RUN / "theme-gui.zip"
 save.unlink(missing_ok=True)

@@ -146,6 +146,12 @@ steps = {
         local nb = 0
         for _, row in pairs(find(w(), "bpgen_badges").children) do nb = nb + #row.children end
         check("result shown", find(w(), "bpgen_result").visible and find(w(), "bpgen_tiles").visible and nb >= 3, nb)
+        -- (the preview has the whole right side: the result is under Plan in the left panel)
+        local info = find_in(w(), "bpgen_info")
+        check("result under Plan", info ~= nil and find_in(info, "bpgen_result") ~= nil
+          and find_in(info.parent, "bpgen_plan") ~= nil and find_in(info.parent, "bpgen_cam") == nil)
+        check("nothing under the preview", find_in(find_in(w(), "bpgen_cam").parent, "bpgen_test_box") == nil
+          and find_in(find_in(w(), "bpgen_cam").parent, "bpgen_cursor") == nil)
       end
     end, ticks = 25 },
 }
@@ -187,6 +193,8 @@ steps[#steps + 1] = { run = function()
     if themed then
       local m = p().gui.screen.bpgen_window__menu
       check("settings open", m ~= nil and find_in(m, "bpgen_docked") ~= nil and find_in(m, "bpgen_only_unlocked") ~= nil)
+      check("settings: the window's Size", m ~= nil and find_in(m, "bpgen_size") ~= nil
+        and find_in(m, "bpgen_size").tags.fstd_scale_pick == "bpgen_window")
       if m and m.location then
         local wl, sc, tw = w().location, p().display_scale, w().tags.fstd_tweak or {}
         check("settings under the title bar, right", m.location.y > wl.y and m.location.y < wl.y + 80 * sc
@@ -215,6 +223,7 @@ steps[#steps + 1] = { run = function()
       check("not docked: tabs and tools inside", find_in(w(), "bpgen_tabs") ~= nil and find_in(w(), "bpgen_test") ~= nil
         and find_in(w(), "bpgen_cursor") ~= nil)
       check("not docked: the plan kept", find(w(), "bpgen_cam").visible and find(w(), "bpgen_recipe").elem_value == "iron-gear-wheel")
+      check("not docked: the test run under the result's area", find_in(find_in(w(), "bpgen_info"), "bpgen_test_box") ~= nil)
       shot("inside")
     end
   end, ticks = 25 }
@@ -222,6 +231,61 @@ steps[#steps + 1] = { run = function() if themed then rc("docked", 1, true) end 
 steps[#steps + 1] = { run = function()
     if themed then check("docked again", p().gui.screen.bpgen_window__left ~= nil and find(w(), "bpgen_cam").visible) end
   end, ticks = 5 }
+-- the Window size (fse-std 0.8): at 150 % the preview shrinks so the window fits at it, clear of the hotbar band; its
+-- own Size from the settings wins; back at 100 % the preview grows back
+local function fits(what)
+  local f, tw, dock = w().tags.fstd_scale or 1, w().tags.fstd_tweak or {}, p().gui.screen.bpgen_window__bottom
+  local sc, res, loc = p().display_scale * f, p().display_resolution, w().location
+  local bottom = loc.y + ((tw.height or 0) + 30) * sc
+  check(what .. ": above the hotbar band", dock ~= nil and bottom <= res.height - 100 * p().display_scale + 1,
+    "bottom " .. bottom .. " scale " .. f)
+  check(what .. ": on the screen", loc.x >= 0 and loc.x + ((tw.width or 0) + 100) * sc <= res.width + 1, serpent.line(loc))
+  return f, tw.width
+end
+local wide_at_100
+if themed and remote.interfaces["fse-std"] and remote.interfaces["fse-std"].set_window_scale then
+  steps[#steps + 1] = { run = function()
+      wide_at_100 = (w().tags.fstd_tweak or {}).width
+      remote.call("fse-std", "set_window_scale", 1, 150)
+    end, ticks = 10 }
+  steps[#steps + 1] = { run = function()
+      local f, width = fits("window size 150 %")
+      -- (a big game UI scale: the largest step at which its smallest size fits)
+      check("window size 150 %: drawn at it (the preview shrank)", f == 1.5 or p().display_scale > 1.25 and f >= 1,
+        f .. " " .. tostring(width))
+      shot("scale-150")
+      rc("click", 1, { fstd_settings = "bpgen_window" })
+    end, ticks = 10 }
+  steps[#steps + 1] = { run = function()
+      local dd = p().gui.screen.bpgen_window__menu and find_in(p().gui.screen.bpgen_window__menu, "bpgen_size")
+      check("Size drop-down", dd ~= nil)
+      shot("settings-150")
+      if dd then  -- (as picked: Size 110 %)
+        local i
+        for k, item in ipairs(dd.items) do if type(item) == "table" and tostring(item[2]) == "110" then i = k end end
+        check("Size 110 % offered", i ~= nil, serpent.line(dd.items[5]))
+        rc("pick", 1, "bpgen_size", i or 5)  -- (Default, then 75 90 100 110 ...)
+      end
+    end, ticks = 10 }
+  steps[#steps + 1] = { run = function()
+      local f = fits("Size 110 %")
+      check("Size 110 %: wins over the setting", f == 1.1 or p().display_scale > 1.25 and f >= 0.9 and f <= 1.1, f)
+      rc("click", 1, { fstd_settings = "bpgen_window" })
+      remote.call("fse-std", "set_window_scale", 1, 100)
+    end, ticks = 10 }
+  steps[#steps + 1] = { run = function()
+      local dd
+      rc("click", 1, { fstd_settings = "bpgen_window" })
+      dd = p().gui.screen.bpgen_window__menu and find_in(p().gui.screen.bpgen_window__menu, "bpgen_size")
+      if dd then rc("pick", 1, "bpgen_size", 1) end  -- (Default: the setting's)
+      rc("click", 1, { fstd_settings = "bpgen_window" })
+    end, ticks = 10 }
+  steps[#steps + 1] = { run = function()
+      local f, width = fits("back at 100 %")
+      check("back at 100 %: the preview as wide as before", f == 1 and width == wide_at_100,
+        tostring(width) .. " was " .. tostring(wide_at_100))
+    end, ticks = 5 }
+end
 -- the preview's recipes locked again (a mod's migration resetting technology effects): planned again, its machines
 -- aren't crossed out as not researched
 steps[#steps + 1] = { run = function()
@@ -320,7 +384,34 @@ steps[#steps + 1] = { run = function()
     local bar = find(w(), "bpgen_test_bar")
     check("test run measured", bar and bar.value > 0, bar and bar.value)
     log("test: " .. text(find(w(), "bpgen_test_status").caption):gsub("\n", " | "))
+    if themed then  -- (docked: in a drawer out of the window's right edge, on the screen; the rail's button live)
+      local d = p().gui.screen.bpgen_window__test
+      check("test run in its drawer", d ~= nil and d.visible and find_in(d, "bpgen_test_box") ~= nil
+        and find_in(d, "bpgen_test_speed") ~= nil)
+      if d and d.location then
+        local a, sc = d.tags.fstd_attach, p().display_scale * (w().tags.fstd_scale or 1)
+        check("test drawer on the screen", d.location.x >= 0
+          and d.location.x + a.w * sc <= p().display_resolution.width + 1, serpent.line(d.location) .. " overlap " .. a.overlap)
+      end
+      local cap = text(find(w(), "bpgen_test").caption)
+      check("Test run says how far", cap:find("test-live", 1, true) ~= nil, cap)
+    end
     shot("test")
+  end, ticks = 25 }
+steps[#steps + 1] = { run = function() if themed then rc("click", 1, { bpgen = "test_close" }) end end, ticks = 5 }
+steps[#steps + 1] = { run = function()
+    if themed then
+      local d = p().gui.screen.bpgen_window__test
+      check("drawer closed, the run goes on", d ~= nil and not d.visible and game.speed == 10, game.speed)
+      shot("test-closed")
+    end
+  end, ticks = 25 }
+steps[#steps + 1] = { run = function()
+    if themed then
+      rc("click", 1, { bpgen = "test" })  -- (a run going on: its drawer again, not stopped)
+      local d = p().gui.screen.bpgen_window__test
+      check("Test run opens it again", d and d.visible and game.speed == 10)
+    end
   end, ticks = 25 }
 steps[#steps + 1] = { run = function()
     rc("click", 1, { bpgen = "test" })  -- (stop)
