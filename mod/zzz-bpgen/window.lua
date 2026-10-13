@@ -521,6 +521,14 @@ local function fields(parent)
   return f
 end
 
+-- Line's "More lines": a recipe slot each, an empty one at the end; each planned as its own line
+local function line_slot(t, recipe)
+  local b = t.add({ type = "choose-elem-button", elem_type = "recipe", tags = { bpgen_line = true },
+    elem_filters = { { filter = "hidden", invert = true } } })
+  if recipe then b.elem_value = recipe end
+  return b
+end
+
 -- "Only unlocked" (the checkbox by the tabs, per player): every picker of the window offers only what the force has
 -- unlocked: recipes it may craft, items it can make, entities whose item it can make. A picker's own filter stays
 -- (kept in its tags) and the names are added to it; unticked, the own filter comes back.
@@ -1199,6 +1207,7 @@ function M.open(player, prefill)
     name = "bpgen_machine", elem_filters = { { filter = "crafting-machine" } } })
   field(fs, T("per-minute"), T("rate-tip")).add({ type = "textfield",
     name = "bpgen_rate", numeric = true, allow_decimal = true, lose_focus_on_confirm = true }).style.width = 90
+  line_slot(field(sec, T("more-lines"), T("more-lines-tip")).add({ type = "table", name = "bpgen_lines", column_count = 7 }))
   fs = fields(sec)
   field(fs, T("belt"), T("belt-tip")).add({ type = "choose-elem-button", elem_type = "entity",
     name = "bpgen_belt", elem_filters = { { filter = "type", type = "transport-belt" } } })
@@ -1589,6 +1598,12 @@ function M.open(player, prefill)
     t.add({ type = "choose-elem-button", elem_type = "recipe", tags = { bpgen_product = true },
       elem_filters = { { filter = "hidden", invert = true } } })
   end
+  if prefill.lines and #prefill.lines > 0 then
+    local t = find(frame, "bpgen_lines")
+    t.clear()
+    for _, r in ipairs(prefill.lines) do line_slot(t, r) end
+    line_slot(t)
+  end
   if prefill.spm then find(frame, "bpgen_spm").text = tostring(prefill.spm) end
   if prefill.plates then find(frame, "bpgen_base_plates").state = true end
   if prefill.bus_belt then find(frame, "bpgen_bus_belt").elem_value = prefill.bus_belt end
@@ -1814,7 +1829,32 @@ local function request(player, frame)
   ticked(find(frame, "bpgen_also"))
   if next(also) then params.also = also end
   req.params = params
+  -- More lines: each its own line, as if picked alone (its best machine, the same rate, belt, feed and modules)
+  local lines = {}
+  for _, r in ipairs(M.more_lines(frame)) do
+    local m = best_machine(player, r)
+    if not m then return nil, T("err-no-machine-for", "[recipe=" .. r .. "]") end
+    local mods = {}
+    local n = prototypes.entity[m].module_inventory_size or 0
+    if mod and n > 0 then mods[1] = { name = mod.name, quality = mod.quality or "normal", count = n } end
+    lines[#lines + 1] = { recipe = r, machine = m, machine_quality = "normal", modules = mods,
+      recipe_productivity = force.recipes[r] and force.recipes[r].productivity_bonus or 0 }
+  end
+  if #lines > 0 then
+    if params.bus_feed then return nil, T("err-lines-bus") end
+    req.lines = lines
+  end
   return req
+end
+
+--- Line's More lines: the recipes picked, in order (the empty slot left out)
+function M.more_lines(frame)
+  local out = {}
+  local t = find(frame, "bpgen_lines")
+  for _, b in pairs(t and t.children or {}) do
+    if b.elem_value then out[#out + 1] = b.elem_value end
+  end
+  return out
 end
 
 --- an absolute plan (next to the base) as ghosts where it belongs, its taps replacing the belts they cut into,
@@ -3009,7 +3049,9 @@ local function on_click(e)
     if not c then
       status(frame, T("no-free-spot", math.ceil(r.w), math.ceil(r.h)))
     else
-      local ghosts, origin, area, marks = place.place(player, r.blueprint, c)
+      local sec = find(frame, "bpgen_section")  -- (a book: the print shown)
+      local ghosts, origin, area, marks = place.place(player, r.blueprint, c, nil,
+        sec.visible and sec.items[sec.selected_index] or nil)
       placed[player.index], unmark[player.index] = ghosts, marks
       if origin then
         local found, missing = place.guide(player, area, origin, r.res.test and r.res.test.case.sources or {},
@@ -3118,6 +3160,18 @@ local function on_elem_changed(e)
     elseif not el.elem_value and kids[#kids] ~= el then
       el.destroy()
     end
+    return
+  end
+  if el.tags and el.tags.bpgen_line then
+    -- (Line's more lines: as the mall's products; planned again with the line added or gone)
+    local t = el.parent
+    local kids = t.children
+    if el.elem_value and kids[#kids] == el then line_slot(t)
+    elseif not el.elem_value and kids[#kids] ~= el then el.destroy() end
+    local player = game.get_player(e.player_index)
+    local frame = player.gui.screen[NAME]
+    M.restrict(player)
+    if frame and value(frame, "bpgen_recipe") then M.plan(player) end
     return
   end
   if el.name ~= "bpgen_recipe" then return end
@@ -3327,7 +3381,7 @@ function M.rebuild(player)
   local mode = mode_of(frame)
   local recipe, machine = value(frame, "bpgen_recipe"), value(frame, "bpgen_machine")
   M.open(player, { mode = mode, recipe = recipe, machine = machine and machine.name,
-    machine_quality = machine and machine.quality, rebuilt = true })
+    machine_quality = machine and machine.quality, lines = M.more_lines(frame), rebuilt = true })
   local r = results[player.index]
   if r and r.blueprint and r.res then M.on_result(player, r.res) end
 end

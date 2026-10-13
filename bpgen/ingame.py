@@ -460,7 +460,9 @@ def place(request: str) -> str:
         global _last
         req = json.loads(request or "{}")
         sec = _sections.get(req.get("section") or "")
-        if sec and _last:  # (a print of the starter base: that one next to the base, and the arrows move it)
+        if sec and sec.get("last"):  # (one of More lines' lines: that one next to the base)
+            _last = sec["last"]
+        elif sec and _last:  # (a print of the starter base: that one next to the base, and the arrows move it)
             res = sec.get("result") or {}
             _last = {"entities": res.get("entities") or [], "sources": res.get("sources") or [],
                      "sinks": [dict(k, item=k.get("item") or sec.get("item")) for k in res.get("sinks") or []],
@@ -573,6 +575,45 @@ def add_lane(request: str) -> str:
         return _crash(e, request)
 
 
+def _lines(req, t):
+    """Line's More lines: the window's line and each of req["lines"] ({recipe, machine, modules...}) planned as its own
+    line, as if picked alone (no Make here / Also make: those are the first line's) -> as plan(), a blueprint book of
+    them, a print each ("sections": their labels, for the window's picker; place() puts the one picked by the base)"""
+    global _last, _sections
+    from bpgen import base
+    first = dict(req)
+    extra = first.pop("lines")
+    plain = {k: v for k, v in (first.get("params") or {}).items() if k not in ("make", "also")}
+    done, notes = [], []  # (label, its answer, its _last)
+    for i, sub in enumerate([first] + [dict(first, params=plain, **ln) for ln in extra]):
+        out = json.loads(plan(json.dumps(sub)))
+        if out.get("measure") or (i == 0 and not out.get("blueprint")):
+            return json.dumps(dict(out, seconds=round(time.perf_counter() - t, 3)))  # (measured, then all again)
+        if not out.get("blueprint"):
+            notes.append(f"{sub.get('recipe')}: not planned ({out.get('error')})")
+            continue
+        label, n = out["label"], 2
+        while any(d[0] == label for d in done):  # (a recipe twice: told apart)
+            label, n = f"{out['label']} ({n})", n + 1
+        done.append((label, out, _last))
+    prints = []
+    for i, (label, out, _) in enumerate(done):
+        bp = base._decode(out["blueprint"])
+        bp["blueprint"]["label"] = label
+        prints.append({"index": i, **bp})
+    book = {"blueprint_book": {"item": "blueprint-book", "label": f"bpgen: {len(done)} lines",
+                               "description": "\n".join(d[0] for d in done), "blueprints": prints, "active_index": 0,
+                               "version": prints[0]["blueprint"]["version"]}}
+    _sections = {label: {"name": label, "last": last} for label, _, last in done}
+    _last = done[0][2]
+    head = done[0][1]
+    for label, out, _ in done:
+        notes += [f"{label}: {x}" for x in out.get("notes") or []]
+    return json.dumps(dict(head, blueprint=base._encode(book), label=f"{len(done)} lines: " + ", ".join(
+        d[0] for d in done), sections=[d[0] for d in done], notes=notes, test=None, absolute=None,
+        seconds=round(time.perf_counter() - t, 3)))
+
+
 def plan(request: str) -> str:
     """a request from the mod (recipe, machine, unlocked belts and inserters, bonuses...) -> {blueprint, label, text}
     or {error}"""
@@ -583,6 +624,9 @@ def plan(request: str) -> str:
     _note("request received", 0)
     try:
         req = json.loads(request)
+        if req.get("lines"):  # (Line's More lines: each its own line, one book)
+            return _lines(req, t)
+        _sections = {}
         with _lock:
             s = _svc()
             s.progress = lambda text: _note(text, 2)  # (placing next to the base: each input routed)

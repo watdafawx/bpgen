@@ -45,14 +45,18 @@ end
 
 --- places the blueprint string centred at `c`: -> the ghosts, the built area's top-left, its area, and what the
 --- paste marked for deconstruction (the belts under its splitters, trees: Undo unmarks them)
-function M.place(player, bp, c, box)
+function M.place(player, bp, c, box, section)
   local inv = game.create_inventory(1)
   local stack = inv[1]
   stack.set_stack({ name = "blueprint" })
   stack.import_stack(bp)
-  if stack.is_blueprint_book then
+  if stack.is_blueprint_book then  -- (the print labelled `section`, else the book's active one)
     local inner = stack.get_inventory(defines.inventory.item_main)
-    stack = inner[stack.active_index or 1]
+    local pick = inner[stack.active_index or 1]
+    for i = 1, section and #inner or 0 do
+      if inner[i].valid_for_read and inner[i].label == section then pick = inner[i] break end
+    end
+    stack = pick
   end
   -- (an absolute blueprint, next to the base: at its box, superforced so its splitters replace the belts they tap)
   if box then c = { x = box[1] + box[3] / 2, y = box[2] + box[4] / 2 } end

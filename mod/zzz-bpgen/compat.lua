@@ -94,10 +94,15 @@ function M.scan(player)
 end
 
 -- the recipe under the cursor for Ctrl+Shift+B: one shown with its tooltip (Recipe Book, Factoriopedia, crafting
--- menu...) or a button showing a recipe's icon (Factory Planner's production table)
+-- menu...), a button showing a recipe's icon (Factory Planner's production table), or what makes an item or fluid
+-- under it (a slot of the inventory, a chest, the quickbar...)
 function M.hovered_recipe(e)
   local sp = e.selected_prototype
   if sp and sp.base_type == "recipe" and prototypes.recipe[sp.name] then return sp.name end
+  if sp and (sp.base_type == "item" or sp.base_type == "fluid") then
+    local r = made_by(sp.base_type, sp.name)
+    if r then return r end
+  end
   local el = e.element
   if el and el.valid then
     local ok, r = pcall(recipe_of, el)

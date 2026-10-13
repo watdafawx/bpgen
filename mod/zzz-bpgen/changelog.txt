@@ -1,4 +1,14 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.24.0
+Date: 2026-10-13
+  Features:
+    - Line: More lines, a row of recipe slots under the recipe (an empty one always at the end). Each recipe is planned
+      as its own line, as if picked alone (its best machine, the same rate, belt, feed and modules), and they all come
+      out as one blueprint book: pick a line under the preview to see it, Place here or Place by my base puts that one.
+      Not with Feed: my main bus.
+    - Ctrl+Shift+B over an item or fluid (an inventory slot, a chest, the quickbar...) opens the window in Line with the
+      recipe that makes it, and plans it.
+---------------------------------------------------------------------------------------------------
 Version: 0.23.1
 Date: 2026-10-13
   Bugfixes:

@@ -20,6 +20,9 @@ places the same (no desyncs). The window's mouse-dragged preview works with its 
 - **Production lines**: one recipe at a rate, on the belt you pick. Machine and quality, modules, beacons,
   productivity and your research bonuses are counted. Inserters are picked from throughput measured in the game,
   not from formulas. Optionally its ingredients too (the recipe tree), fed by belts or by robots.
+  **More lines** (under the recipe): more recipes, each planned as its own line as if picked alone (its best
+  machine, the same rate, belt, feed and modules), all in one blueprint book; pick one under the preview to see it,
+  place it here or by your base.
 - **Malls**: several products, each with its machine and chest. By default (**Fed by: mixed belts**) in columns of
   machines between pairs of mixed belts (one item a lane, 8 within each machine's reach): only plates come in at the
   top (and wood, for wooden chests and small poles), the parts (gears, cable, circuits, inserters...) are made in a band of machines above the products and put on
@@ -203,6 +206,8 @@ your hand.
 **Recipe Book** (and its fork) and **Factory Planner**: a blueprint button sits in Recipe Book's page header (for an
 item, its main recipe) and beside each recipe in Factory Planner's production table; it opens the bpgen window with
 that recipe. Ctrl+Shift+B over any recipe icon in a window (theirs, Factoriopedia, the crafting menu) does the same.
+Over an item or fluid (a slot of your inventory, a chest, the quickbar), Ctrl+Shift+B opens the window with the recipe
+that makes it, in Line, and plans it.
 
 The first time a plan needs an inserter setup bpgen hasn't measured yet (a new belt, a research level), the game
 measures it itself on a hidden surface (about 30 s) and plans again.

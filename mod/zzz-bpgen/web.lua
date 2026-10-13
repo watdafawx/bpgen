@@ -322,6 +322,14 @@ local function snapshot(player, frame)
     prods[#prods + 1] = ref
   end
   out.products = prods
+  -- Line's more lines: the same, each its own line
+  local lines = {}
+  for i, b in ipairs(named.bpgen_lines and named.bpgen_lines.children or {}) do
+    local ref = "line:" .. i
+    picker(ref, b)
+    lines[#lines + 1] = ref
+  end
+  out.lines = lines
   out.patch_note = named.bpgen_patch_note and ls(named.bpgen_patch_note.caption)
   out.snap_note = named.bpgen_snap_note and ls(named.bpgen_snap_note.caption)
   -- planning, Plan, the status line
@@ -424,8 +432,8 @@ local function resolve(player, ref)
         return kind == "make_on" and first or r.children[2]
       end
     end
-  elseif kind == "prod" then
-    local t = W.find(frame, "bpgen_products")
+  elseif kind == "prod" or kind == "line" then
+    local t = W.find(frame, kind == "prod" and "bpgen_products" or "bpgen_lines")
     return t and t.children[tonumber(arg)]
   else
     local function search(box)

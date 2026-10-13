@@ -998,6 +998,7 @@ remote.add_interface("bpgen", {
   last_absolute = function(player_index) return window.last_absolute(player_index) end,
   hover_grip = function(player_index) window.test_hover_grip(player_index) end,
   compat_scan = function(player_index) compat.scan(game.get_player(player_index)) end,
+  hovered_recipe = function(e) return compat.hovered_recipe(e) end,  -- (tests: Ctrl+Shift+B over that)
   preview = function(bp, force_name) return window.preview({ index = 1, force = game.forces[force_name or "player"] }, bp) end,
   bench_test = function(spec, where) return window.bench_test(1, spec, where) end,
   bench_calibrate = function(spec) return window.bench_calibrate(1, spec) end,

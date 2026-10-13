@@ -174,6 +174,7 @@
     line: [
       { h: "recipe", body: [["row", [["pick", "bpgen_recipe", "recipe"], ["pick", "bpgen_machine", "machine", "machine-tip"],
         ["num", "bpgen_rate", "per-minute", "rate-tip", "/min"]]],
+        ["f", "more-lines", "more-lines-tip", ["dyn", "lines"]],
         ["row", [["pick", "bpgen_belt", "belt", "belt-tip"], ["sel", "bpgen_feed", "feed", "feed-tip"]]]] },
       { h: "make-here", tip: "make-here-tip", body: [["dyn", "make"]] },
       { h: "also-make", fold: "also", body: [["dyn", "also"]] },
@@ -237,6 +238,7 @@
     if (kind === "note") return `<div class="note" data-note="${a}"></div>`;
     if (kind === "btn") return `<button class="btn" data-click='${JSON.stringify(a)}' data-t="${b}"${tipAttr(c)}></button>`;
     if (kind === "dyn") return `<div class="dyn" data-dyn="${a}"></div>`;
+    if (kind === "f") return `<div class="f"${tipAttr(b)}><span class="cap" data-t="${a}"></span>${build(c)}</div>`;
     if (kind === "more") return `<div class="more-box" data-more>${a.map(build).join("")}</div>`;
     return "";
   }
@@ -329,6 +331,7 @@
     if (changed("make", [st.make, st.pk, S.iconsN])) renderMake(st);
     if (changed("also", [st.also, S.iconsN])) renderAlso(st);
     if (changed("products", [st.products, st.pk, S.iconsN])) renderProducts(st);
+    if (changed("lines", [st.lines, st.pk, S.iconsN])) renderPicks("lines", st.lines, "more-lines", st);
     // foot
     const prog = st.prog && st.vis.bpgen_progress;
     $("progress").hidden = !prog;
@@ -407,12 +410,13 @@
     }).join("");
     box.innerHTML = rows(st.also || []);
   }
-  function renderProducts(st) {
-    const box = document.querySelector('[data-dyn="products"]');
+  function renderPicks(dyn, refs, cap, st) {
+    const box = document.querySelector(`[data-dyn="${dyn}"]`);
     if (!box) return;
-    box.innerHTML = `<div class="picks">${(st.products || []).map((ref) => `<button class="pick" data-ref="${esc(ref)}" data-cap="products" data-test="pick_${esc(ref)}"></button>`).join("")}</div>`;
+    box.innerHTML = `<div class="picks">${(refs || []).map((ref) => `<button class="pick" data-ref="${esc(ref)}" data-cap="${cap}" data-test="pick_${esc(ref)}"></button>`).join("")}</div>`;
     fillPicks(box, st);
   }
+  function renderProducts(st) { renderPicks("products", st.products, "products", st); }
 
   function tree(node) {
     if (!node) return "";
