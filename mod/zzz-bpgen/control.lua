@@ -300,20 +300,34 @@ window.setup({
   end,
 })
 
+--- a recipe planned as a line: in the bpgen window (planned now), or without the fse loader sent to the web app
+local function request_recipe(player, recipe)
+  if in_game() then
+    window.open(player, { recipe = recipe })
+    return window.plan(player)
+  end
+  local machine = window.best_machine(player, recipe)
+  if not machine then return player.print("[bpgen] no unlocked machine makes [recipe=" .. recipe .. "]") end
+  helpers.write_file("bpgen/request.json", helpers.table_to_json(recipe_request(player.force, recipe, machine)), false)
+  player.print({ "", "[bpgen] request sent: [recipe=" .. recipe .. "] in [entity=" .. machine .. "]" })
+end
+
+-- middle click: only over an item, fluid or recipe shown in a window (not bpgen's own pickers, not with something in
+-- hand, not over the world): what makes it, as a line
+on_event("bpgen-pick", function(e)
+  local player = game.get_player(e.player_index)
+  if player.selected or (player.cursor_stack and player.cursor_stack.valid_for_read) then return end
+  local el = e.element
+  if el and el.valid and el.get_mod() == script.mod_name then return end
+  local recipe = compat.hovered_recipe(e)
+  if recipe then request_recipe(player, recipe) end
+end)
+
 on_event("bpgen-request", function(e)
   local player = game.get_player(e.player_index)
   -- over a recipe in a window (Recipe Book, Factory Planner, Factoriopedia...): that recipe, in the best machine
   local recipe = (e.in_gui or not player.selected) and compat.hovered_recipe(e)
-  if recipe then
-    if in_game() then
-      window.open(player, { recipe = recipe })
-      return window.plan(player)
-    end
-    local machine = window.best_machine(player, recipe)
-    if not machine then return player.print("[bpgen] no unlocked machine makes [recipe=" .. recipe .. "]") end
-    helpers.write_file("bpgen/request.json", helpers.table_to_json(recipe_request(player.force, recipe, machine)), false)
-    return player.print({ "", "[bpgen] request sent: [recipe=" .. recipe .. "] in [entity=" .. machine .. "]" })
-  end
+  if recipe then return request_recipe(player, recipe) end
   local request, err = write_request(player.force, player.selected)
   if in_game() then
     -- the bpgen window: filled in from the hovered machine and planned now, else empty

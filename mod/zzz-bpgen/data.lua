@@ -1,6 +1,10 @@
 data:extend({
   { type = "custom-input", name = "bpgen-request", key_sequence = "CONTROL + SHIFT + B", consuming = "game-only",
     include_selected_prototype = true },
+  -- middle click over an item, fluid or recipe in a window (inventory, chest, Factoriopedia...): Line with its recipe
+  -- (not consumed: the game's own middle click, a wagon slot's filter, still happens)
+  { type = "custom-input", name = "bpgen-pick", key_sequence = "mouse-button-3", consuming = "none",
+    include_selected_prototype = true },
   -- drag over part of the base (the window's Extend tab, "Pick base area"): bpgen builds next to it
   {
     type = "selection-tool",

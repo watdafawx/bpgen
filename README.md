@@ -206,8 +206,9 @@ your hand.
 **Recipe Book** (and its fork) and **Factory Planner**: a blueprint button sits in Recipe Book's page header (for an
 item, its main recipe) and beside each recipe in Factory Planner's production table; it opens the bpgen window with
 that recipe. Ctrl+Shift+B over any recipe icon in a window (theirs, Factoriopedia, the crafting menu) does the same.
-Over an item or fluid (a slot of your inventory, a chest, the quickbar), Ctrl+Shift+B opens the window with the recipe
-that makes it, in Line, and plans it.
+Over an item or fluid (a slot of your inventory, a chest, the quickbar), **middle click** (or Ctrl+Shift+B) opens the
+window with the recipe that makes it, in Line, and plans it. Middle click does nothing over the world or with something
+in hand; rebind it in Controls.
 
 The first time a plan needs an inserter setup bpgen hasn't measured yet (a new belt, a research level), the game
 measures it itself on a hidden surface (about 30 s) and plans again.

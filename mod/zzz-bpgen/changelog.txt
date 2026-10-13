@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.24.1
+Date: 2026-10-13
+  Features:
+    - Middle click over an item or fluid in a window (inventory, chest, quickbar, a recipe icon) opens bpgen in Line
+      with the recipe that makes it and plans it. Over the world, or with something in hand, it does nothing. Rebind it
+      in Controls ("bpgen: plan a line of the hovered item").
+---------------------------------------------------------------------------------------------------
 Version: 0.24.0
 Date: 2026-10-13
   Features:
