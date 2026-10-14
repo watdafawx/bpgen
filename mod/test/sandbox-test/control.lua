@@ -74,8 +74,22 @@ script.on_event(defines.events.on_tick, function(e)
     if s.count_entities_filtered({ name = "inserter", area = { { 8, -2 }, { 18, 6 } } }) ~= 1 then
       out("FAIL: the plan's old copies left behind")
     end
-    local far = remote.call("bpgen", "sandbox_move", 1, 0, 400, false)
-    if far.ok or far.why ~= "sandbox-edge" then out("FAIL: moved past the copied base") end
+    -- (moved far east: the base there copied in as it goes, nothing twice; then back)
+    local far = remote.call("bpgen", "sandbox_move", 1, 60, 0, false)
+    if not far.ok then out("FAIL: a long move refused: " .. tostring(far.why)) end
+    if not s.find_entity("inserter", { 70.5, 1.5 }) then out("FAIL: the plan not moved 60 east") end
+    -- (the lab now reaches past the belt's east end: x -22 .. 88, the belt -45 .. 70)
+    local lab_belts = s.count_entities_filtered({ name = "express-transport-belt", area = { { -20, 0 }, { 71, 1 } } })
+    local real_belts = game.surfaces.nauvis.count_entities_filtered({ name = "express-transport-belt",
+      area = { { -20, 0 }, { 71, 1 } } })
+    if lab_belts ~= real_belts then out("FAIL: the belt copied " .. lab_belts .. " times, the base has " .. real_belts) end
+    for x = -45, 70 do
+      if s.count_entities_filtered({ name = "express-transport-belt", position = { x + 0.5, 0.5 } }) > 1 then
+        out("FAIL: two belts at " .. x) break
+      end
+    end
+    remote.call("bpgen", "sandbox_move", 1, -60, 0, false)
+    if not s.find_entity("inserter", { 10.5, 1.5 }) then out("FAIL: the plan not back from the long move") end
     out("moved and turned")
   end
   if e.tick == 2400 then

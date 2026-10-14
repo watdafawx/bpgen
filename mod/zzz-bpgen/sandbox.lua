@@ -17,7 +17,8 @@ local M = {}
 
 local PREFIX = "bpgen-sandbox-"
 local POWER = "bpgen-sandbox-power"
-local MARGIN = 48       -- the base copied round the plan, tiles each side
+local MARGIN = 32       -- the base copied round the plan, tiles each side (more is copied as the plan moves)
+local ROOM = 16         -- the base kept copied round a moved plan, tiles each side
 local EVERY = 5         -- ticks between the edges' feeds (an item crosses a turbo belt tile in 16)
 local DRY = 400000      -- the paste's test build, this far east on the lab (an even number: rails' 2x2 grid)
 local FLUID = { pipe = true, ["pipe-to-ground"] = true, ["storage-tank"] = true, pump = true }
@@ -271,6 +272,50 @@ end
 
 --- the base round `area` ({x1, y1, x2, y2}, the plan's) copied to a new lab, the plan built in it: the lab's state.
 --- `plan` = {blueprint, section, box = {x, y, w, h} (an absolute plan) | center = {x, y}, clear = {{name, position}}}
+--- `rect` of the real base copied onto the lab (tiles and entities), cleaned up (no characters, enemies, turrets; labs
+--- tamed; the plan's st.clear gone), its entities added to st.originals
+local function copy_in(st, s, rect)
+  local real, force = game.surfaces[st.home_surface], game.forces[st.force]
+  for _, e in pairs(s.find_entities_filtered({ area = box(rect) })) do
+    if e.valid and not inside(st.area, e.position) then e.destroy() end
+  end
+  real.clone_area({ source_area = box(rect), destination_area = box(rect), destination_surface = s,
+    clone_tiles = true, clone_entities = true, clone_decoratives = false,
+    clear_destination_entities = false, expand_map = true, create_build_effect_smoke = false })
+  for _, e in pairs(s.find_entities_filtered({ area = box(rect), type = { "character", "unit", "unit-spawner", "turret",
+      "character-corpse", "item-request-proxy" } })) do
+    if e.valid then e.destroy() end
+  end
+  for _, e in pairs(s.find_entities_filtered({ area = box(rect), type = "lab" })) do tame(e) end
+  for _, c in ipairs(st.clear or {}) do  -- (a refit's, a move's: the old part goes)
+    if inside(rect, c.position) then
+      for _, e in pairs(s.find_entities_filtered({ name = c.name, position = c.position })) do e.destroy() end
+    end
+  end
+  for _, e in pairs(s.find_entities_filtered({ area = box(rect), force = force })) do
+    if e.type ~= "entity-ghost" and e.type ~= "tile-ghost" then st.originals[key(e)] = true end
+  end
+end
+
+--- the base copied out to `want` ({x1, y1, x2, y2}, the area grows to cover it): only the strips not copied yet
+local function grow(st, s, want)
+  local a = st.area
+  local b = { math.min(a[1], math.floor(want[1])), math.min(a[2], math.floor(want[2])), math.max(a[3], math.ceil(want[3])),
+    math.max(a[4], math.ceil(want[4])) }
+  if b[1] == a[1] and b[2] == a[2] and b[3] == a[3] and b[4] == a[4] then return end
+  ground(s, b, 8)
+  local strips = {}
+  if b[2] < a[2] then strips[#strips + 1] = { b[1], b[2], b[3], a[2] } end  -- (above, below, left, right)
+  if b[4] > a[4] then strips[#strips + 1] = { b[1], a[4], b[3], b[4] } end
+  if b[1] < a[1] then strips[#strips + 1] = { b[1], a[2], a[1], a[4] } end
+  if b[3] > a[3] then strips[#strips + 1] = { a[3], a[2], b[3], a[4] } end
+  for _, r in ipairs(strips) do copy_in(st, s, r) end
+  st.area = b
+  game.forces[st.force].chart(s, box(b))
+end
+
+--- the base round `area` ({x1, y1, x2, y2}, the plan's) copied to the player's lab, the plan built in it: the lab's state.
+--- `plan` = {blueprint, section, box = {x, y, w, h} (an absolute plan) | center = {x, y}, clear = {{name, position}}}
 function M.open(index, home_surface, home_force, plan)
   M.close(index)
   local a = plan.area
@@ -279,23 +324,11 @@ function M.open(index, home_surface, home_force, plan)
   local force = home_force
   pcall(home_force.set_surface_hidden, s, true)
   ground(s, a, 8)
-  for _, e in pairs(s.find_entities_filtered({ area = box(a) })) do e.destroy() end
-  home_surface.clone_area({ source_area = box(a), destination_area = box(a), destination_surface = s,
-    clone_tiles = true, clone_entities = true, clone_decoratives = false,
-    clear_destination_entities = true, expand_map = true, create_build_effect_smoke = false })
-  for _, e in pairs(s.find_entities_filtered({ area = box(a), type = { "character", "unit", "unit-spawner", "turret",
-      "character-corpse", "item-request-proxy" } })) do
-    if e.valid then e.destroy() end
-  end
-  for _, e in pairs(s.find_entities_filtered({ area = box(a), type = "lab" })) do tame(e) end
-  for _, c in ipairs(plan.clear or {}) do  -- (a refit's, a move's: the old part goes)
-    for _, e in pairs(s.find_entities_filtered({ name = c.name, position = c.position })) do e.destroy() end
-  end
   local st = { surface = s.name, force = force.name, home_surface = home_surface.name, home_force = home_force.name,
-    area = a, originals = {} }
-  for _, e in pairs(s.find_entities_filtered({ area = box(a), force = force })) do
-    if e.type ~= "entity-ghost" and e.type ~= "tile-ghost" then st.originals[key(e)] = true end
-  end
+    area = { 0, 0, 0, 0 }, originals = {}, clear = plan.clear }
+  for _, e in pairs(s.find_entities_filtered({ area = box(a) })) do e.destroy() end
+  copy_in(st, s, a)
+  st.area = a
   -- the plan, built for real (an absolute one at its box, any other at its center); the card's arrows move it
   local b = plan.box
   st.plan = { blueprint = plan.blueprint, section = plan.section, superforced = b ~= nil, dir = defines.direction.north,
@@ -333,30 +366,26 @@ function M.paste(st, by_player)
     always_include_tiles = true,
     include_station_names = true, include_trains = false, include_fuel = false })
   if not stack.is_blueprint_setup() then inv.destroy() return {}, {}, removed end
-  -- (where the paste lands: a test build far off on the lab, each ghost matched to the entity it stands for; the
-  -- game rounds a paste's position by the print's size, so the shift is a tile or less)
+  -- (where the paste lands: a test build far off on the lab, lined up with what it was made of: the same entities,
+  -- so their leftmost and topmost positions match; the game centres a paste on the print's own extent, which is
+  -- not the area's once the lab grew to one side)
   local cx, cy = (a[1] + a[3]) / 2, (a[2] + a[4]) / 2
-  local at = {}
+  local mx, my
   for _, e in pairs(map) do
-    if e.valid then at[string.format("%s|%.1f|%.1f", e.name, e.position.x, e.position.y)] = true end
+    if e.valid then
+      mx, my = math.min(mx or e.position.x, e.position.x), math.min(my or e.position.y, e.position.y)
+    end
   end
   bench.ground(s, a[1] + DRY - 8, a[2] - 8, a[3] + DRY + 8, a[4] + 8)
   local dry = stack.build_blueprint({ surface = s, force = st.force, position = { cx + DRY, cy },
     build_mode = defines.build_mode.forced })
-  local votes, best, bn = {}, nil, 0
+  local gx, gy
   for _, g in pairs(dry) do
     if g.valid and g.type == "entity-ghost" then
-      for dx = -1, 1, 0.5 do
-        for dy = -1, 1, 0.5 do
-          if at[string.format("%s|%.1f|%.1f", g.ghost_name, g.position.x - DRY + dx, g.position.y + dy)] then
-            local k = dx .. "," .. dy
-            votes[k] = (votes[k] or 0) + 1
-            if votes[k] > bn then best, bn = { dx, dy }, votes[k] end
-          end
-        end
-      end
+      gx, gy = math.min(gx or g.position.x, g.position.x), math.min(gy or g.position.y, g.position.y)
     end
   end
+  local best = mx and gx and { mx - (gx - DRY), my - gy }
   for _, g in pairs(dry) do if g.valid then g.destroy() end end
   if best then cx, cy = cx + best[1], cy + best[2] end
   local before = {}
@@ -381,13 +410,14 @@ function M.move(index, dx, dy, turn)
   local s = st and game.surfaces[st.surface]
   local real = st and game.surfaces[st.home_surface]
   if not (s and real and st.plan and st.plan_box) then return false, "sandbox-cant-move" end
-  local p, pb, a = st.plan, st.plan_box, st.area
+  local p, pb = st.plan, st.plan_box
   local at = { x = p.at.x + dx, y = p.at.y + dy }
-  -- (it stays inside the copied base, off its edge: past that there's nothing to tie into)
-  local r = math.max(p.at.x - pb[1], pb[3] - p.at.x, p.at.y - pb[2], pb[4] - p.at.y)
-  if at.x - r < a[1] + 2 or at.x + r > a[3] - 2 or at.y - r < a[2] + 2 or at.y + r > a[4] - 2 then
-    return false, "sandbox-edge"
+  -- where it will stand (a quarter turn clockwise about its middle), and the base round that copied in if it isn't yet
+  local nb = { pb[1] + dx, pb[2] + dy, pb[3] + dx, pb[4] + dy }
+  if turn then
+    nb = { at.x - (pb[4] - p.at.y), at.y + (pb[1] - p.at.x), at.x - (pb[2] - p.at.y), at.y + (pb[3] - p.at.x) }
   end
+  grow(st, s, { nb[1] - ROOM, nb[2] - ROOM, nb[3] + ROOM, nb[4] + ROOM })
   for _, e in pairs(st.plan_ents or {}) do if e.valid then e.destroy() end end
   -- the base under it as it was: its tiles, and each of the base's own entities missing there, cloned again
   local look = box({ pb[1] - 1, pb[2] - 1, pb[3] + 1, pb[4] + 1 })

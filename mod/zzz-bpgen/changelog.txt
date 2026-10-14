@@ -1,4 +1,15 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.26.4
+Date: 2026-10-14
+  Bugfixes:
+    - The sandbox's move arrows only said "The plan can't go further" for a long plan (the check took the plan as a
+      square as wide as its longest side). The plan now moves as far as you like: more of your base is copied in
+      round it as it goes.
+    - Place in base after moving the plan towards one side pasted everything a few tiles off (the paste was lined
+      up on the lab area's middle, not the blueprint's own extent).
+  Changes:
+    - The sandbox copies 32 tiles of your base round the plan instead of 48 (more follows as you move it).
+---------------------------------------------------------------------------------------------------
 Version: 0.26.3
 Date: 2026-10-14
   Changes:
