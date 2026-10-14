@@ -19,7 +19,9 @@ places the same (no desyncs). The window's mouse-dragged preview works with its 
 
 - **Production lines**: one recipe at a rate, on the belt you pick. Machine and quality, modules, beacons,
   productivity and your research bonuses are counted. Inserters are picked from throughput measured in the game,
-  not from formulas. Optionally its ingredients too (the recipe tree), fed by belts or by robots.
+  not from formulas. Optionally its ingredients too (the recipe tree), fed by belts or by robots. One ingredient made
+  in the blueprint (copper cable for circuits) is made by **direct insertion** when the recipes allow it: its machines
+  sit beside the line's and insert straight into them (3 cable : 2 circuit assemblers), a full belt of circuits.
   **More lines** (under the recipe): more recipes, each planned as its own line as if picked alone (its best
   machine, the same rate, belt, feed and modules), all in one blueprint book; pick one under the preview to see it,
   place it here or by your base.
