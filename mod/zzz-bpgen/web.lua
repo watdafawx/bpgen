@@ -353,7 +353,7 @@ local function snapshot(player, frame)
   out.preview = { on = cam ~= nil and cam.visible, empty = named.bpgen_empty and ls(named.bpgen_empty.caption) }
   -- the actions
   local act = {}
-  for _, n in ipairs({ "cursor", "copy", "place", "place_base", "sandbox", "base_spot", "base_rotate", "base_redo", "nudge_left",
+  for _, n in ipairs({ "cursor", "copy", "place", "place_base", "sandbox", "base_spot", "nudge_left",
                        "test", "test_speed", "plan" }) do
     local el = named["bpgen_" .. n]
     if el then act[n] = { en = el.enabled, vis = el.visible, c = ls(el.caption), tip = ls(el.tooltip) } end

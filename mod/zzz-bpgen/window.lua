@@ -206,8 +206,6 @@ local ctx          -- from control.lua: craftable, unlocked, bonuses, start, mea
 local results = safe.stored("results") -- player index -> { blueprint, res, center, zoom }
 local placed = safe.stored("placed")     -- player index -> the ghosts "Place near me" and "Place by my base" made
 local unmark = safe.stored("unmark")     -- player index -> what those pastes marked for deconstruction (Undo unmarks it)
-local turns = safe.stored("turns")       -- player index -> quarter turns Rotate added to the plan next to the base
-local tried = safe.stored("tried")       -- player index -> the boxes Redo looked past ({x, y, w, h} each)
 local to_sandbox = safe.stored("to_sandbox")  -- player index -> true: "Try in sandbox" waits for Place by my base
 -- (the preview's drag, zoom and size grip: momentary, not saved)
 local cam_hover, drags, wheel_seen, left_during = {}, {}, {}, {}
@@ -1562,10 +1560,6 @@ function M.open(player, prefill)
       tags = { bpgen = "nudge", dx = a[3], dy = a[4] },
       tooltip = T("nudge-tip", T("dir-" .. a[1])) })
   end
-  tools.add({ type = "button", name = "bpgen_base_rotate", caption = "⟳", style = "tool_button", visible = false,
-    tags = { bpgen = "base_rotate" }, tooltip = T("rotate-tip") })
-  ui.add(tools, { type = "button", name = "bpgen_base_redo", caption = T("redo"), visible = false,
-    tags = { bpgen = "base_redo" }, tooltip = T("redo-tip") }, "button", small)
   ui.add(tools, { type = "button", caption = T("undo"), tags = { bpgen = "unplace" }, tooltip = T("undo-tip") }, "button",
     small)
   ui.add(tools, { type = "button", caption = T("history"), tags = { bpgen = "history" }, tooltip = T("history-tip") },
@@ -2070,10 +2064,9 @@ function M.spot(player, area)
   local frame = player.gui.screen[NAME]
   if not (frame and results[player.index]) then return say(player, T("plan-first")) end
   local seed = { x = (area.left_top.x + area.right_bottom.x) / 2, y = (area.left_top.y + area.right_bottom.y) / 2 }
-  tried[player.index] = nil
   local sec = find(frame, "bpgen_section")
   local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off", seed = seed,
-    spot = true, turn = turns[player.index], section = sec.visible and sec.items[sec.selected_index] or nil })
+    spot = true, section = sec.visible and sec.items[sec.selected_index] or nil })
   status(frame, ok and T("placing-clicked") or T("cant", tostring(why)))
 end
 
@@ -2335,19 +2328,20 @@ function M.on_result(player, res)
   if ui.themed then ui.set_role(cursor, "ok") else cursor.style = "confirm_button" end
   find(frame, "bpgen_copy").enabled = safe.has("std")
   find(frame, "bpgen_place").enabled = where ~= nil
-  find(frame, "bpgen_place_base").enabled = res.absolute == nil and (res.mode == "line" or res.mode == "mall"
-    or res.mode == "base")
+  -- (also a plan bpgen already placed beside the bus: in the hand, it goes where the player puts it; not a refit or
+  -- a moved section, which replace what was there, nor a base fitted to the bus design)
+  local a = res.absolute
+  find(frame, "bpgen_place_base").enabled = a == nil and (res.mode == "line" or res.mode == "mall" or res.mode == "base")
+    or a ~= nil and not a.clear and not a.fitted and (res.mode == "line" or res.mode == "mall" or res.mode == "extend")
   find(frame, "bpgen_sandbox").enabled = (where ~= nil or res.absolute ~= nil) and res.mode ~= "ship"
   local pb = find(frame, "bpgen_place")
   pb.caption = T(res.absolute and "place-it" or "place-near")
   pb.tooltip = T(res.absolute and "place-it-tip" or "place-near-tip")
-  local fixed = res.mode == "lane"  -- (where it is is the point: no arrows; a bus design's move its head sideways)
-  for _, n in ipairs({ "left", "up", "down", "right" }) do
-    find(frame, "bpgen_nudge_" .. n).visible = res.absolute ~= nil and not fixed
+  local fixed = res.mode == "lane"  -- (where it is is the point)
+  for _, n in ipairs({ "left", "up", "down", "right" }) do  -- (a bus design's: its head moved sideways, planned again)
+    find(frame, "bpgen_nudge_" .. n).visible = res.mode == "busdesign"
   end
   find(frame, "bpgen_base_spot").visible = res.absolute ~= nil and not fixed or find(frame, "bpgen_place_base").enabled
-  find(frame, "bpgen_base_rotate").visible = res.absolute ~= nil and not fixed
-  find(frame, "bpgen_base_redo").visible = res.absolute ~= nil and not fixed
   local tb = find(frame, "bpgen_test")
   tb.enabled = res.test ~= nil and where ~= nil
   tb.caption = T("test-run")
@@ -3017,7 +3011,6 @@ local function on_click(e)
     if not r.res.absolute and frame and find(frame, "bpgen_place_base").enabled and not sandbox.cant(player) then
       -- (a line, a mall, a base: put by the base first, as Place by my base; the lab follows when it's there)
       local sec = find(frame, "bpgen_section")
-      turns[player.index], tried[player.index] = nil, nil
       local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off",
         seed = { x = player.position.x, y = player.position.y },
         section = sec.visible and sec.items[sec.selected_index] or nil })
@@ -3052,40 +3045,16 @@ local function on_click(e)
     M.plan(player)
   elseif action == "upgrade_lane" and r and r.res.absolute then
     M.upgrade_lane(player, r.res.absolute.upgrades[el.tags.i])
-  elseif action == "nudge" and r and r.res.absolute then
-    -- (exactly that far from where it is: no looking for another spot, the belts and power connected again)
-    local n = e.shift and 5 or 1
-    local b = r.res.absolute.box  -- (the snapshot around it; where it goes is bpgen's last spot, shifted)
-    local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off",
-      seed = { x = b[1] + b[3] / 2, y = b[2] + b[4] / 2 },
-      turn = turns[player.index], shift = { el.tags.dx * n, el.tags.dy * n }, again = true })
-    status(frame, ok and T("moving-it") or T("cant", tostring(why)))
   elseif action == "base_spot" then
     if player.clear_cursor() then
       player.cursor_stack.set_stack({ name = "bpgen-spot" })
       M.tool_card(player, "bpgen-spot")
       status(frame, T("click-where"))
     end
-  elseif (action == "base_rotate" or action == "base_redo") and r and r.res.absolute then
-    -- (both around where it is now: Rotate turns it there, Redo looks past every spot it was shown on)
-    local b = r.res.absolute.box
-    local seed = { x = b[1] + b[3] / 2, y = b[2] + b[4] / 2 }
-    local avoid
-    if action == "base_rotate" then
-      turns[player.index] = ((turns[player.index] or 0) + 1) % 4
-    else
-      tried[player.index] = tried[player.index] or {}
-      table.insert(tried[player.index], { b[1], b[2], b[3], b[4] })
-      avoid = tried[player.index]
-    end
-    local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off", seed = seed,
-      turn = turns[player.index], avoid = avoid, again = true })
-    status(frame, ok and T(action == "base_rotate" and "rotating" or "looking-another-spot") or T("cant", tostring(why)))
   elseif action == "place_base" and r then
     -- (the plan into the cursor, turned to face the bus round you, bpgen's spot shown: put it down where you like,
     -- move it, R, flip it; each paste is tied into the base: hand.lua)
     local sec = find(frame, "bpgen_section")  -- (a starter base: the print picked under the preview)
-    turns[player.index], tried[player.index] = nil, nil
     local ok, why = ctx.hand(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off",
       seed = { x = player.position.x, y = player.position.y },
       section = sec.visible and sec.items[sec.selected_index] or nil })

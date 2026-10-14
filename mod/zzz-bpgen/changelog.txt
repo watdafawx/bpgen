@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.25.4
+Date: 2026-10-14
+  Changes:
+    - The window's arrows, Rotate and Redo for a plan next to your base are gone: Place by my base puts it in your
+      hand, where the game's own moving and turning do that with no waiting, and the card after a paste moves it
+      again. Place by my base works for a plan already placed beside your bus too. A bus design keeps its arrows
+      (its head moved sideways).
+---------------------------------------------------------------------------------------------------
 Version: 0.25.3
 Date: 2026-10-14
   Features:
