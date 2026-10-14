@@ -10,11 +10,11 @@ local BUTTON = "bpgen_xmod"
 
 local function button(parent, recipe)
   local b = parent[BUTTON]
-  if b and b.tags.recipe == recipe then return end
+  if b and b.tags.bpgen_recipe == recipe then return end
   if b then b.destroy() end
   parent.add({ type = "sprite-button", name = BUTTON, sprite = "item/blueprint", style = "tool_button",
     tooltip = { "", "[img=item/blueprint] Plan [recipe=" .. recipe .. "] with bpgen" },
-    tags = { bpgen = "recipe", recipe = recipe } })
+    tags = { bpgen = "recipe", bpgen_recipe = recipe } })
 end
 
 local function recipe_of(el)

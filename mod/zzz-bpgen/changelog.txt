@@ -1,4 +1,14 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.26.3
+Date: 2026-10-14
+  Changes:
+    - Place by my base builds the plan at once at bpgen's spot next to your base, tied in (taps, lanes, power), with
+      the card to Move it (in your hand, to put down elsewhere), Re-route or Undo. Only when there's no spot does it
+      put the plan in your hand.
+  Bugfixes:
+    - With Simple Recipe Pin, clicking bpgen's button in Recipe Book (and Plan it, and the window's other
+      recipe buttons) also opened that mod's recipe window: bpgen's buttons no longer carry a tag it reads.
+---------------------------------------------------------------------------------------------------
 Version: 0.26.2
 Date: 2026-10-14
   Changes:

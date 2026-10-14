@@ -1831,8 +1831,8 @@ local function request(player, frame)
       if r.name == "bpgen_also_near" then ticked(r)
       elseif r.type == "flow" and #r.children > 0 then
         local on, rate = r.children[1], r.children[#r.children]
-        if on.type == "checkbox" and on.state and on.tags.recipe then
-          also[on.tags.item] = { recipe = on.tags.recipe, rate_per_min = rate.type == "textfield" and tonumber(rate.text) or nil }
+        if on.type == "checkbox" and on.state and on.tags.bpgen_recipe then
+          also[on.tags.item] = { recipe = on.tags.bpgen_recipe, rate_per_min = rate.type == "textfield" and tonumber(rate.text) or nil }
         end
       end
     end
@@ -2559,7 +2559,7 @@ local function show_short(frame, rows)
     t.add({ type = "label", caption = T("short-row", sig(r.name), string.format("%.0f", r.short), string.format("%.0f", r.made),
       string.format("%.0f", r.used)) })
     t.add({ type = "empty-widget" })
-    t.add({ type = "button", caption = T("plan-it"), tags = { bpgen = "plan_short", recipe = r.recipe, rate = r.short } })
+    t.add({ type = "button", caption = T("plan-it"), tags = { bpgen = "plan_short", bpgen_recipe = r.recipe, rate = r.short } })
   end
 end
 
@@ -2632,7 +2632,7 @@ local function on_api(player, tag, out)
       local f = parent.add({ type = "flow", direction = "horizontal" })
       f.style.vertical_align = "center"
       f.style.horizontally_stretchable = true
-      local cb = f.add({ type = "checkbox", state = false, caption = caption, tags = { item = sib.item, recipe = sib.recipe } })
+      local cb = f.add({ type = "checkbox", state = false, caption = caption, tags = { item = sib.item, bpgen_recipe = sib.recipe } })
       cb.style.maximal_width = 200  -- (a long name shortens: the rate boxes stay in one column)
       cb.style.horizontally_squashable = true
       f.add({ type = "empty-widget" }).style.horizontally_stretchable = true
@@ -2907,7 +2907,7 @@ local function on_click(e)
     status(frame, T("moving-bus-head"))
     M.plan(player)
   elseif action == "recipe" then  -- a bpgen button in another mod's window (compat.lua)
-    M.open(player, { recipe = el.tags.recipe })
+    M.open(player, { recipe = el.tags.bpgen_recipe })
     M.plan(player)
   elseif action == "test" and r and r.res.test and r.where then
     local run = bench.find("test", player.index)
@@ -2954,9 +2954,9 @@ local function on_click(e)
     ctx.api(player, "shortages", nil, "short")
   elseif action == "plan_short" then
     set_mode(frame, "line")
-    find(frame, "bpgen_recipe").elem_value = el.tags.recipe
-    set_machine_filter(frame, el.tags.recipe)
-    local m = best_machine(player, el.tags.recipe)
+    find(frame, "bpgen_recipe").elem_value = el.tags.bpgen_recipe
+    set_machine_filter(frame, el.tags.bpgen_recipe)
+    local m = best_machine(player, el.tags.bpgen_recipe)
     find(frame, "bpgen_machine").elem_value = m and { name = m, quality = "normal" } or nil
     find(frame, "bpgen_rate").text = tostring(math.ceil(el.tags.rate))
     M.plan(player)
@@ -3537,6 +3537,11 @@ end
 --- a plan's ghosts placed now: at its box next to the base when it has one, else around the player; -> how many
 --- ingame.hand's answer: the plan in the player's cursor (the window out of the way), or why not
 function M.on_hand(player, res)
+  -- (bpgen's spot found: built there at once and tied in, the card moves it; else in the hand to put down)
+  if hand.put(player, res) then
+    close(player)
+    return ui.toast(player, T("placed-at-spot"))
+  end
   local ok, why = hand.give(player, res)
   local frame = player.gui.screen[NAME]
   if not ok then

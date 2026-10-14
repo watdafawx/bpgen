@@ -60,6 +60,30 @@ function M.give(player, res)
   return true
 end
 
+local connect  -- (below)
+
+--- the plan put down at bpgen's spot for it (ingame.hand's answer with a spot), as if the player had pasted it
+--- there: its ghosts tied into the base, the card to move it, route it again or take it back. -> true, or false
+--- (no spot, or nothing could be built there: the caller hands it over instead)
+function M.put(player, res)
+  local s = res.spot
+  if not (res.blueprint and s) then return false end
+  local ghosts = place.place(player, res.blueprint, { x = s[1] + s[3] / 2, y = s[2] + s[4] / 2 })
+  local built, mine = {}, {}
+  for _, g in pairs(ghosts) do
+    local t = g.valid and g.type == "entity-ghost" and g.tags and g.tags.bpgen_place
+    if t and t.id == res.id then
+      built[#built + 1] = { i = t.i, x = g.position.x, y = g.position.y, direction = g.direction }
+      mine[#mine + 1] = g
+    end
+  end
+  if #built == 0 then return false end
+  clear_spot(player.index)
+  held[player.index] = { id = res.id, blueprint = res.blueprint, spot = {} }
+  connect(player, { id = res.id, built = built, ghosts = mine, blueprint = res.blueprint })
+  return true
+end
+
 --- a ghost (or, with cheat mode, an entity) built from bpgen's handed blueprint: gathered for its placement
 function M.on_built(e)
   local ent = e.entity
@@ -81,7 +105,7 @@ end
 --- bpgen connects a paste (ingame.connect); paste: {id, built, ghosts, blueprint}. Inside the area Python keeps
 --- a site of (Place by my base's look round, or the last paste's): only what changed there since, at once; else (or
 --- `full`) the ground round it read and measured first
-local function connect(player, paste, full)
+connect = function(player, paste, full)
   local x1, y1, x2, y2
   for _, b in ipairs(paste.built) do
     x1, y1 = math.min(x1 or b.x, b.x), math.min(y1 or b.y, b.y)
