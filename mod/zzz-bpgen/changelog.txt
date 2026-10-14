@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.26.7
+Date: 2026-10-14
+  Bugfixes:
+    - The sandbox's arrows still didn't move a plan placed with Place by my base once it was built (by bots or an
+      instant-build mod): the lab copied the built plan as part of your base and the plan had nowhere new to go.
+      The lab now takes the built plan out of its copy; moved in the sandbox, Place in base marks the old one for
+      removal.
+---------------------------------------------------------------------------------------------------
 Version: 0.26.6
 Date: 2026-10-14
   Bugfixes:

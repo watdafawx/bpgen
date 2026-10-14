@@ -158,6 +158,34 @@ local function build_plan(st, s)
   st.plan_box = b and { math.floor(b[1]), math.floor(b[2]), math.ceil(b[3]), math.ceil(b[4]) } or nil
 end
 
+--- the plan already built on the real base (Place by my base, then bots or an instant-build mod) came into the lab
+--- with the copy: those entities taken out, so the plan built anew is the lab's own and moves. They stay in
+--- st.originals (moved away, the paste back marks them for removal) and in st.plan_real (a move doesn't clone them
+--- back where the plan stood)
+local function built_already(st, s)
+  local p = st.plan
+  local inv, stack = print_of(p.blueprint, p.section)
+  if not inv then return end
+  local a = st.area
+  bench.ground(s, a[1] + DRY - 8, a[2] - 8, a[3] + DRY + 8, a[4] + 8)
+  local dry = stack.build_blueprint({ surface = s, force = game.forces[st.force], position = { p.at.x + DRY, p.at.y },
+    direction = p.dir, build_mode = defines.build_mode.forced })
+  inv.destroy()
+  st.plan_real = {}
+  for _, g in pairs(dry) do
+    if g.valid and g.type == "entity-ghost" then
+      local pos = { g.position.x - DRY, g.position.y }
+      for _, e in pairs(s.find_entities_filtered({ name = g.ghost_name, position = pos, force = st.force })) do
+        if e.direction == g.direction and (e.quality and e.quality.name) == (g.quality and g.quality.name) then
+          st.plan_real[key(e)] = true
+          e.destroy()
+        end
+      end
+    end
+    if g.valid then g.destroy() end
+  end
+end
+
 -- the edges ---------------------------------------------------------------------------------------------------
 
 local function ids(e)
@@ -334,6 +362,7 @@ function M.open(index, home_surface, home_force, plan)
   local b = plan.box
   st.plan = { blueprint = plan.blueprint, section = plan.section, superforced = b ~= nil, dir = defines.direction.north,
     at = b and { x = b[1] + b[3] / 2, y = b[2] + b[4] / 2 } or plan.center }
+  built_already(st, s)
   build_plan(st, s)
   edges(st)
   force.chart(s, box(a))
@@ -429,7 +458,7 @@ function M.move(index, dx, dy, turn)
   for _, e in pairs(s.find_entities_filtered({ area = look })) do if e.valid then here[key(e)] = true end end
   for _, e in pairs(real.find_entities_filtered({ area = look, force = st.home_force })) do
     local k = key(e)
-    if st.originals[k] and not here[k] then
+    if st.originals[k] and not here[k] and not (st.plan_real or {})[k] then
       local c = e.clone({ position = e.position, surface = s, force = st.force, create_build_effect_smoke = false })
       if c then tame(c) here[k] = true end
     end

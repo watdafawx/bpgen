@@ -140,6 +140,31 @@ script.on_event(defines.events.on_tick, function(e)
     if not m.ok or not s2.find_entity("inserter", { 43.5, 1.5 }) then out("FAIL: the plan over its own ghosts didn't move") end
     if s2.count_entities_filtered({ type = "entity-ghost" }) > 0 then out("FAIL: the real base's ghosts left standing in the lab") end
     remote.call("bpgen", "sandbox_paste", 1)
+    -- (the same, the plan already built (bots, or an instant-build mod): the lab must move it, not leave its copy of
+    -- the real one standing, and the paste back takes the old one away)
+    for _, g in pairs(real.find_entities_filtered({ area = { { 30, 1 }, { 60, 10 } } })) do g.destroy() end
+    inv = game.create_inventory(1)
+    inv[1].import_stack(storage.bp)
+    for _, g in pairs(inv[1].build_blueprint({ surface = real, force = "player", position = { 41, 2 },
+        build_mode = defines.build_mode.superforced })) do
+      if g.valid then g.revive() end
+    end
+    inv.destroy()
+    for _, e in pairs(real.find_entities_filtered({ area = { { 30, -5 }, { 60, 10 } }, to_be_deconstructed = true })) do
+      e.cancel_deconstruction("player")
+    end
+    remote.call("bpgen", "sandbox_open", 1, "nauvis", "player",
+      { blueprint = storage.bp, box = { 40, 1, 2, 2 }, area = { 40, 1, 42, 3 } })
+    local b = remote.call("bpgen", "sandbox_move", 1, 3, 0, false)
+    local n = s2.count_entities_filtered({ name = "inserter", area = { { 35, -5 }, { 50, 8 } } })
+    out("over itself built: move " .. tostring(b.ok) .. ", inserters in the lab: " .. n
+      .. ", at 43.5: " .. tostring(s2.find_entity("inserter", { 43.5, 1.5 }) ~= nil))
+    if not b.ok or n ~= 1 or not s2.find_entity("inserter", { 43.5, 1.5 }) then
+      out("FAIL: the built plan didn't move (its copy of the real one left standing)")
+    end
+    local r = remote.call("bpgen", "sandbox_paste", 1)
+    if not has(r.removed, "inserter", 40.5, 1.5) then out("FAIL: the paste back left the old plan in the base") end
+    if not has(r.ghosts, "inserter", 43.5, 1.5) then out("FAIL: the paste back didn't put the moved plan down") end
     out("done")
   end
 end)
