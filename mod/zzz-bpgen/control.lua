@@ -1011,6 +1011,10 @@ on_event(defines.events.on_player_alt_selected_area, on_selected)
 remote.add_interface("bpgen", {
   -- the player's last plan into their cursor, as Place by my base does (params: seed, bus, section, turn)
   hand = function(player_index, params) return hand_plan(game.get_player(player_index), params or {}) end,
+  -- the player's last paste: {id, plan = its own ghosts left, links = what ties it in}, or nil; its card's buttons
+  hand_record = function(player_index) return hand.record(player_index) end,
+  hand_reroute = function(player_index) return hand.reroute(game.get_player(player_index)) end,
+  hand_move = function(player_index) return hand.move(game.get_player(player_index)) end,
   -- a production line of `item` at `rate` a minute next to the player's base (Extend), placed as ghosts; the answer
   -- comes back as remote.call(reply or "ai-crew", "line_placed", player_index, item, ghosts, error, absolute) where
   -- absolute = {box = {x, y, w, h}, inputs = {{items, position}} to feed by hand, outputs = {{item, position}}}

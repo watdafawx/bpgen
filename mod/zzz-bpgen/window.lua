@@ -2862,6 +2862,7 @@ local function unplace(player)
     if e.valid and e.to_be_deconstructed() then e.cancel_deconstruction(player.force, player) end
   end
   placed[player.index], unmark[player.index] = nil, nil
+  hand.forget(player)
   local frame = player.gui.screen[NAME]
   say(player, T("ghosts-removed", n))
 end
@@ -3106,6 +3107,18 @@ local function on_click(e)
       end
       ctx.api(player, "history", { add = r.blueprint, mode = r.res.mode }, "history_add")
     end
+  elseif action == "paste_reroute" then  -- (the card after a paste: hand.lua)
+    local ok, why = hand.reroute(player)
+    say(player, ok and T("paste-rerouting") or why)
+  elseif action == "paste_move" then
+    local ok, why = hand.move(player)
+    if ok then
+      ui.toast(player, T((why or 0) > 0 and "paste-moving-built" or "paste-moving", why or 0))
+    else
+      say(player, why)
+    end
+  elseif action == "paste_close" then
+    hand.close_card(player)
   elseif action == "unplace" then
     -- (a press of the button asks first when there are ghosts to remove; a script's press (tests) doesn't)
     local n = ghosts_left(player)
@@ -3615,9 +3628,11 @@ function M.on_connected(player, res, ghosts, marks, area)
   placed[player.index], unmark[player.index] = ghosts, marks
   if area then place.outline(player, area, T("placed-by-bpgen")) end
   local a = res.absolute or {}
-  say(player, T("placed-next", #ghosts, a.taps or 0, { "",
+  local text = T("placed-next", #ghosts, a.taps or 0, { "",
     (a.deliveries or 0) > 0 and T("placed-next-deliveries", a.deliveries) or "",
-    (a.new_lanes or 0) > 0 and T("placed-next-lanes", a.new_lanes) or "" }))
+    (a.new_lanes or 0) > 0 and T("placed-next-lanes", a.new_lanes) or "" })
+  say(player, text)
+  hand.card(player, text)  -- (Re-route, Move, Undo)
   for _, n in ipairs(res.notes or {}) do  -- (what it couldn't tie in, and the bus's load: in the chat)
     if n:find("by hand", 1, true) or n:find("upgrade", 1, true) or n:find("runs dry", 1, true)
         or n:find("no belt", 1, true) or n:find("no pipe", 1, true) then

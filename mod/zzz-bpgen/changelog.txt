@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.25.3
+Date: 2026-10-14
+  Features:
+    - After a paste is tied into your base, a card shows what bpgen did, with Re-route (its belts and power routed
+      again from where it stands, after you changed the base round it), Move (its ghosts taken away and the
+      blueprint back in your hand, to put down elsewhere; what's built of it already stays) and Undo.
+---------------------------------------------------------------------------------------------------
 Version: 0.25.2
 Date: 2026-10-14
   Bugfixes:

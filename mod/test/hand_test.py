@@ -76,9 +76,12 @@ for mirror, k in ((False, 2), (True, 0), (True, 1)):
     out = connect(mirror, k, (10, 0), 500 + k)
     print(f"mirror={mirror} turns={k}:", out["absolute"] and out["absolute"]["taps"], "taps;",
           "; ".join(n for n in out["notes"] if "by hand" in n) or "all inputs tapped")
-# an old blueprint (another hand since): refused plainly
+# a blueprint handed out a little earlier (picked up again by Move) still connects; a much older one is refused
 old = h["id"]
 json.loads(ingame.hand(json.dumps({"player": 1, "snapshot": snapshot(100), "seed": seed})))
+assert connect(False, 0, (0, 0), 550)["absolute"]["taps"] >= 1
+for _ in range(5):
+    json.loads(ingame.hand(json.dumps({"player": 1, "snapshot": snapshot(100), "seed": seed})))
 stale = json.loads(ingame.connect(json.dumps({"player": 1, "id": old, "built": [], "snapshot": snapshot(600)})))
 assert "older plan" in stale.get("error", ""), stale
 print("ok")

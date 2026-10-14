@@ -567,7 +567,11 @@ def hand(request: str) -> str:
                 posed = {"offset": [0, 0], "turn": (req.get("turn") or 0) % 4, "side": 0, "main": None,
                          "entities": ents, "sources": srcs, "sinks": snks or [], "notes": []}
             st["hand_n"] = n = st.get("hand_n", 0) + 1
-            st["hands"] = {n: dict(posed, main=None, plan=last)}  # (the one in the cursor; older ones are gone)
+            # (the last few handed out: a paste picked up again (Move) is put down with the blueprint it came from)
+            hands = st.setdefault("hands", {})
+            hands[n] = dict(posed, main=None, plan=last)
+            for old in [k for k in hands if k <= n - 5]:
+                del hands[old]
             ents = [{k: v for k, v in s.decorate(e).items() if k not in ("type", "w", "h", "fluid", "new")}
                     | {"tags": dict(e.get("tags") or {}, bpgen_place={"id": n, "i": i})}
                     for i, e in enumerate(posed["entities"])]
