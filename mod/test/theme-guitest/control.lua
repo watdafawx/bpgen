@@ -346,8 +346,9 @@ for k = 2, #THEMES do
 end
 steps[#steps + 1] = { run = function()
     set_theme("vanilla")
-    rc("click", 1, { bpgen = "place" })
-  end, ticks = 10 }
+    -- (ghosts of bpgen's for Undo: a line placed by the base, as AI Crew asks for one)
+    remote.call("bpgen", "plan_line", 1, "iron-gear-wheel", 30, "nobody")
+  end, ticks = 900 }
 steps[#steps + 1] = { run = function()
     local n = ghosts()
     check("placed ghosts", n > 0, n)

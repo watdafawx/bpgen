@@ -1,4 +1,10 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.25.5
+Date: 2026-10-14
+  Changes:
+    - Pick spot (and its tool) and Place near me are gone: Place by my base puts the plan in your hand, to put down
+      wherever you like, tied into your base where it lands. Place it shows only for a plan bpgen placed itself.
+---------------------------------------------------------------------------------------------------
 Version: 0.25.4
 Date: 2026-10-14
   Changes:

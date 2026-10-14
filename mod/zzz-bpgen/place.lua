@@ -110,26 +110,6 @@ function M.place(player, bp, c, box, section)
   return ghosts, { x = math.floor(x1 + 0.5), y = math.floor(y1 + 0.5) }, { { x1, y1 }, { x2, y2 } }, now
 end
 
---- the nearest belt of the player's carrying `item`, within 80 tiles of `pos` and outside `skip`
-local function nearest_belt(player, item, pos, skip)
-  local best, bd
-  for _, b in pairs(player.surface.find_entities_filtered({ position = pos, radius = 80, force = player.force,
-      type = { "transport-belt", "underground-belt", "splitter" } })) do
-    local p = b.position
-    local inside = p.x >= skip[1][1] and p.x <= skip[2][1] and p.y >= skip[1][2] and p.y <= skip[2][2]
-    if not inside then
-      for lane = 1, b.get_max_transport_line_index() do
-        if b.get_transport_line(lane).get_item_count(item) > 0 then
-          local d = (p.x - pos.x) ^ 2 + (p.y - pos.y) ^ 2
-          if not bd or d < bd then best, bd = b, d end
-          break
-        end
-      end
-    end
-  end
-  return best
-end
-
 local outlines = safe.stored("outlines")  -- player index -> the outline drawn round their last placement
 
 --- what was just placed, outlined and named above its top-left corner (2 minutes; a new placement or Undo takes it
@@ -148,36 +128,6 @@ end
 function M.clear_outline(player)
   for _, o in pairs(outlines[player.index] or {}) do if o.valid then o.destroy() end end
   outlines[player.index] = nil
-end
-
---- the outline, and each input's item with a line to where it can come from (shown to the player for 2 minutes)
-function M.guide(player, area, origin, sources, label)
-  local ttl = 60 * 120
-  M.outline(player, area, label)
-  local found, missing, named = 0, {}, {}
-  for _, src in ipairs(sources or {}) do
-    local pos = { x = origin.x + src.position.x, y = origin.y + src.position.y }
-    local items = {}
-    for _, it in ipairs(src.lanes or {}) do items[it] = true end
-    if src.item then items[src.item] = true end
-    if src.fluid then items[src.fluid] = true end
-    for it in pairs(items) do
-      local fluid = prototypes.fluid[it] ~= nil
-      rendering.draw_text({ text = (fluid and "[fluid=" or "[item=") .. it .. "]", color = { 1, 1, 1 }, target = pos, surface = player.surface,
-        players = { player }, time_to_live = ttl, scale = 2, alignment = "center", vertical_alignment = "middle",
-        use_rich_text = true })
-      local b = not fluid and nearest_belt(player, it, pos, area)
-      if b then
-        found = found + 1
-        rendering.draw_line({ color = { 0.3, 1, 0.3 }, width = 3, gap_length = 1, dash_length = 2, from = pos, to = b,
-          surface = player.surface, players = { player }, time_to_live = ttl })
-      elseif not named[it] then
-        named[it] = true
-        missing[#missing + 1] = (fluid and "[fluid=" or "[item=") .. it .. "]"
-      end
-    end
-  end
-  return found, missing
 end
 
 return M

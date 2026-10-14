@@ -1052,7 +1052,6 @@ local TOOLS = {
   ["bpgen-refit"] = { title = T("mode-refit"), text = T("card-refit") },
   ["bpgen-move"] = { title = T("mode-move"), text = T("card-move") },
   ["bpgen-snapshot"] = { title = T("snapshot"), text = T("card-snapshot") },
-  ["bpgen-spot"] = { title = T("pick-spot"), text = T("card-spot") },
   ["bpgen-patches"] = { title = T("ore-patches"), text = T("card-patches"), many = true },
 }
 M.TOOLS = TOOLS
@@ -1547,14 +1546,12 @@ function M.open(player, prefill)
   ui.add(tools, { type = "button", name = "bpgen_copy", caption = T("copy"), tags = { bpgen = "copy" }, enabled = false,
     tooltip = T("copy-tip") }, "button", small)
   -- (the dock's buttons as tight as Copy: all of them fit its width in the wide monospace fonts too)
-  ui.add(tools, { type = "button", name = "bpgen_place", caption = T("place-near"), tags = { bpgen = "place" },
-    enabled = false, tooltip = T("place-near-tip") }, "button", small)
+  ui.add(tools, { type = "button", name = "bpgen_place", caption = T("place-it"), tags = { bpgen = "place" },
+    enabled = false, visible = false, tooltip = T("place-it-tip") }, "button", small)
   ui.add(tools, { type = "button", name = "bpgen_place_base", caption = T("place-base"), tags = { bpgen = "place_base" },
     enabled = false, tooltip = T("place-base-tip") }, "button", small)
   ui.add(tools, { type = "button", name = "bpgen_sandbox", caption = T("sandbox"), tags = { bpgen = "sandbox" },
     enabled = false, tooltip = T("sandbox-tip") }, "button", small)
-  ui.add(tools, { type = "button", name = "bpgen_base_spot", caption = T("pick-spot"), visible = false,
-    tags = { bpgen = "base_spot" }, tooltip = T("pick-spot-tip") }, "button", small)
   for _, a in ipairs({ { "left", "◀", -1, 0 }, { "up", "▲", 0, -1 }, { "down", "▼", 0, 1 }, { "right", "▶", 1, 0 } }) do
     tools.add({ type = "button", name = "bpgen_nudge_" .. a[1], caption = a[2], style = "tool_button", visible = false,
       tags = { bpgen = "nudge", dx = a[3], dy = a[4] },
@@ -2059,17 +2056,6 @@ function M.plan_size(player)
   if r and type(r.w) == "number" then return r.w, r.h end
 end
 
---- the pick-spot tool clicked (or dragged): the last plan placed with its middle there, on that side of the bus
-function M.spot(player, area)
-  local frame = player.gui.screen[NAME]
-  if not (frame and results[player.index]) then return say(player, T("plan-first")) end
-  local seed = { x = (area.left_top.x + area.right_bottom.x) / 2, y = (area.left_top.y + area.right_bottom.y) / 2 }
-  local sec = find(frame, "bpgen_section")
-  local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off", seed = seed,
-    spot = true, section = sec.visible and sec.items[sec.selected_index] or nil })
-  status(frame, ok and T("placing-clicked") or T("cant", tostring(why)))
-end
-
 function M.move(player, area)
   if not player.gui.screen[NAME] then M.open(player, { mode = "move" }) end
   local frame = player.gui.screen[NAME]
@@ -2327,21 +2313,17 @@ function M.on_result(player, res)
   cursor.enabled = true
   if ui.themed then ui.set_role(cursor, "ok") else cursor.style = "confirm_button" end
   find(frame, "bpgen_copy").enabled = safe.has("std")
-  find(frame, "bpgen_place").enabled = where ~= nil
+  local pl = find(frame, "bpgen_place")  -- (Place it: where bpgen placed it, next to the base)
+  pl.enabled, pl.visible = res.absolute ~= nil, res.absolute ~= nil
   -- (also a plan bpgen already placed beside the bus: in the hand, it goes where the player puts it; not a refit or
   -- a moved section, which replace what was there, nor a base fitted to the bus design)
   local a = res.absolute
   find(frame, "bpgen_place_base").enabled = a == nil and (res.mode == "line" or res.mode == "mall" or res.mode == "base")
     or a ~= nil and not a.clear and not a.fitted and (res.mode == "line" or res.mode == "mall" or res.mode == "extend")
   find(frame, "bpgen_sandbox").enabled = (where ~= nil or res.absolute ~= nil) and res.mode ~= "ship"
-  local pb = find(frame, "bpgen_place")
-  pb.caption = T(res.absolute and "place-it" or "place-near")
-  pb.tooltip = T(res.absolute and "place-it-tip" or "place-near-tip")
-  local fixed = res.mode == "lane"  -- (where it is is the point)
   for _, n in ipairs({ "left", "up", "down", "right" }) do  -- (a bus design's: its head moved sideways, planned again)
     find(frame, "bpgen_nudge_" .. n).visible = res.mode == "busdesign"
   end
-  find(frame, "bpgen_base_spot").visible = res.absolute ~= nil and not fixed or find(frame, "bpgen_place_base").enabled
   local tb = find(frame, "bpgen_test")
   tb.enabled = res.test ~= nil and where ~= nil
   tb.caption = T("test-run")
@@ -3045,12 +3027,6 @@ local function on_click(e)
     M.plan(player)
   elseif action == "upgrade_lane" and r and r.res.absolute then
     M.upgrade_lane(player, r.res.absolute.upgrades[el.tags.i])
-  elseif action == "base_spot" then
-    if player.clear_cursor() then
-      player.cursor_stack.set_stack({ name = "bpgen-spot" })
-      M.tool_card(player, "bpgen-spot")
-      status(frame, T("click-where"))
-    end
   elseif action == "place_base" and r then
     -- (the plan into the cursor, turned to face the bus round you, bpgen's spot shown: put it down where you like,
     -- move it, R, flip it; each paste is tied into the base: hand.lua)
@@ -3059,23 +3035,6 @@ local function on_click(e)
       seed = { x = player.position.x, y = player.position.y },
       section = sec.visible and sec.items[sec.selected_index] or nil })
     status(frame, ok and T("looking-around") or T("cant", tostring(why)))
-  elseif action == "place" and r and r.where then
-    local c = place.find_spot(player, r.w, r.h)
-    if not c then
-      status(frame, T("no-free-spot", math.ceil(r.w), math.ceil(r.h)))
-    else
-      local sec = find(frame, "bpgen_section")  -- (a book: the print shown)
-      local ghosts, origin, area, marks = place.place(player, r.blueprint, c, nil,
-        sec.visible and sec.items[sec.selected_index] or nil)
-      placed[player.index], unmark[player.index] = ghosts, marks
-      if origin then
-        local found, missing = place.guide(player, area, origin, r.res.test and r.res.test.case.sources or {},
-          r.res.label)
-        say(player, T("placed-near", #ghosts, #missing > 0 and T("nothing-carries", table.concat(missing, " "))
-          or found > 0 and T("dashed-lines") or ""))
-      end
-      ctx.api(player, "history", { add = r.blueprint, mode = r.res.mode }, "history_add")
-    end
   elseif action == "paste_reroute" then  -- (the card after a paste: hand.lua)
     local ok, why = hand.reroute(player)
     say(player, ok and T("paste-rerouting") or why)

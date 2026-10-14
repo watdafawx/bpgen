@@ -361,7 +361,7 @@
       if (a.tip) el.dataset.tipLs = JSON.stringify(a.tip);
     };
     setBtn("a-cursor", act.cursor); setBtn("a-copy", act.copy); setBtn("a-place", act.place, { caption: true });
-    setBtn("a-place_base", act.place_base); setBtn("a-sandbox", act.sandbox); setBtn("a-base_spot", act.base_spot);
+    setBtn("a-place_base", act.place_base); setBtn("a-sandbox", act.sandbox);
     $("nudges").hidden = !(act.nudge_left && act.nudge_left.vis);
     setBtn("test-btn", act.test, { caption: true, vis: false });
     $("test-btn").classList.toggle("running", !!st.test.running);
