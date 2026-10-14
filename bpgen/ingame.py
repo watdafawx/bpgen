@@ -249,7 +249,17 @@ def _line_needs(data, sm):
     if not made:
         return None
     runs = sm["expected"] / made / (1 + (sm.get("productivity") or 0))
-    return {i["name"]: runs * i["amount"] for i in r.get("ingredients") or [] if i.get("type") != "fluid"}
+    need = {i["name"]: runs * i["amount"] for i in r.get("ingredients") or [] if i.get("type") != "fluid"}
+    for st in sm.get("stages") or []:  # (made in the blueprint: what it's made from comes in instead)
+        sr = data.raw["recipe"].get(st.get("recipe") or "")
+        v = need.pop(st.get("item"), None)
+        out = sum(p.get("amount", 0) for p in (sr or {}).get("results") or [] if p.get("name") == st.get("item"))
+        if v is None or not out:
+            continue
+        for i in sr.get("ingredients") or []:
+            if i.get("type") != "fluid":
+                need[i["name"]] = need.get(i["name"], 0) + v / out * i["amount"]
+    return need
 
 
 def _section_needs(data, sec, base_summary):

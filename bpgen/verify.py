@@ -3,7 +3,7 @@ import argparse
 import json
 from pathlib import Path
 
-from bpgen import chain, harness, planner
+from bpgen import chain, direct, harness, planner
 from bpgen.calibrate import BONUS_LEVELS
 from bpgen.data import Data
 from bpgen.effects import Modules
@@ -38,6 +38,16 @@ DEFAULT_CASES = [
      {"make": {"iron-gear-wheel": {"recipe": "iron-gear-wheel", "machine": "assembling-machine-2"}}}),
     ("electronic-circuit", "assembling-machine-3", "transport-belt",
      {"make": {"copper-cable": {"recipe": "copper-cable", "machine": "assembling-machine-3"}}}),
+    # direct insertion: cable assemblers inserting into circuit assemblers (direct.py), a full belt and a few
+    ("electronic-circuit", "assembling-machine-2", "transport-belt",
+     {"direct": {"copper-cable": {"recipe": "copper-cable", "machine": "assembling-machine-2"}}}),
+    ("electronic-circuit", "assembling-machine-2", "transport-belt",
+     {"direct": {"copper-cable": {"recipe": "copper-cable", "machine": "assembling-machine-2"}}, "rate": 120}),
+    ("electronic-circuit", "assembling-machine-2", "transport-belt",  # (early game: no bulk or stack inserters)
+     {"direct": {"copper-cable": {"recipe": "copper-cable", "machine": "assembling-machine-2"}},
+      "inserters": ["inserter", "long-handed-inserter", "fast-inserter"]}),
+    ("electronic-circuit", "assembling-machine-3", "fast-transport-belt",
+     {"direct": {"copper-cable": {"recipe": "copper-cable", "machine": "assembling-machine-3"}}}),
     # modules and beacons (one beacon between neighbouring machines: 2 per machine)
     ("iron-gear-wheel", "assembling-machine-3", "express-transport-belt", {"modules": "speed-module-3:4"}),
     ("copper-cable", "assembling-machine-2", "fast-transport-belt", {"modules": "speed-module-2@rare:2"}),
@@ -54,6 +64,7 @@ def main():
     ap.add_argument("--dump", default=str(ROOT / "data" / "vanilla-dump.json"))
     ap.add_argument("--bonus", default="none", choices=list(BONUS_LEVELS))
     ap.add_argument("--minutes", type=float, default=2)
+    ap.add_argument("--only", default="", help="only the cases whose id contains this")
     args = ap.parse_args()
 
     data = Data.load(args.dump)
@@ -61,9 +72,19 @@ def main():
     plans, cases = [], []
     for recipe, machine, belt, *extra in DEFAULT_CASES:
         opts = extra[0] if extra else {}
-        cid = f"{recipe}|{machine}|{belt}" + "".join(f"|{v}" for v in opts.values() if not isinstance(v, dict))             + "".join(f"|make {k}" for k in opts.get("make", {}))
+        cid = (f"{recipe}|{machine}|{belt}" + "".join(f"|{v}" for v in opts.values() if not isinstance(v, (dict, list)))
+               + ("|early" if opts.get("inserters") else "") + "".join(f"|make {k}" for k in opts.get("make", {}))
+               + "".join(f"|direct {k}" for k in opts.get("direct", {})))
+        if args.only not in cid:
+            continue
         try:
-            if opts.get("make"):
+            if opts.get("direct"):
+                (mi, mv), = opts["direct"].items()
+                p = direct.plan(data, calib, recipe, machine, belt, mi, mv["recipe"], mv["machine"],
+                                bonuses=BONUS_LEVELS[args.bonus], target_rate=(opts.get("rate") or 0) / 60 or None,
+                                allowed=opts.get("inserters"))
+                ents, sources, sinks = direct.layout(p)
+            elif opts.get("make"):
                 c = chain.plan_chain(data, calib, {"recipe": recipe, "machine": machine, "belt": belt}, opts["make"],
                                      bonuses=BONUS_LEVELS[args.bonus])
                 p, ents, sources, sinks = c.final.plan, c.entities, c.sources, c.sinks
@@ -79,7 +100,10 @@ def main():
         bp = planner.blueprint_string(ents, cid)
         cases.append({"id": cid, "blueprint": bp, "sources": sources, "sinks": sinks})
 
-    res = harness.run({"warmup": max(planner.warmup_ticks(data, p) for _, p in plans), "measure": max(planner.measure_ticks(p, int(args.minutes * 3600)) for _, p in plans),
+    def mod(p):
+        return direct if isinstance(p, direct.DirectPlan) else planner
+    res = harness.run({"warmup": max(mod(p).warmup_ticks(data, p) for _, p in plans),
+                       "measure": max(mod(p).measure_ticks(p, int(args.minutes * 3600)) for _, p in plans),
                        "force": BONUS_LEVELS[args.bonus], "cases": cases})
     by_id = {c["id"]: c for c in res["cases"]}
     ok = 0
@@ -90,7 +114,7 @@ def main():
         status = "PASS" if ratio >= 0.97 else "FAIL"
         ok += status == "PASS"
         print(f"{status} {got:6.2f}/s measured vs {p.expected_output:6.2f}/s planned ({ratio:5.1%})")
-        print(planner.describe(p))
+        print(mod(p).describe(p))
         for err in c["errors"]:
             print("  harness:", err)
         print()

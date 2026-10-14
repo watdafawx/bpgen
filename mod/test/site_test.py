@@ -56,8 +56,9 @@ assert back["blueprint"] == first["blueprint"], "after Rotate, unturned again: a
 print(f"placed: {t_new * 1000:.0f} ms read anew, {t_kept * 1000:.0f} ms from the kept site")
 
 # an arrow onto the bus: said plainly, not a crash
+onto_bus = 21 - ingame._players[1]["where"]["offset"][0]  # (its west edge onto the bus's lanes, x = 20-27)
 hit = json.loads(ingame.place(json.dumps({"player": 1, "snapshot": snapshot(300), "seed": {"x": 40, "y": 50},
-                                          "shift": [-40, 0]})))
+                                          "shift": [onto_bus, 0]})))
 assert "in the way" in hit.get("error", "") and "trace" not in hit, hit
 
 # another player's plan doesn't take this one's place

@@ -1,4 +1,17 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.26.0
+Date: 2026-10-14
+  Features:
+    - Direct insertion: a line with one ingredient made in the blueprint (Make in this blueprint, or fed from your
+      bus) has the machines making it insert straight into the line's machines, as players build electronic
+      circuits: copper cable assemblers beside the circuit assemblers, 3 to 2. A full yellow belt of circuits
+      (900/min) instead of 252/min, also with only fast inserters; a few a minute get the smallest unit. Measured
+      in a game at 100% of the plan. Recipes that don't fit it (fluids, several ingredients for the made item,
+      modules or beacons) are planned as before.
+  Bugfixes:
+    - What a line fed from your bus takes off it counts what a made ingredient is made from (copper plates for
+      cable), not the ingredient itself.
+---------------------------------------------------------------------------------------------------
 Version: 0.25.6
 Date: 2026-10-14
   Bugfixes:

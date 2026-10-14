@@ -14,7 +14,7 @@ import threading
 import time
 from pathlib import Path
 
-from bpgen import calibrate, chain, harness, labels, mall, pack, planner
+from bpgen import calibrate, chain, direct, harness, labels, mall, pack, planner
 from bpgen.data import Data
 from bpgen.effects import MACHINE_MODULES, Modules, quality_level
 
@@ -546,8 +546,24 @@ class Service:
         also = {k: v for k, v in (params.get("also") or {}).items() if v and v.get("recipe")}
         if also or any(k in self.data.raw.get("fluid", {}) for k in make):
             return self.plan_fluid_chain(params, make, progress, cancel, also)
-        stages, warmup = [], None
-        if make:
+        stages, warmup, p = [], None, None
+        if len(make) == 1:  # (one ingredient made next to it: by direct insertion, when the recipes fit that)
+            (mi, mv), = make.items()
+            if direct.fits(self.data, params["recipe"], params["machine"], mi, mv["recipe"], mv["machine"]) is True:
+                try:
+                    p = direct.plan(self.data, calib, params["recipe"], params["machine"], params["belt"], mi,
+                                    mv["recipe"], mv["machine"], **kw)
+                except planner.PlanError as e:
+                    if progress:
+                        progress(f"not by direct insertion ({e}): as a chain")
+            if p is not None:
+                ents, sources, sinks = direct.layout(p)
+                warmup = direct.warmup_ticks(self.data, p)
+                n = p.machines - p.main_machines
+                stages.append({"item": mi, "recipe": p.made_recipe, "machine": p.made_machine, "machines": n,
+                               "per_block": n, "blocks": 1, "output": round(n * p.made_rate, 3),
+                               "need": round(n * p.made_rate, 3), "notes": [], "direct": True})
+        if p is None and make:
             if progress:
                 progress(f"planning the chain: {', '.join(make)} made in the blueprint, routing belts")
             try:
@@ -569,7 +585,7 @@ class Service:
                                "machines": blocks * s.plan.machines, "per_block": s.plan.machines, "blocks": blocks,
                                "output": round(blocks * min(s.plan.expected_output, s.plan.machines * s.plan.output_per_machine), 3),
                                "need": round(2 * p.input_need[item], 3), "notes": s.plan.notes})
-        else:
+        elif p is None:
             try:
                 p = planner.plan(self.data, calib, params["recipe"], params["machine"], params["belt"], **kw)
             except planner.PlanError as e:
@@ -596,11 +612,12 @@ class Service:
                 "near": vars(p.ins_near), "far": vars(p.ins_far) if p.ins_far else None, "out": vars(p.ins_out),
                 "beacon": p.beacon, "beacons_per_machine": p.beacons_per_machine, "packing": p.packing,
                 "notes": p.notes, "warmup": warmup or planner.warmup_ticks(self.data, p),
-                "measure": planner.measure_ticks(p), "stages": stages,
+                "measure": (direct.measure_ticks if isinstance(p, direct.DirectPlan) else planner.measure_ticks)(p),
+                "stages": stages,
                 "raw_inputs": sorted({l for s in sources if s["kind"] == "belt" for l in s["lanes"] if l}
                                      | {s["fluid"] for s in sources if s["kind"] == "fluid"}),
             },
-            "text": planner.describe(p),
+            "text": (direct.describe if isinstance(p, direct.DirectPlan) else planner.describe)(p),
             "entities": [self.decorate(e) for e in ents],
             "sources": sources, "sinks": sinks,
             "blueprint": planner.blueprint_string(ents, label, description=description),
