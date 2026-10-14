@@ -2843,6 +2843,7 @@ local function unplace(player)
   say(player, T("ghosts-removed", n))
 end
 ui.on_yes("bpgen_unplace", function(player) unplace(player) end)
+M.unplace = unplace  -- (tests: Undo, as its button does once asked)
 
 --- the window's settings (the gear by its close button): opened, or closed when they were open
 local function settings(player)
@@ -3572,6 +3573,11 @@ function M.on_connected(player, res, ghosts, marks, area)
       player.print({ "", "[bpgen] ", n })
     end
   end
+end
+
+--- ghosts bpgen just put down (a paste being tied in): what Undo takes back from now on
+function M.placing(player, ghosts)
+  placed[player.index], unmark[player.index] = ghosts, {}
 end
 
 function M.place_plan(player, res)

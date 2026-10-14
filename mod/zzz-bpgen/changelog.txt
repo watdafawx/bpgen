@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.26.6
+Date: 2026-10-14
+  Bugfixes:
+    - Undo right after Place by my base (or a paste), while bpgen was still tying it into your base, left the plan's
+      ghosts and then put its belts and poles down anyway. Undo now takes the plan's ghosts back at once and drops
+      what was still on its way. A second copy pasted meanwhile is still tied in.
+---------------------------------------------------------------------------------------------------
 Version: 0.26.5
 Date: 2026-10-14
   Bugfixes:

@@ -10,13 +10,17 @@ local place = require("place")
 local ui = require("ui")
 
 local M = {}
-local ctx  -- from control.lua: measure(player, area, kind, data), around(c, r), start_job, site_set, site_delta
+local ctx  -- from control.lua: measure(player, area, kind, data), around(c, r), start_job, site_set, site_delta,
+-- placing(player, ghosts): the window's Undo takes these from now on
 
 local held = safe.stored("hand_held")        -- player index -> {id, blueprint, spot = render ids}: in their cursor
 local pending = safe.stored("hand_pending")  -- player index -> {id, tick, built = {{i, x, y, direction}}, ghosts}
 -- player index -> the last paste: {id, blueprint, built, plan = its own ghosts, links = what ties it in (ghosts),
 -- marks = what that paste marked for removal}
 local records = safe.stored("hand_records")
+-- player index -> {tokens = {token = true}: pastes being tied in, latest = the last one's}: Undo drops the latest's
+-- answer (its ghosts are already gone); an earlier paste's is still tied in, without taking over the card
+local inflight = safe.stored("hand_inflight")
 local MARGIN = 48  -- round what was pasted, the ground looked at for its taps and power
 local CARD = "bpgen_paste_card"
 
@@ -106,6 +110,14 @@ end
 --- a site of (Place by my base's look round, or the last paste's): only what changed there since, at once; else (or
 --- `full`) the ground round it read and measured first
 connect = function(player, paste, full)
+  if not paste.token then  -- (a new paste: Undo takes its ghosts back even before it's tied in)
+    storage.bpgen_paste_n = (storage.bpgen_paste_n or 0) + 1
+    paste.token = storage.bpgen_paste_n
+    ctx.placing(player, paste.ghosts or {})
+  end
+  local f = inflight[player.index] or { tokens = {} }
+  f.tokens[paste.token], f.latest = true, paste.token
+  inflight[player.index] = f
   local x1, y1, x2, y2
   for _, b in ipairs(paste.built) do
     x1, y1 = math.min(x1 or b.x, b.x), math.min(y1 or b.y, b.y)
@@ -154,8 +166,23 @@ end
 
 --- ingame.connect's answer: what ties the paste in, pasted as ghosts where it belongs (superforced: its splitters
 --- replace the belts they tap), kept as the player's last paste. -> every ghost of it, what the paste marked, its area
+--- whether ingame.connect's answer (its job) is for the paste being tied in now: Undo, or a newer paste, drops it
+function M.current(player, job)
+  local f = inflight[player.index]
+  return job.paste ~= nil and job.paste.token ~= nil and f ~= nil and f.tokens[job.paste.token] == true
+end
+
+--- whether the job's paste is the player's last one (its answer updates the card and what Undo takes back)
+function M.latest(player, job)
+  local f = inflight[player.index]
+  return f ~= nil and job.paste ~= nil and f.latest == job.paste.token
+end
+
 function M.connected(player, res, job)
   local paste = job.paste or {}
+  local f = inflight[player.index]
+  local latest = f and f.latest == paste.token
+  if f then f.tokens[paste.token or 0] = nil end
   local plan, links, marks, area = {}, {}, {}, nil
   for _, g in ipairs(paste.ghosts or {}) do if g.valid then plan[#plan + 1] = g end end
   if res.blueprint and res.absolute then
@@ -163,8 +190,10 @@ function M.connected(player, res, job)
     for _, g in pairs(more) do links[#links + 1] = g end
     marks, area = m, a
   end
-  records[player.index] = { id = paste.id, blueprint = paste.blueprint, built = paste.built, plan = plan,
-    links = links, marks = marks }
+  if latest then
+    records[player.index] = { id = paste.id, blueprint = paste.blueprint, built = paste.built, plan = plan,
+      links = links, marks = marks }
+  end
   local ghosts = {}
   local x1, y1, x2, y2
   for _, list in ipairs({ plan, links }) do
@@ -271,6 +300,8 @@ end
 --- the window's Undo took the last paste away: forgotten, its card closed
 function M.forget(player)
   records[player.index] = nil
+  local f = inflight[player.index]  -- (the last paste still being tied in: its answer is dropped)
+  if f and f.latest then f.tokens[f.latest], f.latest = nil, nil end
   M.close_card(player)
 end
 

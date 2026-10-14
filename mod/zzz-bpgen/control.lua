@@ -271,7 +271,8 @@ local function site_removed(e)
   end
 end
 
-hand.setup({ measure = measure, around = around, start_job = start_job, site_set = site_set, site_delta = site_delta })
+hand.setup({ measure = measure, around = around, start_job = start_job, site_set = site_set, site_delta = site_delta,
+  placing = function(player, ghosts) window.placing(player, ghosts) end })
 -- the last plan as a blueprint for the player's cursor (params: seed, bus, section, turn): measured round them first
 local function hand_plan(player, params)
   if not in_game() then return false, "start the game with the fse loader" end
@@ -460,9 +461,13 @@ local function finish(job, out)
   end
   if job.hand then return window.on_hand(player, res) end
   if job.connect then
+    if not hand.current(player, job) then return end  -- (undone, or another paste since: dropped)
     if res.rescan then return hand.rescan(player, job) end  -- (Python's site isn't the one the delta was from)
     if res.error then return window.on_connected(player, res) end
-    return window.on_connected(player, res, hand.connected(player, res, job))
+    local latest = hand.latest(player, job)
+    local ghosts, marks, area = hand.connected(player, res, job)
+    if latest then window.on_connected(player, res, ghosts, marks, area) end
+    return
   end
   if job.window and window.on_result(player, res) then return end
   if not res.blueprint then
@@ -1095,6 +1100,7 @@ remote.add_interface("bpgen", {
   hand_record = function(player_index) return hand.record(player_index) end,
   hand_reroute = function(player_index) return hand.reroute(game.get_player(player_index)) end,
   hand_move = function(player_index) return hand.move(game.get_player(player_index)) end,
+  unplace = function(player_index) window.unplace(game.get_player(player_index)) end,
   -- a production line of `item` at `rate` a minute next to the player's base (Extend), placed as ghosts; the answer
   -- comes back as remote.call(reply or "ai-crew", "line_placed", player_index, item, ghosts, error, absolute) where
   -- absolute = {box = {x, y, w, h}, inputs = {{items, position}} to feed by hand, outputs = {{item, position}}}
