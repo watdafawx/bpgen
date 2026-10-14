@@ -199,6 +199,7 @@ end
 local bench = require("bench")
 local safe = require("safe")
 local place = require("place")
+local hand = require("hand")
 local sandbox = require("sandbox")
 local ctx          -- from control.lua: craftable, unlocked, bonuses, start, measured
 -- (per-player state in storage: in multiplayer every peer must show and place the same; see safe.stored)
@@ -1960,6 +1961,16 @@ local function sandbox_card(player, on)
   local text = ui.add(card, { type = "label", caption = T("sandbox-text") }, "text")
   text.style.single_line = false
   text.style.maximal_width = 356
+  local moves = card.add({ type = "flow", direction = "horizontal" })
+  moves.style.top_margin = 6
+  moves.style.vertical_align = "center"
+  ui.add(moves, { type = "label", caption = T("sandbox-move") }, "text")
+  for _, a in ipairs({ { "left", "◀", -1, 0 }, { "up", "▲", 0, -1 }, { "down", "▼", 0, 1 }, { "right", "▶", 1, 0 } }) do
+    moves.add({ type = "button", name = "bpgen_sandbox_move_" .. a[1], caption = a[2], style = "tool_button",
+      tags = { bpgen = "sandbox_move", dx = a[3], dy = a[4] }, tooltip = T("sandbox-move-tip", T("dir-" .. a[1])) })
+  end
+  moves.add({ type = "button", name = "bpgen_sandbox_turn", caption = "⟳", style = "tool_button",
+    tags = { bpgen = "sandbox_turn" }, tooltip = T("sandbox-turn-tip") })
   local row = card.add({ type = "flow", direction = "horizontal" })
   row.style.top_margin = 6
   row.style.vertical_align = "center"
@@ -3014,6 +3025,11 @@ local function on_click(e)
     else
       try_sandbox(player)
     end
+  elseif action == "sandbox_move" or action == "sandbox_turn" then
+    -- (the plan in the lab: a tile, five with Shift, or a quarter turn)
+    local n = e.shift and 5 or 1
+    local ok, why = sandbox.move(player.index, (el.tags.dx or 0) * n, (el.tags.dy or 0) * n, action == "sandbox_turn")
+    if not ok then player.create_local_flying_text({ text = T(why), create_at_cursor = true }) end
   elseif action == "sandbox_place" then
     sandbox.place(player)
   elseif action == "sandbox_discard" then
@@ -3065,9 +3081,11 @@ local function on_click(e)
       turn = turns[player.index], avoid = avoid, again = true })
     status(frame, ok and T(action == "base_rotate" and "rotating" or "looking-another-spot") or T("cant", tostring(why)))
   elseif action == "place_base" and r then
+    -- (the plan into the cursor, turned to face the bus round you, bpgen's spot shown: put it down where you like,
+    -- move it, R, flip it; each paste is tied into the base: hand.lua)
     local sec = find(frame, "bpgen_section")  -- (a starter base: the print picked under the preview)
     turns[player.index], tried[player.index] = nil, nil
-    local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off",
+    local ok, why = ctx.hand(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off",
       seed = { x = player.position.x, y = player.position.y },
       section = sec.visible and sec.items[sec.selected_index] or nil })
     status(frame, ok and T("looking-around") or T("cant", tostring(why)))
@@ -3576,6 +3594,38 @@ function M.calibrate(player, measure)
 end
 
 --- a plan's ghosts placed now: at its box next to the base when it has one, else around the player; -> how many
+--- ingame.hand's answer: the plan in the player's cursor (the window out of the way), or why not
+function M.on_hand(player, res)
+  local ok, why = hand.give(player, res)
+  local frame = player.gui.screen[NAME]
+  if not ok then
+    if frame then status(frame, T("cant", why)) end
+    return say(player, T("cant", why))
+  end
+  close(player)
+  ui.toast(player, T(res.spot and "hand-put-down-spot" or "hand-put-down"))
+end
+
+--- a paste of the handed plan tied into the base (ingame.connect's answer and every ghost of it), or why not
+function M.on_connected(player, res, ghosts, marks, area)
+  if res.error then
+    if res.trace then safe.log("bpgen.ingame: " .. res.trace) end
+    return say(player, T("cant", tostring(res.error)))
+  end
+  placed[player.index], unmark[player.index] = ghosts, marks
+  if area then place.outline(player, area, T("placed-by-bpgen")) end
+  local a = res.absolute or {}
+  say(player, T("placed-next", #ghosts, a.taps or 0, { "",
+    (a.deliveries or 0) > 0 and T("placed-next-deliveries", a.deliveries) or "",
+    (a.new_lanes or 0) > 0 and T("placed-next-lanes", a.new_lanes) or "" }))
+  for _, n in ipairs(res.notes or {}) do  -- (what it couldn't tie in, and the bus's load: in the chat)
+    if n:find("by hand", 1, true) or n:find("upgrade", 1, true) or n:find("runs dry", 1, true)
+        or n:find("no belt", 1, true) or n:find("no pipe", 1, true) then
+      player.print({ "", "[bpgen] ", n })
+    end
+  end
+end
+
 function M.place_plan(player, res)
   local box = res.absolute and res.absolute.box
   local ghosts = place.place(player, res.blueprint, not box and player.position or nil, box)

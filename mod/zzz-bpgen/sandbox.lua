@@ -45,10 +45,12 @@ local function tame(e)
   if e.valid and e.type == "lab" then pcall(function() e.disabled_by_script = true end) end
 end
 
+--- the player's lab surface: made once and kept (closing a lab only clears it), so trying again needs no new surface
 local function lab_surface(index)
-  -- (the tick in its name: a lab deleted this tick is still there until the tick ends)
-  local name = PREFIX .. index .. "-" .. game.tick
-  local s = game.create_surface(name, {
+  local name = PREFIX .. index
+  local s = game.get_surface(name)
+  if s then return s end
+  s = game.create_surface(name, {
     default_enable_all_autoplace_controls = false,
     autoplace_settings = {
       entity = { treat_missing_as_default = false, settings = {} },
@@ -89,17 +91,70 @@ local function print_of(bp, section)
   return inv, stack
 end
 
---- ghosts built for real (modules in): what build_blueprint gave
+--- ghosts built for real (modules in): what build_blueprint gave -> the entities built
 local function revive(ghosts)
+  local built = {}
   for _, g in pairs(ghosts) do
     if g.valid and (g.type == "entity-ghost" or g.type == "tile-ghost") then
       local plans = g.type == "entity-ghost" and g.insert_plan or nil
       local _, ent, proxy = g.silent_revive({ return_item_request_proxy = true })
-      if ent then tame(ent) end
+      if ent then tame(ent) built[#built + 1] = ent end
       if ent and plans then bench.insert_plans(ent, plans) end
       if proxy and proxy.valid then proxy.destroy() end
     end
   end
+  return built
+end
+
+--- the lab's ground round `a` = {x1, y1, x2, y2}, `pad` tiles past it: chunks made, lab tiles on the ring outside `a`
+--- only (the base copied into `a` brings its own tiles)
+local function ground(s, a, pad)
+  local x1, y1, x2, y2 = a[1] - pad, a[2] - pad, a[3] + pad, a[4] + pad
+  for cx = math.floor(x1 / 32), math.floor(x2 / 32) do
+    for cy = math.floor(y1 / 32), math.floor(y2 / 32) do
+      s.request_to_generate_chunks({ cx * 32 + 16, cy * 32 + 16 }, 0)
+    end
+  end
+  s.force_generate_chunk_requests()
+  local tiles = {}
+  local function lay(xa, ya, xb, yb)
+    for x = xa, xb - 1 do
+      for y = ya, yb - 1 do
+        tiles[#tiles + 1] = { name = (x + y) % 2 == 0 and "lab-dark-1" or "lab-dark-2", position = { x, y } }
+      end
+    end
+  end
+  lay(x1, y1, x2, a[2])  -- (above, below, left, right)
+  lay(x1, a[4], x2, y2)
+  lay(x1, a[2], a[1], a[4])
+  lay(a[3], a[2], x2, a[4])
+  s.set_tiles(tiles, true, false, false, false)
+end
+
+--- the plan (st.plan: its print, where, which way) built for real on the lab: st.plan_ents, st.plan_box
+local function build_plan(st, s)
+  local p = st.plan
+  st.plan_ents, st.plan_box = {}, nil
+  local inv, stack = print_of(p.blueprint, p.section)
+  if not inv then return end
+  -- (an absolute plan superforced: its taps replace the belts they cut into)
+  local ghosts = stack.build_blueprint({ surface = s, force = game.forces[st.force], position = p.at, direction = p.dir,
+    build_mode = p.superforced and defines.build_mode.superforced or defines.build_mode.forced, skip_fog_of_war = false })
+  inv.destroy()
+  for _, e in pairs(s.find_entities_filtered({ area = box(st.area), to_be_deconstructed = true })) do
+    if e.valid then e.destroy() end
+  end
+  st.plan_ents = revive(ghosts)
+  local b
+  for _, e in pairs(st.plan_ents) do
+    local bb = e.valid and e.bounding_box
+    if bb then
+      b = b or { bb.left_top.x, bb.left_top.y, bb.right_bottom.x, bb.right_bottom.y }
+      b = { math.min(b[1], bb.left_top.x), math.min(b[2], bb.left_top.y), math.max(b[3], bb.right_bottom.x),
+        math.max(b[4], bb.right_bottom.y) }
+    end
+  end
+  st.plan_box = b and { math.floor(b[1]), math.floor(b[2]), math.ceil(b[3]), math.ceil(b[4]) } or nil
 end
 
 -- the edges ---------------------------------------------------------------------------------------------------
@@ -223,7 +278,7 @@ function M.open(index, home_surface, home_force, plan)
   local s = lab_surface(index)
   local force = home_force
   pcall(home_force.set_surface_hidden, s, true)
-  bench.ground(s, a[1] - 8, a[2] - 8, a[3] + 8, a[4] + 8)
+  ground(s, a, 8)
   for _, e in pairs(s.find_entities_filtered({ area = box(a) })) do e.destroy() end
   home_surface.clone_area({ source_area = box(a), destination_area = box(a), destination_surface = s,
     clone_tiles = true, clone_entities = true, clone_decoratives = false,
@@ -241,19 +296,11 @@ function M.open(index, home_surface, home_force, plan)
   for _, e in pairs(s.find_entities_filtered({ area = box(a), force = force })) do
     if e.type ~= "entity-ghost" and e.type ~= "tile-ghost" then st.originals[key(e)] = true end
   end
-  -- the plan, built for real (an absolute one superforced at its box: its taps replace the belts they cut into)
-  local inv, stack = print_of(plan.blueprint, plan.section)
-  if inv then
-    local b = plan.box
-    local at = b and { x = b[1] + b[3] / 2, y = b[2] + b[4] / 2 } or plan.center
-    local ghosts = stack.build_blueprint({ surface = s, force = force, position = at,
-      build_mode = b and defines.build_mode.superforced or defines.build_mode.forced, skip_fog_of_war = false })
-    inv.destroy()
-    for _, e in pairs(s.find_entities_filtered({ area = box(a), to_be_deconstructed = true })) do
-      if e.valid then e.destroy() end
-    end
-    revive(ghosts)
-  end
+  -- the plan, built for real (an absolute one at its box, any other at its center); the card's arrows move it
+  local b = plan.box
+  st.plan = { blueprint = plan.blueprint, section = plan.section, superforced = b ~= nil, dir = defines.direction.north,
+    at = b and { x = b[1] + b[3] / 2, y = b[2] + b[4] / 2 } or plan.center }
+  build_plan(st, s)
   edges(st)
   force.chart(s, box(a))
   all()[index] = st
@@ -326,11 +373,54 @@ function M.paste(st, by_player)
   return ghosts, marks, removed
 end
 
---- the lab gone (at the end of the tick) and forgotten
+--- the plan in the lab moved (dx, dy tiles) and/or turned a quarter clockwise: the base where it stood put back as
+--- the real base has it, the plan built again there (changes made to the plan itself in the lab go with it)
+--- -> true, or false and why (a locale key)
+function M.move(index, dx, dy, turn)
+  local st = all()[index]
+  local s = st and game.surfaces[st.surface]
+  local real = st and game.surfaces[st.home_surface]
+  if not (s and real and st.plan and st.plan_box) then return false, "sandbox-cant-move" end
+  local p, pb, a = st.plan, st.plan_box, st.area
+  local at = { x = p.at.x + dx, y = p.at.y + dy }
+  -- (it stays inside the copied base, off its edge: past that there's nothing to tie into)
+  local r = math.max(p.at.x - pb[1], pb[3] - p.at.x, p.at.y - pb[2], pb[4] - p.at.y)
+  if at.x - r < a[1] + 2 or at.x + r > a[3] - 2 or at.y - r < a[2] + 2 or at.y + r > a[4] - 2 then
+    return false, "sandbox-edge"
+  end
+  for _, e in pairs(st.plan_ents or {}) do if e.valid then e.destroy() end end
+  -- the base under it as it was: its tiles, and each of the base's own entities missing there, cloned again
+  local look = box({ pb[1] - 1, pb[2] - 1, pb[3] + 1, pb[4] + 1 })
+  real.clone_area({ source_area = look, destination_area = look, destination_surface = s, clone_tiles = true,
+    clone_entities = false, clone_decoratives = false, clear_destination_entities = false,
+    clear_destination_decoratives = false, expand_map = false, create_build_effect_smoke = false })
+  local here = {}
+  for _, e in pairs(s.find_entities_filtered({ area = look })) do if e.valid then here[key(e)] = true end end
+  for _, e in pairs(real.find_entities_filtered({ area = look, force = st.home_force })) do
+    local k = key(e)
+    if st.originals[k] and not here[k] then
+      local c = e.clone({ position = e.position, surface = s, force = st.force, create_build_effect_smoke = false })
+      if c then tame(c) here[k] = true end
+    end
+  end
+  p.at = at
+  if turn then p.dir = (p.dir + 4) % 16 end
+  build_plan(st, s)
+  edges(st)
+  return true
+end
+
+--- the lab cleared and forgotten (its surface kept for the next one)
 function M.close(index)
   local st = all()[index]
   all()[index] = nil
-  if st and game.surfaces[st.surface] then game.delete_surface(st.surface) end
+  local s = st and game.surfaces[st.surface]
+  if not s then return end
+  if s.name ~= PREFIX .. index then game.delete_surface(s) return end  -- (a lab from before 0.25.1: one per try)
+  local a = st.area
+  for _, e in pairs(s.find_entities_filtered({ area = { { a[1] - 40, a[2] - 40 }, { a[3] + 40, a[4] + 40 } } })) do
+    if e.valid then e.destroy() end
+  end
 end
 
 -- the player ----------------------------------------------------------------------------------------------------

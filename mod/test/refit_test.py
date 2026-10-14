@@ -96,9 +96,9 @@ req = {"belts": ["transport-belt"], "inserters": ["inserter", "long-handed-inser
                   "snapshot": json.loads(json.dumps(snap)), "refit": {"area": AREA, "add": False, "layout": "grid"}}}
 out = json.loads(ingame.plan(json.dumps(req)))
 assert "error" not in out, out
-assert not ingame._last.get("entities") or not any(
-    e.get("control_behavior", {}).get("circuit_condition") for e in ingame._last["entities"]), "nothing wired"
-assert not any(e.get("circuit_to") for e in ingame._last["entities"]), "no circuit wires"
+assert not ingame._players[0]["last"].get("entities") or not any(
+    e.get("control_behavior", {}).get("circuit_condition") for e in ingame._players[0]["last"]["entities"]), "nothing wired"
+assert not any(e.get("circuit_to") for e in ingame._players[0]["last"]["entities"]), "no circuit wires"
 assert set(out["mall"]["products"]) == set(products), out["mall"]
 print("side by side:", [n for n in out["notes"] if "columns" in n or "the area had" in n])
 print("ok (side by side)")

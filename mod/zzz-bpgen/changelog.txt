@@ -1,4 +1,30 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.25.1
+Date: 2026-10-14
+  Features:
+    - Try in sandbox: arrows and a turn button on the sandbox card move the plan a tile (Shift: five) or turn it a
+      quarter where it is. The base where it stood comes back as your real base has it.
+  Changes:
+    - The sandbox keeps one lab surface per player and only clears it when you leave, instead of making and deleting
+      a surface each time (deleting one set off other mods: Mineable Cliffs crashed on it). Lab ground is laid only
+      round the copied base, which brings its own tiles.
+---------------------------------------------------------------------------------------------------
+Version: 0.25.0
+Date: 2026-10-14
+  Features:
+    - Place by my base puts the plan in your hand as a blueprint, turned to face the bus round you, with bpgen's
+      spot for it shown. Put it down there or anywhere else: move it, turn it, flip it as any blueprint, with no
+      waiting while you do. Where you paste it, bpgen ties it into your base: belt taps on your bus or belts, a new
+      bus lane for an output the bus doesn't carry, poles to your power. Each paste is tied in on its own, so the
+      blueprint stays in your hand for another copy, and Undo takes back the last one.
+  Changes:
+    - Placing again from the same look round your base (the window's arrows, Rotate, Redo) no longer reads the
+      base again each time; each player keeps their own last plan (another player's, or AI Crew's, no longer takes
+      its place).
+  Bugfixes:
+    - An arrow moving a plan onto something said so in the window instead of failing with an error.
+    - A line fed from your bus that makes one of its ingredients itself failed with "name 'planner' is not defined".
+---------------------------------------------------------------------------------------------------
 Version: 0.24.3
 Date: 2026-10-14
   Bugfixes:

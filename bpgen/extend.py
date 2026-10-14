@@ -147,7 +147,7 @@ def find_spot(ground, entities, seed, avoid_ore=True, margin=2, keep_clear=()):
         if best and best[0] <= r:
             break
     if not best:
-        raise ValueError("no free spot in the snapshot big enough for this build; snapshot a bigger area")
+        raise Blocked("no free spot in the snapshot big enough for this build; snapshot a bigger area")
     return best[1], best[2]
 
 
@@ -751,6 +751,57 @@ def turned(x, y, k):
     return x, y
 
 
+def mirrored_dir(d):
+    """a direction mirrored left to right (a blueprint flipped horizontally): east and west swap"""
+    return (16 - d) % 16
+
+
+def solve_pose(pairs):
+    """how a plan was put down by hand: pairs [((x, y) where pose() had it, (x, y) where the game built it)] ->
+    (mirror (flipped left to right first), k (then quarter turns clockwise), (ox, oy) (then moved)) taking every
+    first point onto its second, or None"""
+    if not pairs:
+        return None
+    for mirror in (False, True):
+        for k in range(4):
+            (ax, ay), (bx, by) = pairs[0]
+            tx, ty = turned(-ax if mirror else ax, ay, k)
+            ox, oy = bx - tx, by - ty
+            if all(abs(turned(-x if mirror else x, y, k)[0] + ox - u) < 0.01
+                   and abs(turned(-x if mirror else x, y, k)[1] + oy - v) < 0.01 for (x, y), (u, v) in pairs):
+                return mirror, k, (ox, oy)
+    return None
+
+
+def repose(posed, how, built=None):
+    """pose()'s answer moved the way solve_pose() found the player put it down; built: {entity index: direction the
+    game gave it} (its own say, flips included), else the direction worked out. -> a posed dict for connect_posed"""
+    mirror, k, (ox, oy) = how
+
+    def at(p):
+        x, y = turned(-p["x"] if mirror else p["x"], p["y"], k)
+        return {"x": x + ox, "y": y + oy}
+
+    def way(d):
+        return ((mirrored_dir(d) if mirror else d) + 4 * k) % 16
+    ents = []
+    for i, e in enumerate(posed["entities"]):
+        e = dict(e, position=at(e["position"]))
+        if (built or {}).get(i) is not None:
+            e["direction"] = built[i]
+        elif e.get("direction") is not None:
+            e["direction"] = way(e["direction"])
+        ents.append(e)
+    xs = [x["position"]["x"] for x in ents]
+    ys = [x["position"]["y"] for x in ents]
+    dx, dy = round(min(xs) - min(e["position"]["x"] for e in posed["entities"])), round(
+        min(ys) - min(e["position"]["y"] for e in posed["entities"]))
+    return dict(posed, entities=ents, turn=(posed["turn"] + k) % 4,
+                offset=[posed["offset"][0] + dx, posed["offset"][1] + dy],
+                sources=[dict(x, position=at(x["position"])) for x in posed["sources"]],
+                sinks=[dict(x, position=at(x["position"])) for x in posed["sinks"]])
+
+
 def turn_plan(entities, sources, sinks, k):
     """the plan turned k quarter turns clockwise: positions, and every direction +4 a turn (sizes follow the
     direction, see footprint). -> (entities, sources, sinks)"""
@@ -863,8 +914,16 @@ def path_entities(path, belt_name, ug_name):
     return out
 
 
+FIND = object()  # (place's main: look for the bus in the ground)
+
+
+class Blocked(ValueError):
+    """no room for the plan: nowhere free in the snapshot, or something in the way where it was asked to go"""
+
+
 def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt="transport-belt", connect=True,
-          sinks=None, bus="auto", needs=None, extend_bus=True, progress=None, turn=0, avoid=None, spot=False, at=None):
+          sinks=None, bus="auto", needs=None, extend_bus=True, progress=None, turn=0, avoid=None, spot=False, at=None,
+          main=FIND):
     """bus: "auto" (build beside a main bus when the snapshot has one), "on" (the same, saying so when there is
     none), "here" (at the seed - a refit, in the area it replaces - its inputs still taken off the bus's lanes) or
     "off" (free ground nearest the seed, taps from any belt). needs: {item: items/s the build really takes}
@@ -874,11 +933,23 @@ def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt=
     With a bus the plan is turned so its inputs face it. turn: quarter turns clockwise on top of that (the
     window's Rotate). avoid: [x, y, w, h] boxes it must not land on (spots the window's Redo already showed).
     spot: the seed is where the player clicked, kept beside a bus too (else the bus picks the spot along it). at:
-    the offset to use, exactly (the window's arrows), ValueError when something is in the way there.
+    the offset to use, exactly (the window's arrows), Blocked when something is in the way there. main: the
+    bus already found in this ground (site.Site.scratch: a copy connect_posed() writes into), else it is looked for.
     -> dict(offset (of the plan as turned), turn (quarter turns clockwise), entities (new, world coords), taps,
     deliveries, outputs (where its sinks landed), notes, bus (what was found, or None))"""
+    posed = pose(ground, plan_entities, sources, sinks, seed=seed, avoid_ore=avoid_ore, bus=bus, turn=turn,
+                 avoid=avoid, spot=spot, at=at, main=main)
+    return connect_posed(data, ground, posed, belt=belt, connect=connect, needs=needs, extend_bus=extend_bus,
+                         progress=progress)
+
+
+def pose(ground, plan_entities, sources, sinks=None, seed=None, avoid_ore=True, bus="auto", turn=0, avoid=None,
+         spot=False, at=None, main=FIND):
+    """where the plan goes (no routing: cheap). Arguments as place(). Blocked when there's no room.
+    -> dict(offset, turn, side (of the bus, or 0), main (the bus or None), entities, sources, sinks (in world
+    coordinates, as turned), notes)"""
     notes = []
-    main = find_bus(ground) if bus != "off" else None
+    main = None if bus == "off" else find_bus(ground) if main is FIND else main
     keep_clear, side, k = (), 0, 0  # (k: quarter turns; kept as `turn`, the sinks loop reuses k)
     if main:
         side = bus_side(main, plan_entities, sources, seed)
@@ -918,11 +989,27 @@ def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt=
         dx, dy = at
         hit = (ground.blocked(avoid_ore=False) | set(keep_clear)) & plan_tiles(shifted(plan_entities, dx, dy))
         if hit:
-            raise ValueError("something's in the way there" + (" (the room kept beside your bus)" if not
+            raise Blocked("something's in the way there" + (" (the room kept beside your bus)" if not
                              hit & ground.blocked(avoid_ore=False) else "") + ": move it the other way")
     else:
         dx, dy = find_spot(ground, plan_entities, seed, avoid_ore, keep_clear=keep_clear)
-    new = shifted(plan_entities, dx, dy)
+    def moved(x):
+        return dict(x, position={"x": x["position"]["x"] + dx, "y": x["position"]["y"] + dy})
+    return {"offset": [dx, dy], "turn": turn, "side": side, "main": main, "entities": shifted(plan_entities, dx, dy),
+            "sources": [moved(x) for x in sources], "sinks": [moved(x) for x in sinks or []], "notes": notes}
+
+
+def connect_posed(data, ground, posed, belt="transport-belt", connect=True, needs=None, extend_bus=True,
+                  progress=None):
+    """the plan where pose() put it (or where the player pasted it: entities, sources and sinks in world
+    coordinates) tied into the base: belt taps for its inputs, a new bus lane or a belt of the base for its outputs,
+    the bus continued past it, power. ground and posed["main"] are written into (site.Site.scratch: copies).
+    -> dict(offset, turn, entities (new, world coords), taps, deliveries, outputs (where its sinks are), inputs (fed
+    by hand), notes, upgrades, bus (what was found, or None))"""
+    main, side, turn = posed["main"], posed["side"], posed["turn"]
+    new, sources, sinks = list(posed["entities"]), posed["sources"], posed["sinks"]
+    notes = list(posed["notes"])
+    dx = dy = 0  # (sources and sinks are in world coordinates already)
     blocked = ground.blocked(avoid_ore=False) | plan_tiles(new)
     ends = belt_ends(ground.snap["entities"] + new, blocked)
     blocked |= ends
@@ -1126,7 +1213,7 @@ def place(data, ground, plan_entities, sources, seed=None, avoid_ore=True, belt=
         blocked.difference_update(lane)
     outputs = [{"item": s.get("item"), "position": {"x": s["position"]["x"] + dx, "y": s["position"]["y"] + dy}}
                for s in sinks or []]
-    return {"offset": [dx, dy], "turn": turn, "entities": new + poles, "taps": taps, "deliveries": deliveries,
+    return {"offset": posed["offset"], "turn": turn, "entities": new + poles, "taps": taps, "deliveries": deliveries,
             "outputs": outputs, "inputs": inputs, "notes": notes, "upgrades": upgrades,
             "bus": {k: v for k, v in main.items() if k != "tiles"} | {"lanes": len(main["lanes"])} if main else None}
 

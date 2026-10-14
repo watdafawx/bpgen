@@ -18,9 +18,32 @@ from pathlib import Path
 _service = None
 _lock = threading.Lock()  # (plans share one Service: one at a time)
 _taking = None  # the thread re-reading the mods' data with a headless game (planning waits for it)
-_last = None  # the last plan that isn't placed yet (entities, sources, sinks...): what place() puts next to the base
-_sections = {}  # a starter base's prints by name (place() can put one of them next to the base)
-_where = None  # where place() last put _last: {of: that _last, seed, offset} (the window's arrows move it from there)
+# each player's own (a request's "player", 0 without one): "last": the last plan that isn't placed yet (entities,
+# sources, sinks...), what place() puts next to the base; "sections": a starter base's prints by name (place() can
+# put one of them next to the base); "where": where place() last put "last", {of: that plan, seed, offset} (the
+# window's arrows move it from there); "site": the ground round the base it was placed in (site.Site, read once)
+_players = {}
+
+
+def _state(req):
+    """the asking player's state (see _players)"""
+    return _players.setdefault(int(req.get("player") or 0), {"last": None, "sections": {}, "where": None, "site": None})
+
+
+def _site(s, st, snap, prune=None):
+    """the player's site for this snapshot: the kept one when it is the same snapshot (sent again while the window's
+    arrows, Rotate and Redo stay inside it), else read anew and kept. prune: [x1, y1, x2, y2] whose entities are
+    left out (a section being moved: its old place is free ground)"""
+    from bpgen import site
+    variant = tuple(prune) if prune else None
+    if st["site"] is None or st["site"].key != site.key_of(snap, variant) or snap.get("tick") is None:
+        snap = s.snapshot_view(snap)
+        if prune:
+            x1, y1, x2, y2 = prune
+            snap = dict(snap, entities=[e for e in snap["entities"] if not (
+                x1 <= e["position"]["x"] < x2 and y1 <= e["position"]["y"] < y2)])
+        st["site"] = site.Site(snap, variant)
+    return st["site"]
 # what the job running now has done, for the window's progress bar (read by progress(), without _lock: the job holds
 # it while it works). Appending to a list is atomic in CPython.
 STAGES = ("reading your request", "planning", "placing it next to your base", "finishing")
@@ -251,13 +274,12 @@ def _absolute(placed):
             "inputs": placed.get("inputs") or [], "outputs": placed.get("outputs") or []}
 
 
-def _bus_feed(s, params):
+def _bus_feed(s, params, site):
     """a production line fed from the player's main bus: the bus in the snapshot, and what the line takes from it.
     Ingredients the bus doesn't carry are made inside the blueprint (params["make"], as if ticked in the window)
     when there's a recipe for them. -> (the bus or None, notes)"""
-    from bpgen import base, extend
-    snap = s.snapshot_view(params.get("snapshot"))
-    main = extend.find_bus(extend.Ground(snap)) if snap else None
+    from bpgen import base, planner
+    main = site.bus if site else None
     if not main:
         return None, ["no main bus around you (3+ long straight belts side by side): planned as a plain line"]
     data = s.data
@@ -292,12 +314,11 @@ def _bus_feed(s, params):
     return main, notes
 
 
-def _mall_bus_feed(s, params):
+def _mall_bus_feed(s, params, site):
     """a grid mall fed from the player's main bus: what the bus carries comes in on its belts (tapped from the bus),
     the parts it doesn't are made at the top. -> (the bus or None, notes)"""
-    from bpgen import base, extend
-    snap = s.snapshot_view(params.get("snapshot"))
-    main = extend.find_bus(extend.Ground(snap)) if snap else None
+    from bpgen import base
+    main = site.bus if site else None
     if not main:
         return None, ["no main bus around you (3+ long straight belts side by side): only plates come in"]
     on_bus = {i for ln in main["lanes"] for i in ln.get("items") or [] if i}
@@ -424,11 +445,11 @@ def _section(s, params):
 def move(request: str) -> str:
     """a section of the base moved: {"params": {"move": ..., "snapshot": ..., "seed": {x, y}}} (see _section) ->
     as plan(): an absolute blueprint (its belts in and out routed to the base), "absolute.clear": the old one"""
-    global _last
     from bpgen import planner
     t = time.perf_counter()
     try:
         req = json.loads(request)
+        st = _state(req)
         params = req.get("params") or {}
         _begin()
         _note("reading the section", 0)
@@ -440,12 +461,12 @@ def move(request: str) -> str:
             x1, y1 = params["move"]["area"][:2]
             plan = [dict(e, position={"x": e["position"]["x"] - x1, "y": e["position"]["y"] - y1}) for e in ents]
             shift = lambda p: {"x": p["x"] - x1, "y": p["y"] - y1}  # noqa: E731
-            _last = {"entities": [s.decorate(e) for e in plan],
+            st["last"] = {"entities": [s.decorate(e) for e in plan],
                      "sources": [dict(k, position=shift(k["position"])) for k in sources],
                      "sinks": [dict(k, position=shift(k["position"])) for k in sinks],
                      "belt": "transport-belt", "mode": "move", "label": "bpgen: a section moved",
                      "prune": params["move"]["area"], "clear": clear}
-            placed = s.extend(dict(_last, bus="here", seed=params.get("seed"), snapshot=params["snapshot"]))
+            placed = s.extend(dict(st["last"], bus="here", seed=params.get("seed"), snapshot=params["snapshot"]))
             absolute = dict(_absolute(placed), clear=clear)
         return json.dumps({"blueprint": placed["blueprint"], "label": "a section moved", "mode": "move",
                            "absolute": absolute, "notes": notes + list(placed.get("notes") or []), "summary": {},
@@ -456,50 +477,140 @@ def move(request: str) -> str:
         return _crash(e, request)
 
 
+def _pick_section(st, name):
+    """one print of the last plan's book (a starter base's, More lines') becomes the plan to place"""
+    sec = st["sections"].get(name or "")
+    if sec and sec.get("last"):  # (one of More lines' lines: that one next to the base)
+        st["last"] = sec["last"]
+    elif sec and st["last"]:  # (a print of the starter base: that one next to the base, and the arrows move it)
+        res = sec.get("result") or {}
+        st["last"] = {"entities": res.get("entities") or [], "sources": res.get("sources") or [],
+                      "sinks": [dict(k, item=k.get("item") or sec.get("item")) for k in res.get("sinks") or []],
+                      "belt": (res.get("summary") or {}).get("belt") or st["last"].get("belt"), "mode": "base",
+                      "label": f"bpgen: {sec['name']} next to the base", "needs": _section_needs(_svc().data, sec, {})}
+
+
 def place(request: str) -> str:
     """the last plan next to the player's base: {"bus": "auto"|"on"|"off", "seed": {x, y}, "snapshot": the area
     around the player, as the snapshot tool takes it} -> as plan(), an absolute blueprint with taps on the base's
     belts, or {error}"""
     t = time.perf_counter()
+    from bpgen import extend
     try:
-        global _last
         req = json.loads(request or "{}")
-        sec = _sections.get(req.get("section") or "")
-        if sec and sec.get("last"):  # (one of More lines' lines: that one next to the base)
-            _last = sec["last"]
-        elif sec and _last:  # (a print of the starter base: that one next to the base, and the arrows move it)
-            res = sec.get("result") or {}
-            _last = {"entities": res.get("entities") or [], "sources": res.get("sources") or [],
-                     "sinks": [dict(k, item=k.get("item") or sec.get("item")) for k in res.get("sinks") or []],
-                     "belt": (res.get("summary") or {}).get("belt") or _last.get("belt"), "mode": "base",
-                     "label": f"bpgen: {sec['name']} next to the base", "needs": _section_needs(_svc().data, sec, {})}
-        if not _last or not _last.get("entities"):
+        st = _state(req)
+        _pick_section(st, req.get("section"))
+        if not st["last"] or not st["last"].get("entities"):
             return json.dumps({"error": "plan something first"})
         snap = req.get("snapshot")
-        if _last.get("prune") and snap:  # (a section being moved: its old place is free ground)
-            x1, y1, x2, y2 = _last["prune"]
-            snap = dict(snap, entities=[e for e in snap.get("entities") or [] if not (
-                x1 <= e["position"]["x"] < x2 and y1 <= e["position"]["y"] < y2)])
-        global _where
         seed, at = req.get("seed"), None
-        if req.get("shift") and _where and _where["of"] is _last:  # (the arrows: that far from the last spot)
-            seed = _where["seed"]
-            at = (_where["offset"][0] + req["shift"][0], _where["offset"][1] + req["shift"][1])
+        if req.get("shift") and st["where"] and st["where"]["of"] is st["last"]:  # (the arrows: that far from the last spot)
+            seed = st["where"]["seed"]
+            at = (st["where"]["offset"][0] + req["shift"][0], st["where"]["offset"][1] + req["shift"][1])
         _begin()
         _note("placing the last plan where you asked", 2)
         with _lock:
             _svc().progress = lambda text: _note(text, 2)
-            placed = _svc().extend(dict(_last, bus="here" if _last.get("mode") == "move" else req.get("bus") or "auto",
-                                        seed=seed, snapshot=snap, turn=req.get("turn") or 0,
+            site = _site(_svc(), st, snap, st["last"].get("prune")) if snap else None
+            placed = _svc().extend(dict(st["last"], bus="here" if st["last"].get("mode") == "move" else req.get("bus") or "auto",
+                                        seed=seed, site=site, snapshot=snap, turn=req.get("turn") or 0,
                                         avoid=req.get("avoid"), spot=bool(req.get("spot")), at=at))
-        _where = {"of": _last, "seed": seed, "offset": placed["offset"]}
+        st["where"] = {"of": st["last"], "seed": seed, "offset": placed["offset"]}
         absolute = _absolute(placed)
-        if _last.get("clear"):
-            absolute["clear"] = _last["clear"]
+        if st["last"].get("clear"):
+            absolute["clear"] = st["last"]["clear"]
         return json.dumps({
-            "blueprint": placed["blueprint"], "label": _last["label"], "mode": _last["mode"],
+            "blueprint": placed["blueprint"], "label": st["last"]["label"], "mode": st["last"]["mode"],
             "absolute": absolute,
             "notes": placed.get("notes") or [], "summary": {}, "seconds": round(time.perf_counter() - t, 3)})
+    except extend.Blocked as e:  # (no room there: said in the window, not a crash)
+        return json.dumps({"error": str(e), "seconds": round(time.perf_counter() - t, 3)})
+    except Exception as e:  # noqa: BLE001 - shown in game
+        return _crash(e, request)
+
+
+def hand(request: str) -> str:
+    """the last plan as a blueprint for the player's cursor, to put down where they like (the game's own moving,
+    R and flips: no planning while they do): {"player", "snapshot" (round them: the plan turned to face a main bus
+    there, and the spot bpgen would pick), "seed", "bus", "turn", "section"} -> {"blueprint", "id" (its entities
+    carry the tag bpgen_place = {id, i}: connect() finds them by it), "spot": [x, y, w, h] or None, "notes"}"""
+    from bpgen import extend, planner
+    t = time.perf_counter()
+    try:
+        req = json.loads(request or "{}")
+        st = _state(req)
+        if req.get("section"):
+            _pick_section(st, req["section"])
+        last = st["last"]
+        if not last or not last.get("entities"):
+            return json.dumps({"error": "plan something first"})
+        seed = req.get("seed")
+        with _lock:
+            s = _svc()
+            site = _site(s, st, req["snapshot"], last.get("prune")) if req.get("snapshot") else None
+            spot = posed = None
+            if site:
+                ground, main = site.scratch()
+                try:
+                    posed = extend.pose(ground, last["entities"], last.get("sources") or [], last.get("sinks") or [],
+                                        seed=(seed["x"], seed["y"]) if seed else None,
+                                        bus="here" if last.get("mode") == "move" else req.get("bus") or "auto",
+                                        turn=req.get("turn") or 0, main=main)
+                    tiles = extend.plan_tiles(posed["entities"])
+                    x0, y0 = min(a for a, _ in tiles), min(b for _, b in tiles)
+                    spot = [x0, y0, max(a for a, _ in tiles) - x0 + 1, max(b for _, b in tiles) - y0 + 1]
+                except extend.Blocked:
+                    posed = None
+            if posed is None:  # (no snapshot, or no room in it: as planned, the player finds it a place)
+                ents, srcs, snks = extend.turn_plan(last["entities"], last.get("sources") or [],
+                                                    last.get("sinks") or [], req.get("turn") or 0)
+                posed = {"offset": [0, 0], "turn": (req.get("turn") or 0) % 4, "side": 0, "main": None,
+                         "entities": ents, "sources": srcs, "sinks": snks or [], "notes": []}
+            st["hand_n"] = n = st.get("hand_n", 0) + 1
+            st["hands"] = {n: dict(posed, main=None, plan=last)}  # (the one in the cursor; older ones are gone)
+            ents = [{k: v for k, v in s.decorate(e).items() if k not in ("type", "w", "h", "fluid", "new")}
+                    | {"tags": dict(e.get("tags") or {}, bpgen_place={"id": n, "i": i})}
+                    for i, e in enumerate(posed["entities"])]
+            bp = planner.blueprint_string(ents, last.get("label") or "bpgen",
+                                          description="Put it down where you like; bpgen ties it into your base.")
+        return json.dumps({"blueprint": bp, "id": n, "spot": spot, "notes": posed["notes"],
+                           "seconds": round(time.perf_counter() - t, 3)})
+    except Exception as e:  # noqa: BLE001 - shown in game
+        return _crash(e, request)
+
+
+def connect(request: str) -> str:
+    """the plan from hand() put down by the player, tied into their base: {"player", "id", "built": [{i, x, y,
+    direction}] (its ghosts, as the game built them), "snapshot" (round it, measured after)} -> {"blueprint" (only
+    what connects it: taps, lanes, poles; absolute, so it lands where it belongs) or None, "absolute", "notes"}"""
+    from bpgen import extend
+    t = time.perf_counter()
+    try:
+        req = json.loads(request or "{}")
+        st = _state(req)
+        held = (st.get("hands") or {}).get(req.get("id"))
+        if not held:
+            return json.dumps({"error": "that blueprint is from an older plan: take it from the window again"})
+        built = {b["i"]: b for b in req.get("built") or [] if 0 <= b.get("i", -1) < len(held["entities"])}
+        how = extend.solve_pose([((held["entities"][i]["position"]["x"], held["entities"][i]["position"]["y"]),
+                                  (b["x"], b["y"])) for i, b in built.items()])
+        if not how:
+            return json.dumps({"error": "bpgen couldn't tell how the blueprint was put down (was it edited?)"})
+        posed = extend.repose(held, how, {i: b.get("direction") for i, b in built.items()})
+        last = held["plan"]
+        _begin()
+        _note("tying it into your base", 2)
+        with _lock:
+            s = _svc()
+            s.progress = lambda text: _note(text, 2)
+            site = _site(s, st, req["snapshot"])
+            placed = s.connect({"site": site, "posed": posed, "belt": last.get("belt"), "needs": last.get("needs"),
+                                "label": (last.get("label") or "bpgen") + ": connected"})
+        absolute = _absolute(placed) if placed["box"] else None
+        if absolute and last.get("clear"):
+            absolute["clear"] = last["clear"]
+        return json.dumps({"blueprint": placed["blueprint"], "absolute": absolute, "notes": placed["notes"],
+                           "mirror": how[0], "turns": how[1], "seconds": round(time.perf_counter() - t, 3)})
     except Exception as e:  # noqa: BLE001 - shown in game
         return _crash(e, request)
 
@@ -514,8 +625,7 @@ def bus_report(request: str) -> str:
         req = json.loads(request or "{}")
         with _lock:
             s = _svc()
-            snap = s.snapshot_view(req.get("snapshot"))
-            main = extend.find_bus(extend.Ground(snap)) if snap else None
+            main = _site(s, _state(req), req["snapshot"]).bus if req.get("snapshot") else None
             if not main:
                 return json.dumps({"result": {"bus": None}})
             try:
@@ -558,9 +668,7 @@ def add_lane(request: str) -> str:
         item = req.get("item")
         with _lock:
             s = _svc()
-            snap = s.snapshot_view(req.get("snapshot"))
-            ground = extend.Ground(snap) if snap else None
-            main = extend.find_bus(ground) if ground else None
+            ground, main = _site(s, _state(req), req["snapshot"]).scratch() if req.get("snapshot") else (None, None)
             if not main:
                 return json.dumps({"error": "no main bus around you (3+ long straight belts side by side)"})
             got = extend.new_bus_lane(s.data, ground, main, item)
@@ -584,12 +692,12 @@ def _lines(req, t):
     """Line's More lines: the window's line and each of req["lines"] ({recipe, machine, modules...}) planned as its own
     line, as if picked alone (no Make here / Also make: those are the first line's) -> as plan(), a blueprint book of
     them, a print each ("sections": their labels, for the window's picker; place() puts the one picked by the base)"""
-    global _last, _sections
     from bpgen import base
+    st = _state(req)
     first = dict(req)
     extra = first.pop("lines")
     plain = {k: v for k, v in (first.get("params") or {}).items() if k not in ("make", "also")}
-    done, notes = [], []  # (label, its answer, its _last)
+    done, notes = [], []  # (label, its answer, its st["last"])
     for i, sub in enumerate([first] + [dict(first, params=plain, **ln) for ln in extra]):
         out = json.loads(plan(json.dumps(sub)))
         if out.get("measure") or (i == 0 and not out.get("blueprint")):
@@ -600,7 +708,7 @@ def _lines(req, t):
         label, n = out["label"], 2
         while any(d[0] == label for d in done):  # (a recipe twice: told apart)
             label, n = f"{out['label']} ({n})", n + 1
-        done.append((label, out, _last))
+        done.append((label, out, st["last"]))
     prints = []
     for i, (label, out, _) in enumerate(done):
         bp = base._decode(out["blueprint"])
@@ -609,8 +717,8 @@ def _lines(req, t):
     book = {"blueprint_book": {"item": "blueprint-book", "label": f"bpgen: {len(done)} lines",
                                "description": "\n".join(d[0] for d in done), "blueprints": prints, "active_index": 0,
                                "version": prints[0]["blueprint"]["version"]}}
-    _sections = {label: {"name": label, "last": last} for label, _, last in done}
-    _last = done[0][2]
+    st["sections"] = {label: {"name": label, "last": last} for label, _, last in done}
+    st["last"] = done[0][2]
     head = done[0][1]
     for label, out, _ in done:
         notes += [f"{label}: {x}" for x in out.get("notes") or []]
@@ -622,16 +730,16 @@ def _lines(req, t):
 def plan(request: str) -> str:
     """a request from the mod (recipe, machine, unlocked belts and inserters, bonuses...) -> {blueprint, label, text}
     or {error}"""
-    global _last, _sections
     from bpgen import calibrate, pack, planner
     t = time.perf_counter()
     _begin()
     _note("request received", 0)
     try:
         req = json.loads(request)
+        st = _state(req)
         if req.get("lines"):  # (Line's More lines: each its own line, one book)
             return _lines(req, t)
-        _sections = {}
+        st["sections"] = {}
         with _lock:
             s = _svc()
             s.progress = lambda text: _note(text, 2)  # (placing next to the base: each input routed)
@@ -677,10 +785,13 @@ def plan(request: str) -> str:
                     # the top, nothing wired - no chest limits, no loop to keep from jamming)
                     params.update(layout="grid", stock=0)
                 clear, had, refit_notes = _refit(s, params)
+            # (the ground round the player, read once: the bus feed and the placing after the plan both use it; a
+            # refit's has the area's entities left out, made by _refit)
+            site = _site(s, st, params["snapshot"]) if params.get("snapshot") and not refit else None
             if params.get("bus_feed") and params.get("recipe"):
-                bus, bus_notes = _bus_feed(s, params)
+                bus, bus_notes = _bus_feed(s, params, site)
             elif params.get("bus_feed") and params.get("mode") == "mall":
-                bus, bus_notes = _mall_bus_feed(s, params)
+                bus, bus_notes = _mall_bus_feed(s, params, site)
             if refit and params["mode"] == "mall":
                 params["extra"] = bool(refit.get("add"))  # (off: no machine the area didn't have)
                 if not refit.get("add"):
@@ -708,13 +819,13 @@ def plan(request: str) -> str:
                     if not whole:
                         raise planner.PlanError(out.get("route_note") or "the base didn't come out as one connected build")
                     res = whole["result"]
-                    _last = {"entities": res["entities"], "sources": res.get("sources") or [],
+                    st["last"] = {"entities": res["entities"], "sources": res.get("sources") or [],
                              "sinks": res.get("sinks") or [], "belt": params.get("belt"), "mode": "base",
                              "label": "bpgen: the area refit as a base", "clear": clear}
                     o = params["origin"]
-                    placed = s.extend(dict(_last, bus="here", seed=o, snapshot=params.get("snapshot")))
+                    placed = s.extend(dict(st["last"], bus="here", seed=o, snapshot=params.get("snapshot")))
                     if placed.get("inputs"):
-                        placed = s.extend(dict(_last, bus="auto", seed=o, snapshot=params.get("snapshot")))
+                        placed = s.extend(dict(st["last"], bus="auto", seed=o, snapshot=params.get("snapshot")))
                     n = sum(1 for e in placed["entities"] if e.get("recipe"))
                     out = {"blueprint": placed["blueprint"], "absolute": dict(_absolute(placed), clear=clear),
                            "summary": {"mode": "base", "packs": out.get("packs"), "spm": out.get("spm"),
@@ -724,26 +835,26 @@ def plan(request: str) -> str:
                 elif params.get("mode") == "extend":
                     # (next to the base: plan_extension already placed the chain into the snapshot, taps on its
                     # belts, power: an absolute blueprint that lands where it belongs)
-                    _last = dict(out["plan"], belt=params.get("belt"), mode="extend",
+                    st["last"] = dict(out["plan"], belt=params.get("belt"), mode="extend",
                                  label=f"bpgen: {params.get('item')} next to the base")
                     out = {"blueprint": out["blueprint"], "summary": {"notes": out.get("notes") or []},
                            "absolute": _absolute(out)}
                 elif params.get("mode") == "ship":  # (absolute too: it lands on the platform's hub, at 0,0)
-                    _last = None
+                    st["last"] = None
                     out = {"blueprint": out["blueprint"], "summary": {"notes": out.get("notes") or []},
                            "absolute": _absolute(out)}
                 elif params.get("mode") == "busdesign":  # (absolute, like extend: it lands on the patches)
                     from bpgen import busdesign
                     if not params.get("add_to_bus"):  # (more lanes on a bus: the bus design it fits stays)
                         busdesign.save_last(out, params)
-                    _last = None
+                    st["last"] = None
                     out = {"blueprint": out["blueprint"], "summary": {"notes": out.get("notes") or []},
                            "absolute": _absolute(out)}
                 elif out.get("entities"):  # (for place(): this plan, put next to the base on request)
                     sm = out.get("summary") or {}
-                    _sections = {x["name"]: x for x in out.get("sections") or []}
-                    _last = {"entities": out["entities"], "sources": out.get("sources") or [],
-                             "needs": _line_needs(s.data, sm) if not _sections else _section_needs(
+                    st["sections"] = {x["name"]: x for x in out.get("sections") or []}
+                    st["last"] = {"entities": out["entities"], "sources": out.get("sources") or [],
+                             "needs": _line_needs(s.data, sm) if not st["sections"] else _section_needs(
                                  s.data, (out.get("sections") or [{}])[0], sm),
                              "sinks": [dict(k, item=k.get("item") or sm.get("output")) for k in out.get("sinks") or []],
                              "belt": sm.get("belt") or params.get("belt"), "mode": params.get("mode") or "line",
@@ -753,15 +864,15 @@ def plan(request: str) -> str:
                         try:
                             placed = None
                             if refit:  # (in the area's own place when it fits there, its belts tapped nearby)
-                                placed = s.extend(dict(_last, bus="here", seed=o, snapshot=params.get("snapshot")))
+                                placed = s.extend(dict(st["last"], bus="here", seed=o, snapshot=params.get("snapshot")))
                                 bx, by, bw, bh = placed["box"][:4]
                                 ax1, ay1, ax2, ay2 = refit["area"]
                                 if not (ax1 <= bx + bw / 2 <= ax2 and ay1 <= by + bh / 2 <= ay2) or placed.get("inputs"):
                                     placed = None  # (it doesn't fit, or not every input could be tapped there:
                                     # beside the bus, as a mall from it goes)
                             if placed is None:
-                                placed = s.extend(dict(_last, bus="on" if bus else "off", seed=o if o else None,
-                                                       snapshot=params.get("snapshot")))
+                                placed = s.extend(dict(st["last"], bus="on" if bus else "off", seed=o if o else None,
+                                                       site=site, snapshot=params.get("snapshot")))
                             absolute = _absolute(placed)
                             if refit:
                                 n = sum(1 for e in placed["entities"] if e.get("recipe"))

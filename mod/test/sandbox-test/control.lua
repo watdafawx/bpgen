@@ -55,6 +55,29 @@ script.on_event(defines.events.on_tick, function(e)
     out(string.format("lab %s: %d belts fed, %d drained, %d pipes", lab.surface, lab.feeds, lab.drains, lab.pipes))
     if lab.feeds ~= 1 or lab.drains ~= 1 then out("FAIL: expected one belt in and one out") end
   end
+  if e.tick == 620 then  -- the plan moved 3 east, turned four times (back as it was), moved back
+    local s = game.surfaces[lab.surface]
+    local m = remote.call("bpgen", "sandbox_move", 1, 3, 0, false)
+    if not m.ok then out("FAIL: move refused: " .. tostring(m.why)) end
+    if s.find_entity("inserter", { 10.5, 1.5 }) or not s.find_entity("inserter", { 13.5, 1.5 }) then
+      out("FAIL: the plan not moved 3 east")
+    end
+    local turned = remote.call("bpgen", "sandbox_move", 1, 0, 0, true)
+    local ins = s.find_entities_filtered({ name = "inserter", area = { { 11, -1 }, { 16, 5 } } })[1]
+    if not turned.ok or not ins or ins.direction == defines.direction.north then out("FAIL: the plan not turned") end
+    for _ = 1, 3 do remote.call("bpgen", "sandbox_move", 1, 0, 0, true) end
+    remote.call("bpgen", "sandbox_move", 1, -3, 0, false)
+    ins = s.find_entity("inserter", { 10.5, 1.5 })
+    if not (ins and ins.direction == defines.direction.north and s.find_entity("wooden-chest", { 10.5, 2.5 })) then
+      out("FAIL: the plan not back where it was")
+    end
+    if s.count_entities_filtered({ name = "inserter", area = { { 8, -2 }, { 18, 6 } } }) ~= 1 then
+      out("FAIL: the plan's old copies left behind")
+    end
+    local far = remote.call("bpgen", "sandbox_move", 1, 0, 400, false)
+    if far.ok or far.why ~= "sandbox-edge" then out("FAIL: moved past the copied base") end
+    out("moved and turned")
+  end
   if e.tick == 2400 then
     local s = game.surfaces[lab.surface]
     local chest = s.find_entity("wooden-chest", { 10.5, 2.5 })
@@ -78,7 +101,14 @@ script.on_event(defines.events.on_tick, function(e)
     end
   end
   if e.tick == 2460 then
-    if game.surfaces[lab.surface] then out("FAIL: the lab still there") end
+    local s = game.surfaces[lab.surface]
+    if not s then out("FAIL: the lab surface was deleted (it is kept for the next try)")
+    elseif s.count_entities_filtered({}) > 0 then out("FAIL: the lab not cleared") end
+    -- (a second try reuses it)
+    local again = remote.call("bpgen", "sandbox_open", 1, "nauvis", "player",
+      { blueprint = storage.bp, center = { x = 11, y = 2 }, area = { 10, 1, 12, 3 } })
+    if again.surface ~= lab.surface then out("FAIL: a second try made another lab surface") end
+    remote.call("bpgen", "sandbox_paste", 1)
     out("done")
   end
 end)

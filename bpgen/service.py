@@ -1480,12 +1480,17 @@ class Service:
         return snap
 
     def extend(self, params):
-        """place a plan (entities + sources) into the snapshot: free ground, belt taps, power, absolute blueprint"""
+        """place a plan (entities + sources) into the snapshot: free ground, belt taps, power, absolute blueprint.
+        params["site"]: a site.Site of it already read (ingame.py keeps one per player), else params["snapshot"]"""
         from bpgen import extend
-        snap = self.snapshot_view(params.get("snapshot"))
-        if not snap:
-            raise planner.PlanError("no snapshot yet: in game, use the bpgen snapshot tool (shortcut bar) on your base")
-        ground = extend.Ground(snap)
+        site = params.get("site")
+        if site is not None:
+            ground, main = site.scratch()
+        else:
+            snap = self.snapshot_view(params.get("snapshot"))
+            if not snap:
+                raise planner.PlanError("no snapshot yet: in game, use the bpgen snapshot tool (shortcut bar) on your base")
+            ground, main = extend.Ground(snap), extend.FIND
         seed = params.get("seed")
         placed = extend.place(self.data, ground, params["entities"], params.get("sources") or [],
                               seed=(seed["x"], seed["y"]) if seed else None,
@@ -1494,7 +1499,7 @@ class Service:
                               bus=params.get("bus") or "auto", needs=params.get("needs"),
                               extend_bus=params.get("extend_bus", True), progress=getattr(self, "progress", None),
                               turn=params.get("turn") or 0, avoid=params.get("avoid"), spot=params.get("spot", False),
-                              at=params.get("at"))
+                              at=params.get("at"), main=main)
         if params.get("needs"):  # (per minute, what the plan takes from the base)
             placed["notes"] = list(placed["notes"]) + short_notes(
                 {k: v * 60 for k, v in params["needs"].items()}, self.spare())
@@ -1505,6 +1510,29 @@ class Service:
                 "notes": placed["notes"], "bus": placed.get("bus"), "upgrades": placed.get("upgrades") or [],
                 "outputs": placed.get("outputs") or [], "inputs": placed.get("inputs") or [],
                 "blueprint": bp, "box": box}
+
+    def connect(self, params):
+        """a plan the player put down by hand tied into the base: params["posed"] (extend.repose: where it is),
+        params["site"] (site.Site round it), "belt", "needs", "label" -> as extend(), but its blueprint only what
+        connects it (taps, lanes, poles: the plan itself is already there), None when nothing does"""
+        from bpgen import extend
+        ground, main = params["site"].scratch()
+        posed = dict(params["posed"], main=main)
+        if main:  # (the side of the bus it was put on)
+            mid = [sum(e["position"][a] for e in posed["entities"]) / len(posed["entities"]) for a in ("x", "y")]
+            posed["side"] = extend.bus_side(main, posed["entities"], posed["sources"], mid)
+        placed = extend.connect_posed(self.data, ground, posed, belt=params.get("belt") or "transport-belt",
+                                      needs=params.get("needs"), progress=getattr(self, "progress", None))
+        if params.get("needs"):
+            placed["notes"] = list(placed["notes"]) + short_notes(
+                {k: v * 60 for k, v in params["needs"].items()}, self.spare())
+        added = [dict(self.decorate(e), new=True) for e in placed["entities"][len(posed["entities"]):]]
+        bp, box = extend.absolute_blueprint(added, params.get("label") or "bpgen: connected",
+                                            description="Its taps, lanes and poles.") if added else (None, None)
+        return {"entities": added, "offset": placed["offset"], "taps": placed["taps"],
+                "deliveries": placed["deliveries"], "notes": placed["notes"], "bus": placed.get("bus"),
+                "upgrades": placed.get("upgrades") or [], "outputs": placed.get("outputs") or [],
+                "inputs": placed.get("inputs") or [], "blueprint": bp, "box": box}
 
     def last_request(self):
         return json.loads(REQUEST.read_text(encoding="utf-8")) if REQUEST.exists() else None

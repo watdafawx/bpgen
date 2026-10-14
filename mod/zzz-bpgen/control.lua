@@ -201,6 +201,16 @@ local window = require("window")
 local compat = require("compat")
 local web = require("web")  -- (the window as a web page: fse's shells)
 local sandbox = require("sandbox")  -- ("Try in sandbox": the plan in a lab with the base round it)
+local hand = require("hand")  -- (a plan put down by hand, then tied into the base)
+hand.setup({ measure = measure, around = around, start_job = start_job })
+-- the last plan as a blueprint for the player's cursor (params: seed, bus, section, turn): measured round them first
+local function hand_plan(player, params)
+  if not in_game() then return false, "start the game with the fse loader" end
+  local w, h = window.plan_size(player)
+  local r = math.min(250, math.max(PLACE_R, math.ceil(math.max(w or 0, h or 0) / 2) + PLACE_R / 2))
+  measure(player, around(params.seed or player.position, r), "hand", params)
+  return true
+end
 -- (a bpgen button in Recipe Book / Factory Planner: the window may be opened from it soon, so the web window's page
 -- loads ahead, hidden, and what "Only unlocked" needs is read ahead a little each tick)
 compat.on_button = function(player)
@@ -259,6 +269,9 @@ window.setup({
   end,
   -- the last plan next to the base: a snapshot around params.seed (the player, or where the window's arrows moved
   -- it), then bpgen places it (taps, a main bus, power); the answer lands in the window as a plan's does
+  -- the last plan as a blueprint for the player's cursor (turned to face the bus round them, bpgen's spot shown);
+  -- where they paste it, it is tied into the base (hand.lua). The answer goes to window.on_hand.
+  hand = function(player, params) return hand_plan(player, params) end,
   place_base = function(player, params)
     if not in_game() then return false, "start the game with the fse loader" end
     local seed = params.seed or player.position
@@ -375,6 +388,11 @@ local function finish(job, out)
     local n = window.place_plan(player, res)
     return line_done(player, n, nil, res.absolute or {})
   end
+  if job.hand then return window.on_hand(player, res) end
+  if job.connect then
+    if res.error then return window.on_connected(player, res) end
+    return window.on_connected(player, res, hand.connected(player, res, job))
+  end
   if job.window and window.on_result(player, res) then return end
   if not res.blueprint then
     player.print("[bpgen] can't plan [recipe=" .. job.recipe .. "]: " .. tostring(res.error))
@@ -420,6 +438,7 @@ local function progress()
 end
 
 on_nth(6, function()
+  hand.tick()
   local m = measuring()
   for i = #m, 1, -1 do
     if game.tick >= m[i].tick then measured_now(table.remove(m, i)) end
@@ -886,6 +905,7 @@ end
 
 -- what follows a measurement (see measure): one function per kind, the data plain
 local function plan_with(player, snap, request, fn, job)
+  request.player = player.index  -- (bpgen keeps each player's last plan and ground apart)
   request.params.snapshot = snap
   start_job(player.index, fn, helpers.table_to_json(request), job)
 end
@@ -903,8 +923,15 @@ after.place_base = function(player, snap, params)
   storage.bpgen_place_snap[player.index] = snap
   params.again = nil
   params.snapshot = snap
+  params.player = player.index
   start_job(player.index, "bpgen.ingame:place", helpers.table_to_json(params), { player = player.index, recipe = "", window = true })
 end
+after.hand = function(player, snap, params)
+  params.snapshot, params.player = snap, player.index
+  params.seed = params.seed or { x = player.position.x, y = player.position.y }
+  start_job(player.index, "bpgen.ingame:hand", helpers.table_to_json(params), { player = player.index, hand = true })
+end
+after.connect = function(player, snap, data) hand.measured(player, snap, data) end
 after.bus_report = function(player, snap, belts)
   start_job(player.index, "bpgen.ingame:bus_report", helpers.table_to_json({ snapshot = snap, belts = belts }),
     { player = player.index, api = "bus" })
@@ -963,12 +990,17 @@ end
 for _, ev in pairs({ defines.events.on_space_platform_built_entity, defines.events.on_built_entity,
                      defines.events.on_robot_built_entity, defines.events.script_raised_revive,
                      defines.events.script_raised_built }) do
-  on_event(ev, hub_wire)
+  on_event(ev, function(e)
+    hub_wire(e)
+    hand.on_built(e)
+  end)
 end
 on_event(defines.events.on_player_alt_selected_area, on_selected)
 
 -- for automated tests (no player to press the hotkey in a headless run)
 remote.add_interface("bpgen", {
+  -- the player's last plan into their cursor, as Place by my base does (params: seed, bus, section, turn)
+  hand = function(player_index, params) return hand_plan(game.get_player(player_index), params or {}) end,
   -- a production line of `item` at `rate` a minute next to the player's base (Extend), placed as ghosts; the answer
   -- comes back as remote.call(reply or "ai-crew", "line_placed", player_index, item, ghosts, error, absolute) where
   -- absolute = {box = {x, y, w, h}, inputs = {{items, position}} to feed by hand, outputs = {{item, position}}}
@@ -1034,6 +1066,10 @@ remote.add_interface("bpgen", {
   sandbox_open = function(index, surface_name, force_name, plan)
     local st = sandbox.open(index, game.get_surface(surface_name), game.forces[force_name], plan)
     return { surface = st.surface, area = st.area, feeds = #st.feeds, drains = #st.drains, pipes = #st.pipes }
+  end,
+  sandbox_move = function(index, dx, dy, turn)
+    local ok, why = sandbox.move(index, dx, dy, turn)
+    return { ok = ok, why = why }
   end,
   sandbox_paste = function(index)
     local ghosts, marks, removed = sandbox.paste(sandbox.state(index))
