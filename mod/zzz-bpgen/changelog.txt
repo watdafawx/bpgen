@@ -8,6 +8,8 @@ Date: 2026-10-14
       2 minutes beside yours; plans wait for it.
     - Recipes with additional crafting categories (Space Age's mechanics, electrochemistry, compressing...): the
       machines of those categories are offered, picked and planned too.
+    - The web window's icons come from the same headless read (every mod's final fixes): a mod changing another's
+      icon late (AAI Containers' chests) shows its icon. This mod's own data-stage table is only the fallback.
 ---------------------------------------------------------------------------------------------------
 Version: 0.24.2
 Date: 2026-10-13

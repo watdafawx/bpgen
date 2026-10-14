@@ -77,6 +77,19 @@ def _crash(e, request):
     return json.dumps({"error": f"{type(e).__name__}: {e}", "trace": trace[-2000:]})
 
 
+def _post_icons():
+    """the icon table (pack.icon_specs) for the web window, as fse's note "bpgen.icons": web.lua reads it without
+    waiting for Python. A "kind<tab>name<tab>spec" line each: the game splits that in ~30 ms, JSON took ~400 ms"""
+    from bpgen import pack
+    try:
+        import fse
+        icons = json.loads(pack.ICONS.read_text(encoding="utf-8"))
+        fse.note("bpgen.icons", "".join(f"{kind}\t{n}\t{s}\n" for kind, t in icons.items() for n, s in t.items()))
+        fse.note("bpgen.icons.at", str(pack.ICONS.stat().st_mtime_ns))  # (a new table: web.lua reads it again)
+    except (ImportError, AttributeError, OSError):
+        pass
+
+
 def _reread():
     """bpgen's copy of the mods' data, made again by a headless game (factorio --dump-data on a mirror of the user's
     mods, about 2 minutes), on a thread: the game goes on. (Not taken from the game's own data stage: a mod named
@@ -89,6 +102,7 @@ def _reread():
         t = time.perf_counter()
         try:
             pack.sync()
+            _post_icons()
             print(f"bpgen: mods' data re-read in {time.perf_counter() - t:.0f} s")
         except Exception:  # noqa: BLE001 - logged; bpgen keeps its old copy
             traceback.print_exc()
@@ -133,6 +147,7 @@ def warm(_: str = "") -> str:
     t = time.perf_counter()
     with _lock:
         _svc()
+    _post_icons()
     from bpgen import router
     print(f"bpgen: belt router in {'Rust (bpgen_fast)' if router._fast else 'Python (bpgen_fast not built)'}")
     return json.dumps({"ok": True, "seconds": round(time.perf_counter() - t, 3)})

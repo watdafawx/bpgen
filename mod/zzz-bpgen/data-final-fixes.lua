@@ -3,7 +3,9 @@
 -- The prototypes' icons for the web window (a shell page shows the files from the game's data folder or a mod, zipped
 -- or not: /mod/<mod>/<path>, and composes layered ones): "item" / "fluid" / "recipe" / "entity" / "item-group" / ... ->
 -- name -> its layers, ";" between them, each "<mod>/<path>|<icon size>[|<scale>|<shift x>|<shift y>|<r,g,b,a>]".
--- Read at runtime from prototypes.mod_data["bpgen-icons"] (made again whenever the mods change: it is data).
+-- Read at runtime from prototypes.mod_data["bpgen-icons"] (made again whenever the mods change: it is data) only
+-- until bpgen's own table is there (fse note "bpgen.icons", from its headless dump): this one misses the final fixes
+-- of mods loading after this one (Factorio orders mods by dependency depth before name).
 pcall(function()
   local KIND = { fluid = "fluid", recipe = "recipe", ["space-location"] = "space-location", planet = "space-location",
     ["virtual-signal"] = "virtual-signal", quality = "quality", ["item-group"] = "item-group" }

@@ -102,6 +102,7 @@ DROP_KEYS = {"graphics_set", "animation", "picture", "pictures", "working_sound"
              "water_reflection", "open_sound", "close_sound", "damaged_trigger_effect", "corpse", "dying_explosion"}
 DATA = ROOT / "data" / "pack-data.json"
 SPRITES = ROOT / "data" / "pack-sprites.json"
+ICONS = ROOT / "data" / "pack-icons.json"
 
 
 def trim():
@@ -133,6 +134,69 @@ def trim():
     # top-down entity sprites for the preview (graphics are dropped above)
     from bpgen import sprites
     SPRITES.write_text(json.dumps(sprites.build(raw)), encoding="utf-8")
+    ICONS.write_text(json.dumps(icon_specs(raw), separators=(",", ":")), encoding="utf-8")
+
+
+ICON_KIND = {"fluid": "fluid", "recipe": "recipe", "space-location": "space-location", "planet": "space-location",
+             "virtual-signal": "virtual-signal", "quality": "quality", "item-group": "item-group"}
+ICON_SKIP = {"technology", "item-subgroup", "tile", "shortcut", "tips-and-tricks-item", "mod-data"}
+
+
+def icon_specs(raw):
+    """the prototypes' icons for the web window: "item" / "fluid" / "recipe" / "entity" / ... -> name -> its layers,
+    ";" between them, each "<mod>/<path>|<icon size>[|<scale>|<shift x>|<shift y>|<r,g,b,a>]". The game reads it
+    from fse's note "bpgen.icons" (web.lua). Made from the dump: every mod's final fixes included."""
+    def num(x):
+        return f"{x:.4g}"
+
+    def xy(v, k, i):
+        return v.get(k, 0) if isinstance(v, dict) else (v[i] if len(v) > i else 0)
+
+    def tint(c):
+        if isinstance(c, dict):
+            c = [c.get("r", 0), c.get("g", 0), c.get("b", 0), c.get("a", 1)]
+        elif isinstance(c, list):
+            c = (list(c) + [0, 0, 0, 1][len(c):])[:4]
+        else:
+            return None
+        if any(v > 1 for v in c):
+            c = [v / 255 for v in c]
+        return ",".join(num(v) for v in c)
+
+    def spec(p):
+        layers = p.get("icons") or ([{"icon": p["icon"], "icon_size": p.get("icon_size")}] if p.get("icon") else None)
+        if not layers:
+            return None
+        out = []
+        for i, l in enumerate(layers):
+            icon = l.get("icon")
+            if not isinstance(icon, str) or not icon.startswith("__") or "__/" not in icon[2:]:
+                return None
+            mod, rest = icon[2:].split("__/", 1)
+            size = l.get("icon_size") or p.get("icon_size") or 64
+            s = f"{mod}/{rest}|{size:g}" if isinstance(size, float) else f"{mod}/{rest}|{size}"
+            sh = l.get("shift")
+            tn = tint(l.get("tint"))
+            if l.get("scale") or sh or tn or i > 0:
+                s += (f"|{num(l.get('scale') or 32 / size)}|{num(xy(sh, 'x', 0) if sh else 0)}|"
+                      f"{num(xy(sh, 'y', 1) if sh else 0)}|{tn or ''}")
+            out.append(s)
+        return ";".join(out)
+
+    out = {}
+    for t, protos in raw.items():
+        if t in ICON_SKIP or not isinstance(protos, dict):
+            continue
+        for name, p in protos.items():
+            if not isinstance(p, dict):
+                continue
+            kind = ICON_KIND.get(t) or ("item" if p.get("stack_size") else None) or (
+                "entity" if p.get("collision_box") or p.get("selection_box") or p.get("max_health") else None)
+            if kind and name not in out.get(kind, {}):
+                s = spec(p)
+                if s:
+                    out.setdefault(kind, {})[name] = s
+    return out
 
 
 def user_enabled():

@@ -490,9 +490,24 @@ local function translate(player, keys)
   end
 end
 
-local icon_map
---- the icons' files ("<mod>/<path>|<size>") for "type/name" keys; a recipe without its own: its main product's
+local icon_map, icon_at
+--- the icons' files ("<mod>/<path>|<size>") for "type/name" keys; a recipe without its own: its main product's.
+--- From bpgen's headless dump (fse note "bpgen.icons": every mod's final fixes), until it is there this mod's own
+--- data-stage table (it misses the final fixes of mods loading after it)
 local function icons(keys)
+  local at = type(native) == "table" and native.call("py", "_note", "bpgen.icons.at") or ""
+  if at ~= "" and at ~= icon_at then
+    local text = native.call("py", "_note", "bpgen.icons")
+    if type(text) == "string" and text ~= "" then
+      local map = {}
+      for kind, n, s in text:gmatch("([^\t\n]*)\t([^\t\n]*)\t([^\n]*)\n") do
+        local k = map[kind]
+        if not k then k = {} map[kind] = k end
+        k[n] = s
+      end
+      icon_map, icon_at = map, at
+    end
+  end
   if icon_map == nil then
     local ok, md = pcall(function() return prototypes.mod_data["bpgen-icons"] end)
     icon_map = ok and md and md.data or false
