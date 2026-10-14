@@ -387,21 +387,22 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
     out_per_machine = craft_rate * _amount(out) * (1 + productivity)
     cap = belt_capacity(data, belt)
     lane_cap = cap / 2
-    target = _ceil(lane_cap * OUTPUT_SLACK / out_per_machine)  # each row fills one output lane
+    exact = lane_cap * OUTPUT_SLACK / out_per_machine  # machines a row needs (each row fills one output lane)
+    target = _ceil(exact)
     notes = []
     if target_rate:  # a set rate, or a chain stage making what the next block eats (each row fills one output lane)
         wanted = max(1, _ceil(target_rate / 2 * 1.03 / out_per_machine))
         if wanted > target:
             notes.append(f"{target_rate * 60:g}/min is more than one {belt} carries ({cap * 60:g}/min): planned a full belt")
         else:
-            target = wanted
+            target, exact = wanted, target_rate / 2 * 1.03 / out_per_machine
     if per_row:
         if per_row != target:
             notes.append(f"machines per row set to {per_row} (a full belt needs {target})")
-        target = per_row
+        target = exact = per_row
     elif target > max_per_row and not target_rate:
         notes.append(f"a full belt needs {target} machines per row; capped at {max_per_row}")
-        target = max_per_row
+        target = exact = max_per_row
 
     rates = {i["name"]: craft_rate * _amount(i) for i in items}  # per machine
     fuel, fuel_rate = None, 0.0
@@ -439,7 +440,9 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
         if not out_keeps_up(out_per_machine * throttle):
             continue
         t_rates = {it: v * throttle for it, v in rates.items()}
-        t_target = max(1, _ceil(target / throttle)) if throttle < 1 else target
+        # (slower machines: as many more as the row really needs, from its need before rounding - one machine at
+        # 70% may still be plenty for a small rate)
+        t_target = max(target if per_row else 1, _ceil(exact / throttle)) if throttle < 1 else target
         found = _pick_inputs(calib, belt, bonus, near_ins, far_ins, slots, t_rates, lane_cap, t_target,
                              whole_belt_items, failures)
         if found:

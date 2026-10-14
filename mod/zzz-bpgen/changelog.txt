@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.25.6
+Date: 2026-10-14
+  Bugfixes:
+    - A line whose inserters can't keep a machine at full speed got twice the machines it needed (60 circuits a
+      minute: 4 assemblers making 252/min). The machines a row needs are now worked out from what it really has to
+      make at the slower speed (now 2 assemblers, 126/min).
+---------------------------------------------------------------------------------------------------
 Version: 0.25.5
 Date: 2026-10-14
   Changes:
