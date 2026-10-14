@@ -66,8 +66,9 @@ local function lab_surface(index)
   return s
 end
 
---- the blueprint string's print (a book: the one named `section`, else its first) in a scratch inventory
-local function print_of(bp, section)
+--- the blueprint string's print (a book: the one named `section`, else its first) in a scratch inventory; not
+--- snapped to the grid unless `snapped`
+local function print_of(bp, section, snapped)
   local inv = game.create_inventory(1)
   local stack = inv[1]
   stack.set_stack({ name = "blueprint" })
@@ -89,7 +90,25 @@ local function print_of(bp, section)
     inv.destroy()
     return nil
   end
+  -- (snapped to the grid, every build at a spot near the first lands on it again: the lab's plan never moved; the
+  -- lab builds it free, from the spot calibrate found)
+  if not snapped and stack.blueprint_snap_to_grid then stack.blueprint_snap_to_grid = nil end
   return inv, stack
+end
+
+--- the lowest entity-ghost position `stack` builds at `at` (then gone)
+local function lowest(s, force, stack, at, dir)
+  local x, y
+  for _, g in pairs(stack.build_blueprint({ surface = s, force = force, position = at, direction = dir,
+      build_mode = defines.build_mode.forced })) do
+    if g.valid then
+      if g.type == "entity-ghost" then
+        x, y = math.min(x or g.position.x, g.position.x), math.min(y or g.position.y, g.position.y)
+      end
+      g.destroy()
+    end
+  end
+  return x, y
 end
 
 --- ghosts built for real (modules in): what build_blueprint gave -> the entities built
@@ -156,6 +175,27 @@ local function build_plan(st, s)
     end
   end
   st.plan_box = b and { math.floor(b[1]), math.floor(b[2]), math.ceil(b[3]), math.ceil(b[4]) } or nil
+end
+
+--- an absolute plan's print snaps to the grid: the spot that builds it free where it lands snapped (st.plan.at)
+local function calibrate(st, s)
+  local p = st.plan
+  local inv, stack = print_of(p.blueprint, p.section, true)
+  if not inv then return end
+  local snap = stack.blueprint_snap_to_grid
+  if not snap then inv.destroy() return end
+  -- (a whole number of grid cells off: the snapped print lands exactly that far from where it lands on the base)
+  local off = math.ceil(DRY / snap.x) * snap.x
+  if off % 2 == 1 then off = off + snap.x end  -- (rails: an even shift)
+  local a = st.area
+  bench.ground(s, a[1] + off - 8, a[2] - 8, a[3] + off + 8, a[4] + 8)
+  local force = game.forces[st.force]
+  local at = { x = p.at.x + off, y = p.at.y }
+  local x1, y1 = lowest(s, force, stack, at, p.dir)
+  stack.blueprint_snap_to_grid = nil
+  local x2, y2 = lowest(s, force, stack, at, p.dir)
+  inv.destroy()
+  if x1 and x2 then p.at = { x = p.at.x + (x1 - x2), y = p.at.y + (y1 - y2) } end
 end
 
 --- the plan already built on the real base (Place by my base, then bots or an instant-build mod) came into the lab
@@ -362,6 +402,7 @@ function M.open(index, home_surface, home_force, plan)
   local b = plan.box
   st.plan = { blueprint = plan.blueprint, section = plan.section, superforced = b ~= nil, dir = defines.direction.north,
     at = b and { x = b[1] + b[3] / 2, y = b[2] + b[4] / 2 } or plan.center }
+  calibrate(st, s)
   built_already(st, s)
   build_plan(st, s)
   edges(st)

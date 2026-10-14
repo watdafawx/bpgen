@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.26.8
+Date: 2026-10-14
+  Bugfixes:
+    - The sandbox's arrows didn't move an absolute plan (Place it, Place by my base): its blueprint snaps to the
+      map's grid, so the lab built it on the same spot again at every press. The lab now builds it free of the grid,
+      from where it first landed.
+---------------------------------------------------------------------------------------------------
 Version: 0.26.7
 Date: 2026-10-14
   Bugfixes:

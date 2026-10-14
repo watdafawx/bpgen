@@ -165,6 +165,27 @@ script.on_event(defines.events.on_tick, function(e)
     local r = remote.call("bpgen", "sandbox_paste", 1)
     if not has(r.removed, "inserter", 40.5, 1.5) then out("FAIL: the paste back left the old plan in the base") end
     if not has(r.ghosts, "inserter", 43.5, 1.5) then out("FAIL: the paste back didn't put the moved plan down") end
+    -- (an absolute plan's print snapped to the world grid, as bpgen's are: each build near its spot landed on it
+    -- again, so the arrows moved nothing)
+    inv = game.create_inventory(1)
+    inv[1].import_stack(storage.bp)
+    for _, g in pairs(real.find_entities_filtered({ area = { { 30, 1 }, { 60, 10 } } })) do g.destroy() end
+    inv[1].blueprint_snap_to_grid = { 8, 8 }
+    inv[1].blueprint_absolute_snapping = true
+    local snapped = inv[1].export_stack()
+    inv.destroy()
+    remote.call("bpgen", "sandbox_open", 1, "nauvis", "player",
+      { blueprint = snapped, box = { 40, 1, 2, 2 }, area = { 40, 1, 42, 3 } })
+    local before = s2.find_entities_filtered({ name = "inserter", area = { { 30, -5 }, { 60, 8 } } })
+    local x0 = #before == 1 and before[1].position.x
+    local m3 = remote.call("bpgen", "sandbox_move", 1, 3, 0, false)
+    local after = s2.find_entities_filtered({ name = "inserter", area = { { 30, -5 }, { 60, 8 } } })
+    out("snapped: inserter at " .. tostring(x0) .. ", moved " .. tostring(m3.ok) .. " to "
+      .. tostring(#after == 1 and after[1].position.x))
+    if not (x0 and m3.ok and #after == 1 and after[1].position.x == x0 + 3) then
+      out("FAIL: the snapped plan didn't move 3 east")
+    end
+    remote.call("bpgen", "sandbox_paste", 1)
     out("done")
   end
 end)

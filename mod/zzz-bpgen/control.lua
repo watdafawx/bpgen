@@ -1167,6 +1167,16 @@ remote.add_interface("bpgen", {
     local st = sandbox.open(index, game.get_surface(surface_name), game.forces[force_name], plan)
     return { surface = st.surface, area = st.area, feeds = #st.feeds, drains = #st.drains, pipes = #st.pipes }
   end,
+  -- (tests, debugging) where the lab's plan stands: its area, the plan's spot and box, how many entities it has
+  sandbox_state = function(index)
+    local st = sandbox.state(index)
+    if not st then return nil end
+    local n, real = 0, 0
+    for _, e in pairs(st.plan_ents or {}) do if e.valid then n = n + 1 end end
+    for _ in pairs(st.plan_real or {}) do real = real + 1 end
+    return { surface = st.surface, area = st.area, at = st.plan and st.plan.at, dir = st.plan and st.plan.dir,
+      plan_box = st.plan_box, plan_ents = n, plan_real = real }
+  end,
   sandbox_move = function(index, dx, dy, turn)
     local ok, why = sandbox.move(index, dx, dy, turn)
     return { ok = ok, why = why }
