@@ -206,6 +206,8 @@ local ctx          -- from control.lua: craftable, unlocked, bonuses, start, mea
 local results = safe.stored("results") -- player index -> { blueprint, res, center, zoom }
 local placed = safe.stored("placed")     -- player index -> the ghosts "Place near me" and "Place by my base" made
 local unmark = safe.stored("unmark")     -- player index -> what those pastes marked for deconstruction (Undo unmarks it)
+local turns = safe.stored("turns")       -- player index -> quarter turns Rotate added to the plan next to the base
+local tried = safe.stored("tried")       -- player index -> the boxes Redo looked past ({x, y, w, h} each)
 local to_sandbox = safe.stored("to_sandbox")  -- player index -> true: "Try in sandbox" waits for Place by my base
 -- (the preview's drag, zoom and size grip: momentary, not saved)
 local cam_hover, drags, wheel_seen, left_during = {}, {}, {}, {}
@@ -479,7 +481,8 @@ end
 local MODES = { "line", "mall", "extend", "base", "busdesign", "refit", "move", "ship" }
 local GROUP_START = { base = true, refit = true, ship = true }  -- (a gap above them on the rail)
 local RAIL_W, RAIL_H = 112, #MODES * 34 + 3 * 12 + 8          -- (the rail of mode tabs, GUI units)
-local TOOLS_H = 4 * 34 + 12 + 34 + 8                          -- (the preview's tools, a rail on the right)
+local MOVE_H = 12 + 22 + 3 * 34                                 -- (moving a plan next to the base: on the rail)
+local TOOLS_H = 4 * 34 + 12 + 34 + 8 + MOVE_H                 -- (the preview's tools, a rail on the right)
 local BUS_DIRS = { "north", "east", "south", "west" }
 local patch_areas = safe.stored("patch_areas")  -- player index -> {{area, counts = {resource = tiles}}}: the ore patches picked for a bus design
 local bus_shift = safe.stored("bus_shift")  -- player index -> tiles the bus head is moved sideways from the player (the ◀ ▶ arrows)
@@ -1052,6 +1055,7 @@ local TOOLS = {
   ["bpgen-refit"] = { title = T("mode-refit"), text = T("card-refit") },
   ["bpgen-move"] = { title = T("mode-move"), text = T("card-move") },
   ["bpgen-snapshot"] = { title = T("snapshot"), text = T("card-snapshot") },
+  ["bpgen-spot"] = { title = T("pick-spot"), text = T("card-spot") },
   ["bpgen-patches"] = { title = T("ore-patches"), text = T("card-patches"), many = true },
 }
 M.TOOLS = TOOLS
@@ -1134,6 +1138,36 @@ function M.add_patch(player, area)
   if frame then show_patches(frame, player) end
   local note = player.gui.screen[CARD] and player.gui.screen[CARD].bpgen_card_note
   if note then note.caption = patch_count(player) end
+end
+
+--- the plan next to the base moved (◀▲▼▶, Shift: 5), turned, put elsewhere (Redo, Pick spot): on the preview's rail
+--- when docked (`wide`: its buttons' size), else in the row of actions (`small`). Shown by on_result
+local function moves(parent, wide, small)
+  local box = parent.add({ type = "flow", name = "bpgen_moves", direction = wide and "vertical" or "horizontal",
+    visible = false })
+  if wide then
+    box.style.vertical_spacing = 4
+    box.style.top_margin = 12
+    ui.add(box, { type = "label", caption = T("move-it") }, "caption")
+  end
+  local arrows = wide and box.add({ type = "flow", direction = "horizontal" }) or box
+  if wide then arrows.style.horizontal_spacing = 2 end
+  local aw = wide and { width = math.floor((RAIL_W - 14) / 4), height = 30, padding = 0 } or nil
+  for _, a in ipairs({ { "left", "◀", -1, 0 }, { "up", "▲", 0, -1 }, { "down", "▼", 0, 1 }, { "right", "▶", 1, 0 } }) do
+    local b = arrows.add({ type = "button", name = "bpgen_nudge_" .. a[1], caption = a[2], style = "tool_button",
+      tags = { bpgen = "nudge", dx = a[3], dy = a[4] }, tooltip = T("nudge-tip", T("dir-" .. a[1])) })
+    if aw then ui.style(b, aw) end
+  end
+  local row = wide and box.add({ type = "flow", direction = "horizontal" }) or box
+  if wide then row.style.horizontal_spacing = 2 end
+  local half = wide and { width = math.floor((RAIL_W - 10) / 2), height = 30, padding = 0 } or nil
+  local rot = row.add({ type = "button", name = "bpgen_base_rotate", caption = "⟳", style = "tool_button",
+    tags = { bpgen = "base_rotate" }, tooltip = T("rotate-tip") })
+  if half then ui.style(rot, half) end
+  ui.add(row, { type = "button", name = "bpgen_base_redo", caption = T("redo"), tags = { bpgen = "base_redo" },
+    tooltip = T("redo-tip") }, wide and "rtab" or "button", half or small)
+  ui.add(box, { type = "button", name = "bpgen_base_spot", caption = T("pick-spot"), tags = { bpgen = "base_spot" },
+    tooltip = T("pick-spot-tip") }, wide and "rtab" or "button", wide or small)
 end
 
 function M.open(player, prefill)
@@ -1496,6 +1530,7 @@ function M.open(player, prefill)
   ui.add(tools, { type = "button", name = "bpgen_test", caption = T("test-run"), tags = { bpgen = "test" }, enabled = false,
     tooltip = T("test-run-tip") },
     vrail and "rtab" or "button", vrail and { width = RAIL_W - 8, height = 30, top_margin = 12 } or nil)
+  if vrail then moves(vrail, wide, nil) end
   -- the test run, live: the rate it reaches (a bar red to green by the share of the expected), a chart of it; in a
   -- drawer out of the window's right edge under the preview's tools (docked), else at the top of the result's area
   local fh = stdwin and select(2, stdwin.size(player, NAME))
@@ -1552,11 +1587,7 @@ function M.open(player, prefill)
     enabled = false, tooltip = T("place-base-tip") }, "button", small)
   ui.add(tools, { type = "button", name = "bpgen_sandbox", caption = T("sandbox"), tags = { bpgen = "sandbox" },
     enabled = false, tooltip = T("sandbox-tip") }, "button", small)
-  for _, a in ipairs({ { "left", "◀", -1, 0 }, { "up", "▲", 0, -1 }, { "down", "▼", 0, 1 }, { "right", "▶", 1, 0 } }) do
-    tools.add({ type = "button", name = "bpgen_nudge_" .. a[1], caption = a[2], style = "tool_button", visible = false,
-      tags = { bpgen = "nudge", dx = a[3], dy = a[4] },
-      tooltip = T("nudge-tip", T("dir-" .. a[1])) })
-  end
+  if not vrail then moves(tools, nil, small) end
   ui.add(tools, { type = "button", caption = T("undo"), tags = { bpgen = "unplace" }, tooltip = T("undo-tip") }, "button",
     small)
   ui.add(tools, { type = "button", caption = T("history"), tags = { bpgen = "history" }, tooltip = T("history-tip") },
@@ -2056,6 +2087,18 @@ function M.plan_size(player)
   if r and type(r.w) == "number" then return r.w, r.h end
 end
 
+--- the pick-spot tool clicked (or dragged): the last plan placed with its middle there, on that side of the bus
+function M.spot(player, area)
+  local frame = player.gui.screen[NAME]
+  if not (frame and results[player.index]) then return say(player, T("plan-first")) end
+  local seed = { x = (area.left_top.x + area.right_bottom.x) / 2, y = (area.left_top.y + area.right_bottom.y) / 2 }
+  tried[player.index] = nil
+  local sec = find(frame, "bpgen_section")
+  local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off", seed = seed,
+    spot = true, turn = turns[player.index], section = sec.visible and sec.items[sec.selected_index] or nil })
+  status(frame, ok and T("placing-clicked") or T("cant", tostring(why)))
+end
+
 function M.move(player, area)
   if not player.gui.screen[NAME] then M.open(player, { mode = "move" }) end
   local frame = player.gui.screen[NAME]
@@ -2315,15 +2358,20 @@ function M.on_result(player, res)
   find(frame, "bpgen_copy").enabled = safe.has("std")
   local pl = find(frame, "bpgen_place")  -- (Place it: where bpgen placed it, next to the base)
   pl.enabled, pl.visible = res.absolute ~= nil, res.absolute ~= nil
-  -- (also a plan bpgen already placed beside the bus: in the hand, it goes where the player puts it; not a refit or
-  -- a moved section, which replace what was there, nor a base fitted to the bus design)
-  local a = res.absolute
-  find(frame, "bpgen_place_base").enabled = a == nil and (res.mode == "line" or res.mode == "mall" or res.mode == "base")
-    or a ~= nil and not a.clear and not a.fitted and (res.mode == "line" or res.mode == "mall" or res.mode == "extend")
+  find(frame, "bpgen_place_base").enabled = res.absolute == nil and (res.mode == "line" or res.mode == "mall"
+    or res.mode == "base")
   find(frame, "bpgen_sandbox").enabled = (where ~= nil or res.absolute ~= nil) and res.mode ~= "ship"
-  for _, n in ipairs({ "left", "up", "down", "right" }) do  -- (a bus design's: its head moved sideways, planned again)
-    find(frame, "bpgen_nudge_" .. n).visible = res.mode == "busdesign"
+  -- (next to the base: moved, turned, another spot, each tied in again; a lane's place is the point, and a bus
+  -- design's arrows move its head sideways)
+  local adjust = res.absolute ~= nil and res.mode ~= "lane" and res.mode ~= "busdesign"
+  local spot = adjust or find(frame, "bpgen_place_base").enabled
+  find(frame, "bpgen_moves").visible = adjust or spot or res.mode == "busdesign"
+  for _, n in ipairs({ "left", "up", "down", "right" }) do
+    find(frame, "bpgen_nudge_" .. n).visible = adjust or res.mode == "busdesign"
   end
+  find(frame, "bpgen_base_spot").visible = spot
+  find(frame, "bpgen_base_rotate").visible = adjust
+  find(frame, "bpgen_base_redo").visible = adjust
   local tb = find(frame, "bpgen_test")
   tb.enabled = res.test ~= nil and where ~= nil
   tb.caption = T("test-run")
@@ -3028,11 +3076,41 @@ local function on_click(e)
     M.plan(player)
   elseif action == "upgrade_lane" and r and r.res.absolute then
     M.upgrade_lane(player, r.res.absolute.upgrades[el.tags.i])
+  elseif action == "nudge" and r and r.res.absolute then
+    -- (exactly that far from where it is: no looking for another spot, the belts and power connected again)
+    local n = e.shift and 5 or 1
+    local b = r.res.absolute.box  -- (the snapshot around it; where it goes is bpgen's last spot, shifted)
+    local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off",
+      seed = { x = b[1] + b[3] / 2, y = b[2] + b[4] / 2 },
+      turn = turns[player.index], shift = { el.tags.dx * n, el.tags.dy * n }, again = true })
+    status(frame, ok and T("moving-it") or T("cant", tostring(why)))
+  elseif action == "base_spot" then
+    if player.clear_cursor() then
+      player.cursor_stack.set_stack({ name = "bpgen-spot" })
+      M.tool_card(player, "bpgen-spot")
+      status(frame, T("click-where"))
+    end
+  elseif (action == "base_rotate" or action == "base_redo") and r and r.res.absolute then
+    -- (both around where it is now: Rotate turns it there, Redo looks past every spot it was shown on)
+    local b = r.res.absolute.box
+    local seed = { x = b[1] + b[3] / 2, y = b[2] + b[4] / 2 }
+    local avoid
+    if action == "base_rotate" then
+      turns[player.index] = ((turns[player.index] or 0) + 1) % 4
+    else
+      tried[player.index] = tried[player.index] or {}
+      table.insert(tried[player.index], { b[1], b[2], b[3], b[4] })
+      avoid = tried[player.index]
+    end
+    local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off", seed = seed,
+      turn = turns[player.index], avoid = avoid, again = true })
+    status(frame, ok and T(action == "base_rotate" and "rotating" or "looking-another-spot") or T("cant", tostring(why)))
   elseif action == "place_base" and r then
-    -- (the plan into the cursor, turned to face the bus round you, bpgen's spot shown: put it down where you like,
-    -- move it, R, flip it; each paste is tied into the base: hand.lua)
+    -- (bpgen picks the spot beside the base and shows it in the preview: the arrows, Rotate, Redo and Pick spot
+    -- adjust it there, Place it puts the ghosts down)
     local sec = find(frame, "bpgen_section")  -- (a starter base: the print picked under the preview)
-    local ok, why = ctx.hand(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off",
+    turns[player.index], tried[player.index] = nil, nil
+    local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off",
       seed = { x = player.position.x, y = player.position.y },
       section = sec.visible and sec.items[sec.selected_index] or nil })
     status(frame, ok and T("looking-around") or T("cant", tostring(why)))

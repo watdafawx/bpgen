@@ -357,6 +357,14 @@ window.setup({
     -- (a plan bigger than the usual snapshot gets one it fits in, with room round it for the bus taps and poles)
     local w, h = window.plan_size(player)
     local r = math.min(250, math.max(PLACE_R, math.ceil(math.max(w or 0, h or 0) / 2) + PLACE_R / 2))
+    local m = r - PLACE_R / 2
+    -- (the window's arrows, Rotate, Redo: the last snapshot again while the spot is well inside it, not measured anew)
+    local last = params.again and (storage.bpgen_place_snap or {})[player.index]
+    if last and seed.x - last.area[1] > m and last.area[3] - seed.x > m
+        and seed.y - last.area[2] > m and last.area[4] - seed.y > m then
+      after.place_base(player, last, params)
+      return true
+    end
     measure(player, around(seed, r), "place_base", params)
     return true
   end,
@@ -847,7 +855,6 @@ end)
 on_event(defines.events.on_force_reset, function(e) window.forget_unlocked(e.force) end)
 on_event(defines.events.on_technology_effects_reset, function(e) window.forget_unlocked(e.force) end)
 script.on_configuration_changed(safe.guard("bpgen", function()
-  storage.bpgen_place_snap = nil  -- (0.25.4: the window's arrows, Rotate and Redo kept the last snapshot here)
   research_cache, static = {}, nil
   window.forget_unlocked()  -- (other mods, other recipes and machines)
 end))
@@ -1010,6 +1017,9 @@ after.plan_line = function(player, snap, req)
   plan_with(player, snap, req, "bpgen.ingame:plan", { player = player.index, auto = true })
 end
 after.place_base = function(player, snap, params)
+  storage.bpgen_place_snap = storage.bpgen_place_snap or {}
+  storage.bpgen_place_snap[player.index] = snap
+  params.again = nil
   params.snapshot = snap
   params.player = player.index
   start_job(player.index, "bpgen.ingame:place", helpers.table_to_json(params), { player = player.index, recipe = "", window = true })
@@ -1059,6 +1069,7 @@ local function on_selected(e)
   window.tool_done(player)
   if e.item == "bpgen-refit" then return window.refit(player, e.area) end
   if e.item == "bpgen-move" then return window.move(player, e.area) end
+  if e.item == "bpgen-spot" then return window.spot(player, e.area) end
   measure(player, e.area, "snapshot_tool", e.area)
 end
 on_event(defines.events.on_player_selected_area, on_selected)

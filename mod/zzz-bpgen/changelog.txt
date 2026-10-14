@@ -1,4 +1,13 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.27.0
+Date: 2026-10-14
+  Changes:
+    - Place by my base is back to how it was in 0.24: bpgen picks the spot beside your base and shows it in the
+      preview with your base round it; the arrows (Shift: 5 tiles), Rotate, Redo (another spot) and Pick spot
+      adjust it there, each tying its belts and power in again, and Place it puts the ghosts down. Its taps come
+      from your belts as measured. The arrows, Rotate and Redo reuse the last look round your base (no wait).
+      Docked, they sit on the preview's rail under Move it (the toolbar below had no room for them).
+---------------------------------------------------------------------------------------------------
 Version: 0.26.8
 Date: 2026-10-14
   Bugfixes:
