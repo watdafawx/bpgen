@@ -272,8 +272,9 @@ end
 
 --- the base round `area` ({x1, y1, x2, y2}, the plan's) copied to a new lab, the plan built in it: the lab's state.
 --- `plan` = {blueprint, section, box = {x, y, w, h} (an absolute plan) | center = {x, y}, clear = {{name, position}}}
---- `rect` of the real base copied onto the lab (tiles and entities), cleaned up (no characters, enemies, turrets; labs
---- tamed; the plan's st.clear gone), its entities added to st.originals
+--- `rect` of the real base copied onto the lab (tiles and entities), cleaned up (no characters, enemies, turrets, and
+--- no ghosts: the base as built; Place by my base leaves the plan itself there as ghosts, and the lab builds it anew;
+--- labs tamed; the plan's st.clear gone), its entities added to st.originals
 local function copy_in(st, s, rect)
   local real, force = game.surfaces[st.home_surface], game.forces[st.force]
   for _, e in pairs(s.find_entities_filtered({ area = box(rect) })) do
@@ -283,7 +284,7 @@ local function copy_in(st, s, rect)
     clone_tiles = true, clone_entities = true, clone_decoratives = false,
     clear_destination_entities = false, expand_map = true, create_build_effect_smoke = false })
   for _, e in pairs(s.find_entities_filtered({ area = box(rect), type = { "character", "unit", "unit-spawner", "turret",
-      "character-corpse", "item-request-proxy" } })) do
+      "character-corpse", "item-request-proxy", "entity-ghost", "tile-ghost" } })) do
     if e.valid then e.destroy() end
   end
   for _, e in pairs(s.find_entities_filtered({ area = box(rect), type = "lab" })) do tame(e) end

@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.26.5
+Date: 2026-10-14
+  Bugfixes:
+    - The sandbox's arrows didn't move a plan placed with Place by my base: the plan was already on the base as
+      ghosts, the lab copied those ghosts and built the plan over them, which left nothing to move. The lab copies
+      your base as built (no ghosts) and builds the plan anew.
+---------------------------------------------------------------------------------------------------
 Version: 0.26.4
 Date: 2026-10-14
   Bugfixes:

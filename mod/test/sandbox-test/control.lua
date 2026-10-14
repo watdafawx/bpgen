@@ -123,6 +123,23 @@ script.on_event(defines.events.on_tick, function(e)
       { blueprint = storage.bp, center = { x = 11, y = 2 }, area = { 10, 1, 12, 3 } })
     if again.surface ~= lab.surface then out("FAIL: a second try made another lab surface") end
     remote.call("bpgen", "sandbox_paste", 1)
+    -- (as Place by my base leaves it since 0.26.3: the plan already there as ghosts on the real base, an absolute
+    -- plan at its box; the lab must still build it and move it)
+    local real = game.surfaces.nauvis
+    local inv = game.create_inventory(1)
+    inv[1].import_stack(storage.bp)
+    inv[1].build_blueprint({ surface = real, force = "player", position = { 41, 2 }, build_mode = defines.build_mode.superforced })
+    inv.destroy()
+    remote.call("bpgen", "sandbox_open", 1, "nauvis", "player",
+      { blueprint = storage.bp, box = { 40, 1, 2, 2 }, area = { 40, 1, 42, 3 } })
+    local m = remote.call("bpgen", "sandbox_move", 1, 3, 0, false)
+    local s2 = game.surfaces[lab.surface]
+    out("over its own ghosts: move " .. tostring(m.ok) .. " " .. tostring(m.why)
+      .. ", inserter at 43.5: " .. tostring(s2.find_entity("inserter", { 43.5, 1.5 }) ~= nil)
+      .. ", ghosts left in the lab: " .. s2.count_entities_filtered({ type = "entity-ghost" }))
+    if not m.ok or not s2.find_entity("inserter", { 43.5, 1.5 }) then out("FAIL: the plan over its own ghosts didn't move") end
+    if s2.count_entities_filtered({ type = "entity-ghost" }) > 0 then out("FAIL: the real base's ghosts left standing in the lab") end
+    remote.call("bpgen", "sandbox_paste", 1)
     out("done")
   end
 end)
