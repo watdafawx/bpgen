@@ -137,6 +137,10 @@ local function start_job(player_index, fn, input, job)
 end
 
 local snapshot  -- (below: an area of the base, for bpgen to build next to)
+-- what makes power: a pole on the same network as one of these has power to give (a mall's own poles may not)
+local POWER_SOURCES = { ["generator"] = true, ["burner-generator"] = true, ["solar-panel"] = true,
+  ["accumulator"] = true, ["electric-energy-interface"] = true, ["fusion-generator"] = true,
+  ["lightning-attractor"] = true }
 local PLACE_R = 48  -- without an area picked with the snapshot tool: the snapshot reaches this far around a spot
 local snaps = safe.stored("snaps")  -- player index -> the area last picked with the snapshot tool
 local function around(c, r)
@@ -848,6 +852,7 @@ end
 snapshot = function(player, area, keep)  -- keep: the snapshot back instead of written to snapshot.json
   local surface = player.surface
   local ents, obstacles = {}, {}
+  local powered, poles = {}, {}  -- electric network ids with a power source on them; the poles' records
   for _, e in pairs(surface.find_entities_filtered({ area = area })) do
     local t = e.type
     if OBSTACLE[t] then
@@ -868,11 +873,16 @@ snapshot = function(player, area, keep)  -- keep: the snapshot back instead of w
       if ty == "underground-belt" then out.ug_type = e.belt_to_ground_type end
       if (ty == "loader" or ty == "loader-1x1") then out.ug_type = e.loader_type end
       if BELTS[t] then out.lanes = lanes(e) end
-      if t == "electric-pole" then out.network = e.electric_network_id end
+      if t == "electric-pole" then
+        out.network = e.electric_network_id
+        poles[#poles + 1] = out
+      end
+      if POWER_SOURCES[t] and e.electric_network_id then powered[e.electric_network_id] = true end
       if PIPES[t] then out.fluid = pipe_fluid(e) end
       ents[#ents + 1] = out
     end
   end
+  for _, p in ipairs(poles) do p.powered = p.network ~= nil and powered[p.network] == true end
   local resources, fluid_resources = {}, {}
   for _, r in pairs(surface.find_entities_filtered({ area = area, type = "resource" })) do
     if r.prototype.resource_category == "basic-fluid" then  -- (oil: each one a pumpjack's spot, and its yield)

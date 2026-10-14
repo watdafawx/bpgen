@@ -101,6 +101,16 @@ def belt_ends(entities, taken):
     return out
 
 
+def into_belt(ground, t, new=()):
+    """a belt on tile t (the base's, or one of `new`, planned): a lane ending just before it would side-load onto
+    it (a new bus lane's circuits onto a coal belt crossing its way, jamming both)"""
+    e = ground.taken.get(t)
+    if e and e.get("type") in BELT_TYPES:
+        return True
+    return any((x.get("type") in BELT_TYPES or x["name"].endswith(("belt", "splitter"))) and t in footprint(x)
+               for x in new)
+
+
 def plan_tiles(entities):
     out = set()
     for e in entities:
@@ -427,8 +437,18 @@ def feed(ground, blocked, spans, lanes, goal, goal_dir, names, prefer=None, rate
 
 
 def link_power(ground, blocked, new_ents, pole, reach):
-    """poles from the nearest existing pole to the nearest new one, when they are out of wire reach"""
+    """poles from the nearest existing pole to the nearest new one, when they are out of wire reach; only poles
+    whose network has power when the snapshot says (a mall begun beside the bus may have poles of its own, wired
+    to nothing)"""
     poles_old = [e for e in ground.snap["entities"] if e["type"] == "electric-pole" and not e.get("ghost")]
+    if any(e.get("powered") for e in poles_old):
+        poles_old = [e for e in poles_old if e.get("powered")]
+    elif any(e.get("network") is not None for e in poles_old):  # (no power source in sight: the biggest network)
+        sizes = {}
+        for e in poles_old:
+            sizes[e.get("network")] = sizes.get(e.get("network"), 0) + 1
+        big = max(sizes, key=sizes.get)
+        poles_old = [e for e in poles_old if e.get("network") == big]
     poles_new = [e for e in new_ents if e["name"] == pole or e.get("type") == "electric-pole"]
     if not poles_old or not poles_new:
         return []
@@ -891,6 +911,9 @@ def new_bus_lane(data, ground, main, item, max_ug=4):
             k = next((k for k in range(1, ug_max + 1) if bus_xy(main, a + k * f, at) not in blocked
                       and ground.inside(bus_xy(main, a + k * f, at))), None)
             if not ents or k is None or any((main["axis"], at, a + j * f) in ground.spans for j in range(-1, k + 1)):
+                if ents and ents[-1].get("ug_type") is None and into_belt(ground, t):  # (not fed onto that belt)
+                    ents.pop()
+                    tiles.pop()
                 break
             ents[-1] = dict(ents[-1], name=ug, ug_type="input")
             t = bus_xy(main, a + k * f, at)
@@ -1057,6 +1080,8 @@ def connect_posed(data, ground, posed, belt="transport-belt", connect=True, need
                 for a in range(last + f, reach + f, f):
                     t = bus_xy(main, a, ln["at"])
                     if (t in blocked and t not in ends) or not ground.inside(t):
+                        if run and into_belt(ground, t, new):  # (stopped by a belt: not fed onto it)
+                            run.pop()
                         break
                     run.append(t)
                 blocked.update(run)
@@ -1074,6 +1099,8 @@ def connect_posed(data, ground, posed, belt="transport-belt", connect=True, need
             for a in range(head, last + main["flow"], main["flow"]):
                 t = bus_xy(main, a, at)
                 if t in blocked or not ground.inside(t):
+                    if lane and into_belt(ground, t, new):  # (stopped by a belt: not fed onto it)
+                        lane.pop()
                     break
                 lane.append(t)
             if len(lane) >= 4:

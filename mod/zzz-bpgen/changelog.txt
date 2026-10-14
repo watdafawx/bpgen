@@ -1,4 +1,15 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.25.2
+Date: 2026-10-14
+  Bugfixes:
+    - Placed beside a bus with a mall begun next to it, the plan's power was linked to one of the mall's own poles,
+      wired to nothing: no machine of it had power. bpgen now links to a pole whose network has a power source
+      (else to your biggest network).
+    - A new bus lane for an output ended pointing into a belt crossing its way (a coal belt side-loading onto the
+      bus) and side-loaded the output onto it: both jammed. It now stops a tile short; the same for the bus
+      continued past a build and for Add a lane.
+    - Two looks round the base taken in the same tick (other players, other saves) could be mistaken for one.
+---------------------------------------------------------------------------------------------------
 Version: 0.25.1
 Date: 2026-10-14
   Features:

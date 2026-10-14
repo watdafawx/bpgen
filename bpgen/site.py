@@ -14,9 +14,12 @@ _UNSET = object()
 
 
 def key_of(snap, variant=None):
-    """what tells snapshots apart: a new measurement has a new tick, another area or surface; variant: the same
-    snapshot with entities left out (a section being moved: its old place)"""
-    return snap.get("surface"), snap.get("tick"), tuple(snap.get("area") or ()), variant
+    """what tells snapshots apart: surface, tick and area, and what's in it (two measured in the same tick - other
+    players, other saves - differ there); variant: the same snapshot with entities left out (a section being moved:
+    its old place)"""
+    ents = snap.get("entities") or []
+    return (snap.get("surface"), snap.get("tick"), tuple(snap.get("area") or ()), variant,
+            hash(tuple((e.get("name"), e["position"]["x"], e["position"]["y"], e.get("direction")) for e in ents)))
 
 
 class Site:
