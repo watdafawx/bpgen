@@ -2046,6 +2046,14 @@ end
 
 --- a section of the base to move (the move tool): its blueprint (settings, wires) and where it is, to bpgen, which
 --- places it near the player with its belts in and out run to the base again (see ingame.move)
+--- the last plan's size in tiles (where it was placed: its box there), or nil before a plan
+function M.plan_size(player)
+  local r = results[player.index]
+  local b = r and r.res and r.res.absolute and r.res.absolute.box
+  if b then return b[3], b[4] end
+  if r and type(r.w) == "number" then return r.w, r.h end
+end
+
 --- the pick-spot tool clicked (or dragged): the last plan placed with its middle there, on that side of the bus
 function M.spot(player, area)
   local frame = player.gui.screen[NAME]

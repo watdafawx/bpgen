@@ -10,6 +10,8 @@ Date: 2026-10-14
       machines of those categories are offered, picked and planned too.
     - The web window's icons come from the same headless read (every mod's final fixes): a mod changing another's
       icon late (AAI Containers' chests) shows its icon. This mod's own data-stage table is only the fallback.
+    - Place by my base with a plan wider than about 90 tiles (a full belt of engines: 155 x 18) said "no free spot
+      in the snapshot big enough". The area it looks at around you now grows with the plan (up to 500 x 500).
 ---------------------------------------------------------------------------------------------------
 Version: 0.24.2
 Date: 2026-10-13
