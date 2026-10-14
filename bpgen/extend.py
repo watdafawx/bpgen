@@ -162,23 +162,13 @@ def find_spot(ground, entities, seed, avoid_ore=True, margin=2, keep_clear=()):
 
 
 def pole_chain(a, b, blocked, reach=8):
-    """medium poles from the pole on tile a to within wire reach of tile b: each on the free tile within `reach` of
-    the last that gets nearest b (round what's in the way). Their tiles join `blocked`. -> entities, or None (stuck)"""
-    def d2(p, q):
-        return (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2
-    ring = [(dx, dy) for dx in range(-reach, reach + 1) for dy in range(-reach, reach + 1) if 0 < dx * dx + dy * dy <= reach * reach]
-    out, cur, seen = [], a, {a}
-    for _ in range(2000):
-        if d2(cur, b) <= reach * reach:
-            return out
-        spot = min(((cur[0] + dx, cur[1] + dy) for dx, dy in ring), key=lambda p: (p in blocked or p in seen, d2(p, b)))
-        if spot in blocked or spot in seen or d2(spot, b) >= d2(cur, b):
-            return None
-        seen.add(spot)
-        blocked.add(spot)
-        out.append({"name": planner.POLE, "position": {"x": spot[0] + 0.5, "y": spot[1] + 0.5}})
-        cur = spot
-    return None
+    """medium poles from the pole on tile a to within wire reach of tile b, round what's in the way (chain's
+    _pole_line). Their tiles join `blocked`. -> entities, or None (stuck)"""
+    try:
+        line = chain._pole_line((a[0] + 0.5, a[1] + 0.5), (b[0] + 0.5, b[1] + 0.5), blocked, reach)
+    except planner.PlanError:
+        return None
+    return [{"name": planner.POLE, "position": {"x": x, "y": y}} for x, y in line]
 
 
 def pole_tiles(entities):
@@ -437,7 +427,8 @@ def feed(ground, blocked, spans, lanes, goal, goal_dir, names, prefer=None, rate
 
 
 def link_power(ground, blocked, new_ents, pole, reach):
-    """poles from the nearest existing pole to the nearest new one, when they are out of wire reach; only poles
+    """poles from the nearest existing pole to the nearest new one, when they are out of wire reach (None: no way
+    round what's in between); only poles
     whose network has power when the snapshot says (a mall begun beside the bus may have poles of its own, wired
     to nothing)"""
     poles_old = [e for e in ground.snap["entities"] if e["type"] == "electric-pole" and not e.get("ghost")]
@@ -455,27 +446,14 @@ def link_power(ground, blocked, new_ents, pole, reach):
     pos = lambda e: (e["position"]["x"], e["position"]["y"])  # noqa: E731
     a, b = min(((o, n) for o in poles_old for n in poles_new),
                key=lambda p: math.dist(pos(p[0]), pos(p[1])))
-    dist = math.dist(pos(a), pos(b))
-    if dist <= reach:
+    if math.dist(pos(a), pos(b)) <= reach:
         return []
-    steps = math.ceil(dist / (reach - 1))
-    out = []
-    for k in range(1, steps):
-        fx = pos(a)[0] + (pos(b)[0] - pos(a)[0]) * k / steps
-        fy = pos(a)[1] + (pos(b)[1] - pos(a)[1]) * k / steps
-        spot = None
-        for r in range(0, 4):  # nearest free tile to the ideal point
-            for i in range(-r, r + 1):
-                for j in range(-r, r + 1):
-                    t = (math.floor(fx) + i, math.floor(fy) + j)
-                    if t not in blocked and (not spot or math.dist(t, (fx, fy)) < math.dist(spot, (fx, fy))):
-                        spot = t
-            if spot:
-                break
-        if spot:
-            blocked.add(spot)
-            out.append({"name": pole, "position": {"x": spot[0] + 0.5, "y": spot[1] + 0.5}})
-    return out
+    # (each pole within wire reach of the last, round what's in the way: the shared line chain.py's blocks use)
+    try:
+        line = chain._pole_line(pos(a), pos(b), blocked, reach - 0.5)
+    except planner.PlanError:
+        return None
+    return [{"name": pole, "position": {"x": x, "y": y}} for x, y in line]
 
 
 def absolute_blueprint(entities, label, description=None, floor=None):
@@ -1234,7 +1212,10 @@ def connect_posed(data, ground, posed, belt="transport-belt", connect=True, need
         else:
             notes.append(f"{k['item']}: no belt of yours carries it within reach; take the output where it's needed")
     poles = link_power(ground, blocked, new, planner.POLE, planner.POLE_REACH)
-    if poles:
+    if poles is None:
+        poles = []
+        notes.append("no way to run power poles to your network from here: connect its poles to your power yourself")
+    elif poles:
         notes.append(f"{len(poles)} poles link it to your power")
     for lane in new_lanes.values():  # (lanes whose output never came: free again)
         blocked.difference_update(lane)

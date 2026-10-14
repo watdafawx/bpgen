@@ -261,8 +261,14 @@ window.setup({
       return true
     end
     if request.params and (request.params.mode == "extend" or request.params.bus_feed) then  -- (the base it builds next to, with the request)
-      if snaps[player.index] then
-        request.params.snapshot = snaps[player.index]
+      local picked = snaps[player.index]
+      local pos = player.position
+      if picked and (picked.surface ~= player.surface.name or pos.x < picked.area[1] - PLACE_R
+          or pos.x > picked.area[3] + PLACE_R or pos.y < picked.area[2] - PLACE_R or pos.y > picked.area[4] + PLACE_R) then
+        snaps[player.index], picked = nil, nil  -- (an area picked somewhere else: the player has moved on)
+      end
+      if picked then
+        request.params.snapshot = picked
       else
         -- (a line fed from the bus: room beside the bus for the line and what it makes for itself)
         measure(player, around(player.position, request.params.bus_feed and 128 or nil), "plan", request)

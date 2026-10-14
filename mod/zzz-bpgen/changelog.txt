@@ -1,4 +1,17 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.26.1
+Date: 2026-10-14
+  Bugfixes:
+    - A plan placed next to your base with something wide between it and your power (a wall, a block of machines)
+      got poles with a gap too long for a wire, and still said "N poles link it to your power": it had none. Its
+      poles now go round what's in the way, each within wire reach of the last; when there's no way round it says
+      so (connect it yourself).
+    - The area picked with the snapshot tool was used for every later Extend, even after you had walked far away
+      from it: now only while you're near it.
+  Changes:
+    - One way of running power poles between two points for every layout (bus design, starter base tiers, plans
+      next to your base, chains, malls).
+---------------------------------------------------------------------------------------------------
 Version: 0.26.0
 Date: 2026-10-14
   Features:
