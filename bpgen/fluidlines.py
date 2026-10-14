@@ -83,7 +83,7 @@ def plan_fluid(data, calib, recipe, machine, belt, bonuses=None, allowed=None, t
     m = data.raw["assembling-machine"].get(machine) or data.raw.get("furnace", {}).get(machine)
     if not r or not m:
         raise PlanError(f"unknown recipe or machine ({recipe}, {machine})")
-    if r.get("category", "crafting") not in m.get("crafting_categories", []):
+    if not planner.can_craft(m, r):
         raise PlanError(f"{machine} can't craft {recipe}")
     size = _size(m)
     ings = r.get("ingredients", [])
@@ -575,10 +575,9 @@ def flare_for(data, fluid, prefer=None):
         ings = r.get("ingredients") or []
         if r.get("results") or len(ings) != 1 or ings[0].get("type") != "fluid" or ings[0]["name"] != fluid:
             continue
-        cat = r.get("category", "crafting")
         for t in ("furnace", "assembling-machine"):
             for mn, m in data.raw.get(t, {}).items():
-                if m.get("hidden") or cat not in m.get("crafting_categories", []):
+                if m.get("hidden") or not planner.can_craft(m, r):
                     continue
                 if m.get("energy_source", {}).get("type") not in ("electric", "burner"):
                     continue  # unpowered copies (bioluminescent-, harene-infused-) and helper entities

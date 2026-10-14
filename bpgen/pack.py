@@ -34,7 +34,8 @@ def _stamp():
         startup = hashlib.sha1((USER_MODS / "mod-settings.dat").read_bytes()).hexdigest()
     versions = sorted(p.name for p in USER_MODS.iterdir() if p.suffix == ".zip")  # updated mods have new zip names
     # (and what bpgen keeps: a type it starts reading is dumped at the next game start)
-    return hashlib.sha1(json.dumps([enabled, startup, versions, sorted(KEEP)], sort_keys=True,
+    # ("headless": copies the game's data stage handed over before 0.24.3 missed some mods' final fixes)
+    return hashlib.sha1(json.dumps([enabled, startup, versions, sorted(KEEP), "headless"], sort_keys=True,
                                    default=str).encode()).hexdigest()
 
 
@@ -154,34 +155,15 @@ def user_enabled():
     return ({n for n, on in listed.items() if on} | {n for n in present if n not in listed}) - OWN
 
 
-def game_wants(active):
-    """from the game's data stage (the zzz-bpgen mod, fse loader): bpgen's copy is stale and the game runs the
-    user's own mods (not a test's mod folder) -> what to send: (types, keys to leave out), else None"""
-    if up_to_date():
-        return None
+def users_game(active):
+    """the game runs the user's own mods (not a test's mod folder): `active` is its script.active_mods"""
     # (the user's mods but for a few: one the game couldn't load (a broken zip), a name a mod adds to `mods` for
     # another's sake; a test's mod folder is hundreds off)
     run, user = set(active) - OWN, user_enabled()
     if len(run - user) > 5 or len(user - run) > 5:
         print(f"bpgen: not the user's mods (foreign {sorted(run - user)[:5]}, missing {sorted(user - run)[:5]})")
-        return None
-    from bpgen import sprites
-    types = sorted(set(KEEP) | set(sprites.TYPES) | {"tile"})
-    # (sounds and effects: neither the planner nor the sprites read them)
-    skip = ["working_sound", "open_sound", "close_sound", "mined_sound", "repair_sound", "rotated_sound", "build_sound",
-            "vehicle_impact_sound", "damaged_trigger_effect", "dying_explosion", "dying_trigger_effect", "corpse",
-            "water_reflection", "created_effect", "transitions", "transitions_between_transitions", "variants",
-            "effect_color", "effect_color_secondary"]
-    return types, skip
-
-
-def from_game(text):
-    """the game's data.raw (the types game_wants named) -> the dump, trimmed, stamped: as if dumped headless"""
-    DUMP.parent.mkdir(exist_ok=True)
-    DUMP.write_text(text, encoding="utf-8")
-    trim()
-    STAMP.write_text(_stamp())
-    mirror()
+        return False
+    return True
 
 
 def up_to_date():

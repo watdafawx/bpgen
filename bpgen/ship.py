@@ -24,7 +24,7 @@ enough for the machines at the orbit's sunlight; foundation under all of it.
 """
 import math
 
-from bpgen.planner import EAST, NORTH, SOUTH, WEST, PIPE, POLE, UNDERGROUND, PlanError
+from bpgen.planner import EAST, NORTH, SOUTH, WEST, PIPE, POLE, UNDERGROUND, PlanError, can_craft
 
 HUB_CAPS = {"chunk": 4, "ore": 400, "carbon": 200, "ice": 200, "plate": 200, "ammo": 200}
 PITCH = 7  # thrusters: 4 wide, their pipes either side and a tile between
@@ -60,7 +60,7 @@ def _condenser(data, fluids):
             continue
         for mn, m in sorted(raw.get("assembling-machine", {}).items()):
             box = m.get("collision_box") or [[0, 0], [0, 0]]
-            if r.get("category", "crafting") not in (m.get("crafting_categories") or []) or round(box[1][0] * 2) != 5:
+            if not can_craft(m, r) or round(box[1][0] * 2) != 5:
                 continue
             at = {tuple(c.get("position") or ()) for fb in m.get("fluid_boxes") or []
                   for c in fb.get("pipe_connections") or []}

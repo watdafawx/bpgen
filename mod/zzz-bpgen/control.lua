@@ -425,9 +425,8 @@ on_nth(6, function()
     -- (loads bpgen's data before the first plan; its answer is collected and dropped)
     local id = in_game() and native.start("py", "bpgen.ingame:warm", "")
     if id then local_jobs[id] = { warm = true } end
-    -- (bpgen's copy of the mods' data stale although the data stage ran: the game used its data stage cache; then
-    -- that cache goes, and the next start hands the data over)
-    local sid = in_game() and native.start("py", "bpgen.ingame:stale", "")
+    -- (bpgen's copy of the mods' data stale: the mods changed; a headless game reads them again meanwhile)
+    local sid = in_game() and native.start("py", "bpgen.ingame:stale", helpers.table_to_json(script.active_mods))
     if sid then local_jobs[sid] = { stale = true } end
   end
   for id, job in pairs(local_jobs) do
@@ -439,7 +438,8 @@ on_nth(6, function()
       else
         local r = status == "done" and helpers.json_to_table(out) or {}
         if r.stale then
-          local msg = "[bpgen] your mods changed since bpgen read them: it reads them at the next game start"
+          local msg = "[bpgen] your mods changed since bpgen read them: it reads them again now (about 2 minutes, "
+            .. "plans wait for it)"
           -- (this peer's own news: printing it would make its console differ from the others')
           if game.is_multiplayer() then safe.log(msg) else game.print(msg) end
         end

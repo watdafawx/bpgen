@@ -1,10 +1,10 @@
 {
   "name": "zzz-bpgen",
-  "version": "0.24.2",
+  "version": "0.24.3",
   "title": "bpgen",
   "author": "mtopfox",
   "factorio_version": "2.0",
-  "description": "Blueprints planned in game (with the fse loader): the bpgen window (shortcut bar, Ctrl+Alt+B) plans production lines, malls and starter bases, shows them drawn by the game and puts them in your hand or next to your base, beside your main bus. Hover an assembler (or a recipe in Recipe Book, Factory Planner, Factoriopedia) and press Ctrl+Shift+B to plan a line for it; Recipe Book and Factory Planner also get a bpgen button on their recipes. When your mods change it hands their prototypes to bpgen as the game loads (named to load last, after every mod's final fixes). Files go to script-output/bpgen/.",
+  "description": "Blueprints planned in game (with the fse loader): the bpgen window (shortcut bar, Ctrl+Alt+B) plans production lines, malls and starter bases, shows them drawn by the game and puts them in your hand or next to your base, beside your main bus. Hover an assembler (or a recipe in Recipe Book, Factory Planner, Factoriopedia) and press Ctrl+Shift+B to plan a line for it; Recipe Book and Factory Planner also get a bpgen button on their recipes. When your mods change, bpgen reads their prototypes again with a headless game as yours loads. Files go to script-output/bpgen/.",
   "dependencies": [
     "base",
     "? fse-std >= 0.8.2"

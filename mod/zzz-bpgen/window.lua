@@ -266,12 +266,30 @@ local function powerless(p)
   return ok and v ~= nil
 end
 
+-- a recipe's crafting categories: its category and its additional_categories (a machine with any one makes it)
+local function recipe_cats(recipe)
+  local rp = recipe and prototypes.recipe[recipe]
+  if not rp then return {} end
+  local out = { rp.category }
+  local ok, more = pcall(function() return rp.additional_categories end)
+  for _, c in pairs(ok and more or {}) do out[#out + 1] = c end
+  return out
+end
+M.recipe_cats = recipe_cats
+
+local function crafts(p, recipe)
+  if not p.crafting_categories then return false end
+  for _, c in ipairs(recipe_cats(recipe)) do
+    if p.crafting_categories[c] then return true end
+  end
+  return false
+end
+
 local function best_machine(player, recipe)
-  local cat = prototypes.recipe[recipe] and prototypes.recipe[recipe].category
   local best, best_speed
   for _, name in ipairs(unlocked(player).machines) do
     local p = prototypes.entity[name]
-    if p.crafting_categories and p.crafting_categories[cat] and not powerless(p) then
+    if crafts(p, recipe) and not powerless(p) then
       local s = speed(p)
       if not best or s > best_speed then best, best_speed = name, s end
     end
@@ -813,9 +831,11 @@ end
 
 local function set_machine_filter(frame, recipe)
   local btn = find(frame, "bpgen_machine")
-  local cat = recipe and prototypes.recipe[recipe] and prototypes.recipe[recipe].category
-  if btn and cat then
-    btn.elem_filters = { { filter = "crafting-category", crafting_category = cat } }
+  local cats = recipe_cats(recipe)
+  if btn and #cats > 0 then
+    local filters = {}
+    for _, c in ipairs(cats) do filters[#filters + 1] = { filter = "crafting-category", crafting_category = c } end
+    btn.elem_filters = filters
     local tags = btn.tags
     tags.bpgen_own_filters = nil -- (a new own filter: restricted again below)
     btn.tags = tags
@@ -1652,8 +1672,7 @@ local function machines_for_all(player, recipes)
     local p = prototypes.entity[name]
     local ok = p.crafting_categories ~= nil and not powerless(p)
     for _, r in ipairs(recipes) do
-      local cat = prototypes.recipe[r] and prototypes.recipe[r].category
-      if not (ok and cat and p.crafting_categories[cat]) then ok = false end
+      if not (ok and crafts(p, r)) then ok = false end
     end
     if ok then list[#list + 1] = name end
   end
@@ -3181,8 +3200,7 @@ local function on_elem_changed(e)
   set_machine_filter(frame, el.elem_value)
   local mbtn = find(frame, "bpgen_machine")
   local cur = mbtn.elem_value
-  local cat = el.elem_value and prototypes.recipe[el.elem_value].category
-  if el.elem_value and not (cur and prototypes.entity[cur.name].crafting_categories[cat]) then
+  if el.elem_value and not (cur and crafts(prototypes.entity[cur.name], el.elem_value)) then
     local m = best_machine(player, el.elem_value)
     mbtn.elem_value = m and { name = m, quality = "normal" } or nil
   end

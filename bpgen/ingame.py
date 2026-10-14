@@ -17,7 +17,7 @@ from pathlib import Path
 
 _service = None
 _lock = threading.Lock()  # (plans share one Service: one at a time)
-_taking = None  # the thread writing data the game sent (planning waits for it)
+_taking = None  # the thread re-reading the mods' data with a headless game (planning waits for it)
 _last = None  # the last plan that isn't placed yet (entities, sources, sinks...): what place() puts next to the base
 _sections = {}  # a starter base's prints by name (place() can put one of them next to the base)
 _where = None  # where place() last put _last: {of: that _last, seed, offset} (the window's arrows move it from there)
@@ -77,58 +77,48 @@ def _crash(e, request):
     return json.dumps({"error": f"{type(e).__name__}: {e}", "trace": trace[-2000:]})
 
 
-def data_wanted(active: str = "") -> str:
-    """the data stage asks (data-final-fixes of the zzz-bpgen mod): "" if bpgen's copy of the mods' data is current (or the game runs
-    other mods than the user's), else "type,type,...|skip,skip,..." for native.to_json"""
-    from bpgen import pack
-    try:
-        want = pack.game_wants(json.loads(active or "{}"))
-    except (OSError, ValueError):
-        traceback.print_exc()
-        return ""
-    return "" if not want else ",".join(want[0]) + "|" + ",".join(want[1])
-
-
-def take_data(text: str) -> str:
-    """data.raw from the data stage -> bpgen's data files, on a thread (the game goes on loading)"""
+def _reread():
+    """bpgen's copy of the mods' data, made again by a headless game (factorio --dump-data on a mirror of the user's
+    mods, about 2 minutes), on a thread: the game goes on. (Not taken from the game's own data stage: a mod named
+    zzz- doesn't load last, Factorio orders mods by dependency depth first, so it missed later mods' final fixes.)"""
     global _taking, _service
     from bpgen import pack
 
     def work():
+        global _service
         t = time.perf_counter()
         try:
-            pack.from_game(text)
-            print(f"bpgen: mods' data from the game in {time.perf_counter() - t:.1f} s")
+            pack.sync()
+            print(f"bpgen: mods' data re-read in {time.perf_counter() - t:.0f} s")
         except Exception:  # noqa: BLE001 - logged; bpgen keeps its old copy
             traceback.print_exc()
+        _service = None  # (the next plan loads the new copy)
 
     _service = None
-    _taking = threading.Thread(target=work, name="bpgen-take-data")
+    _taking = threading.Thread(target=work, name="bpgen-reread")
     _taking.start()
-    return f"taking {len(text) / 1e6:.1f} MB"
 
 
-def stale(_: str = "") -> str:
-    """at game load: bpgen's copy is stale although the data stage didn't send it (the game loaded its data stage
-    cache): the game's data-cache.dat is removed so the next start runs the data stage and sends it"""
+def stale(active: str = "") -> str:
+    """at game load (`active`: the game's script.active_mods as JSON): bpgen's copy of the mods' data is stale and
+    the game runs the user's own mods -> it is read again, headless, while the game goes on"""
     from bpgen import pack
-    from bpgen.config import PATHS
-    if _taking is not None or pack.up_to_date():
+    if _taking is not None and _taking.is_alive():
+        return json.dumps({"stale": True, "reading": True})
+    try:
+        if pack.up_to_date() or not pack.users_game(json.loads(active or "{}")):
+            return json.dumps({"stale": False})
+    except (OSError, ValueError):
+        traceback.print_exc()
         return json.dumps({"stale": False})
-    cache = PATHS["write_data"] / "data-cache.dat"
-    removed = False
-    if cache.exists():
-        try:
-            cache.unlink()
-            removed = True
-        except OSError:
-            pass
-    return json.dumps({"stale": True, "cache_removed": removed})
+    _reread()
+    return json.dumps({"stale": True, "reading": True})
 
 
 def _svc():
     global _service
-    if _taking is not None:
+    if _taking is not None and _taking.is_alive():
+        _note("reading your mods' changes (about 2 minutes, once after they change)")
         _taking.join()
     if _service is None:
         from bpgen.service import Service
@@ -274,7 +264,7 @@ def _bus_feed(s, params):
         else:
             rn = base.pick_recipe(data, n, machine_for, on_bus, avoid=out_items)
             if rn:
-                make[n] = {"recipe": rn, "machine": machine_for[data.raw["recipe"][rn].get("category", "crafting")]}
+                make[n] = {"recipe": rn, "machine": machine_for[planner.category_in(data.raw["recipe"][rn], machine_for)]}
                 made.append(n)
             else:
                 missing.append(n)

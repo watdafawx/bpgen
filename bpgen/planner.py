@@ -46,6 +46,25 @@ class PlanError(Exception):
     pass
 
 
+def categories(r):
+    """a recipe's crafting categories: its category and its additional_categories (any one is enough)"""
+    return [r.get("category") or "crafting"] + list(r.get("additional_categories") or [])
+
+
+def category_in(r, cats):
+    """the first crafting category of recipe r found in cats (a set, or a dict keyed by category), else None"""
+    return next((c for c in categories(r) if c in cats), None)
+
+
+def in_cats(r, cats):
+    return category_in(r, cats) is not None
+
+
+def can_craft(m, r):
+    """machine prototype m has a crafting category of recipe r"""
+    return in_cats(r, m.get("crafting_categories") or [])
+
+
 EPS = 1e-9  # effect sums like 2.0000000000000004 must not cost a machine in floor()/ceil()
 
 
@@ -301,9 +320,8 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
     if not m:
         raise PlanError(f"{machine} is not an assembling machine or furnace this template can use")
     furnace = m.get("type") == "furnace"
-    category = r.get("category", "crafting")
-    if category not in m.get("crafting_categories", []):
-        raise PlanError(f"{machine} can't craft {recipe} (category {category})")
+    if not can_craft(m, r):
+        raise PlanError(f"{machine} can't craft {recipe} (category {' or '.join(categories(r))})")
     size, height = _dims(m)  # width along the row, depth across it (machine facing north)
     rotated = False
     if size < height and not any(i.get("type") == "fluid" for i in r.get("ingredients", [])):

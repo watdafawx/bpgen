@@ -1,4 +1,14 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.24.3
+Date: 2026-10-14
+  Bugfixes:
+    - bpgen saw some mods' prototypes as they were before their final fixes (with Maraxsis: "assembling-machine-2
+      can't craft engine-unit"). The data stage handed them over from this mod, which doesn't load last (Factorio
+      orders mods by dependency depth first). bpgen now reads them with a headless game when your mods change, about
+      2 minutes beside yours; plans wait for it.
+    - Recipes with additional crafting categories (Space Age's mechanics, electrochemistry, compressing...): the
+      machines of those categories are offered, picked and planned too.
+---------------------------------------------------------------------------------------------------
 Version: 0.24.2
 Date: 2026-10-13
   Bugfixes:

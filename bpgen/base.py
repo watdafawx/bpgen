@@ -224,8 +224,8 @@ def recipe_choices(data, item, machine_for):
     """every recipe a base could make `item` with (one product, a machine for it, not recycling)"""
     out = []
     for rn, r in _makers(data).get(item, ()):
-        cat = r.get("category", "crafting")
-        if cat in machine_for and not any(s in cat for s in SKIP_CATEGORIES):
+        cat = planner.category_in(r, machine_for)
+        if cat and not any(s in cat for s in SKIP_CATEGORIES):
             out.append(rn)
     return sorted(out, key=lambda n: (n != item, n))
 
@@ -296,7 +296,7 @@ def solve(data, targets, picks, raw=None, overrides=None, fluid_plans=None):
     steps = {}
 
     def machine_of(rn):
-        return machine_for.get(data.raw["recipe"][rn].get("category", "crafting"))
+        return machine_for.get(planner.category_in(data.raw["recipe"][rn], machine_for))
 
     def multi(item, rate, by, path):
         """a product of a several-product recipe: size it with its converters, and burn or put out the rest"""
@@ -346,7 +346,7 @@ def solve(data, targets, picks, raw=None, overrides=None, fluid_plans=None):
             else:
                 rn = None if item in raw else pick_recipe(data, item, machine_for, raw, avoid=path)
             r = data.raw["recipe"].get(rn) if rn else None
-            st = steps[item] = Step(item, 0.0, rn, machine_for.get(r.get("category", "crafting")) if r else None)
+            st = steps[item] = Step(item, 0.0, rn, machine_for.get(planner.category_in(r, machine_for)) if r else None)
         st.rate += rate
         if by:
             st.used_by[by] = st.used_by.get(by, 0) + rate
@@ -407,7 +407,7 @@ def mall_products(data, assembler):
     out = []
     for item in EARLY_MALL:
         r = data.raw["recipe"].get(item)
-        if (r and not r.get("hidden") and r.get("category", "crafting") in cats and len(r.get("results") or []) == 1
+        if (r and not r.get("hidden") and planner.in_cats(r, cats) and len(r.get("results") or []) == 1
                 and all(i.get("type", "item") == "item" for i in r.get("ingredients", []))):
             out.append(item)
     return out
@@ -593,7 +593,7 @@ def plan_base(service, params, progress=None, cancel=None):
     if params.get("mall", True):
         cats = set(_proto(data, assembler).get("crafting_categories", []))
         products = [p for p in params.get("mall_products") or [] if p in data.raw["recipe"]
-                    and data.raw["recipe"][p].get("category", "crafting") in cats] or mall_products(data, assembler)
+                    and planner.in_cats(data.raw["recipe"][p], cats)] or mall_products(data, assembler)
         if progress:
             progress(f"mall: {len(products)} buildings")
         try:

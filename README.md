@@ -193,9 +193,11 @@ FSE_PYPATH=C:\path\to\FSE\py;C:\path\to\bpgen
 ### 4. Install the mod
 
 Copy (or symlink) `mod\zzz-bpgen` into your mods folder (`%APPDATA%\Factorio\mods`) and enable it ("bpgen" in the
-mod list). It is the window and the in-game tools, and it hands your mods' prototypes to bpgen while the game loads,
-only when your mods changed: the first start after installing (or changing mods) takes a few seconds longer. Its
-name makes it load last, after every other mod's final fixes, so bpgen sees your mods' data as the game uses it.
+mod list). It is the window and the in-game tools. When your mods changed (or on the first game after installing),
+bpgen reads their prototypes again as the game loads: a headless game (`factorio --dump-data` on a mirror of your
+mods, `mods/pack`) runs beside yours for about 2 minutes, and plans wait for it. That is the data exactly as the game
+uses it, every mod's final fixes included (the mod's own data stage can't promise that: Factorio loads mods by
+dependency depth before name, so even a zzz- name doesn't load last).
 
 ### 5. Plan
 

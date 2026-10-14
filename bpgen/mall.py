@@ -114,7 +114,7 @@ def plan_mall(data, calib, products, machine, belt, shared=None, bonuses=None, a
     for r in products:
         if r not in recipes:
             raise PlanError(f"unknown recipe {r}")
-        if recipes[r].get("category", "crafting") not in m.get("crafting_categories", []):
+        if not planner.can_craft(m, recipes[r]):
             raise PlanError(f"{machine} can't craft {r}")
         if any(i.get("type") == "fluid" for i in recipes[r].get("ingredients", [])):
             raise PlanError(f"{r} needs a fluid: fluids aren't in mall mode yet")
@@ -131,7 +131,7 @@ def plan_mall(data, calib, products, machine, belt, shared=None, bonuses=None, a
         shared.pop(item, None)  # handed over chest to chest, not on the bus
     linked_use = {(item, user) for item, (_, user) in links.items()}
     for item, r in list(shared.items()):
-        if recipes[r].get("category", "crafting") not in m.get("crafting_categories", []):
+        if not planner.can_craft(m, recipes[r]):
             raise PlanError(f"{machine} can't craft {r} (for {item})")
 
     speed = m["crafting_speed"]
@@ -723,7 +723,7 @@ def plan_bot_mall(data, products, machine, inserter="inserter", chest_limit=4, b
         rec = recipes.get(r)
         if not rec:
             raise PlanError(f"unknown recipe {r}")
-        if rec.get("category", "crafting") not in m.get("crafting_categories", []):
+        if not planner.can_craft(m, rec):
             notes.append(f"{r}: {machine} can't craft it, left out")
             continue
         if any(i.get("type") == "fluid" for i in rec.get("ingredients", [])):
@@ -793,7 +793,7 @@ def plan_bot_line(data, recipe, machine, rate, inserters, bonuses=None, unlocked
     m = data.raw.get("assembling-machine", {}).get(machine)
     if not r or not m:
         raise PlanError(f"{machine} can't be robot-fed here (assembling machines only)")
-    if r.get("category", "crafting") not in m.get("crafting_categories", []):
+    if not planner.can_craft(m, r):
         raise PlanError(f"{machine} can't craft {recipe}")
     if any(i.get("type") == "fluid" for i in r.get("ingredients", []) + (r.get("results") or [])):
         raise PlanError(f"{recipe} uses a fluid: robots can't carry fluids")

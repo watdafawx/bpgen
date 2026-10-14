@@ -96,12 +96,12 @@ def resolve(data, products, machine, inputs, fluids=False):
     for r in dict.fromkeys(products):
         if r not in recipes:
             continue
-        if recipes[r].get("category", "crafting") not in cats or _fluids(data, r):
+        if not planner.in_cats(recipes[r], cats) or _fluids(data, r):
             alt = _result(data, r) and base.pick_recipe(data, _result(data, r), machine_for, inputs)
             if alt and not _fluids(data, alt):
                 notes.append(f"{r}: made with the {alt} recipe ({machine} can't craft {r}'s here)")
                 r = alt
-            elif fluids and len(_fluids(data, r)) == 1 and recipes[r].get("category", "crafting") in cats:
+            elif fluids and len(_fluids(data, r)) == 1 and planner.in_cats(recipes[r], cats):
                 pass
             elif _fluids(data, r):
                 wet.append(f"{r} ({', '.join(_fluids(data, r))})")

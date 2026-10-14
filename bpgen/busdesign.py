@@ -379,7 +379,7 @@ def smelt_recipe(data, ore, fp):
     found = []
     for name, rc in data.raw["recipe"].items():
         ing, res = rc.get("ingredients") or [], rc.get("results") or []
-        if (rc.get("category", "crafting") in cats and len(ing) == 1 and ing[0].get("name") == ore
+        if (planner.in_cats(rc, cats) and len(ing) == 1 and ing[0].get("name") == ore
                 and len(res) == 1 and res[0].get("type", "item") == "item" and not rc.get("hidden")):
             found.append((name != res[0]["name"], name, ing[0]["amount"], res[0]["name"], res[0].get("amount", 1)))
     return min(found)[1:] if found else None

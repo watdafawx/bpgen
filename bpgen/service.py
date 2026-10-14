@@ -776,9 +776,8 @@ class Service:
     def options(self, params):
         d = self.data
         recipe = d.raw["recipe"].get(params.get("recipe"), {})
-        category = recipe.get("category", "crafting")
         machines = sorted(n for t in ("assembling-machine", "furnace") for n, m in d.raw.get(t, {}).items()
-                          if category in m.get("crafting_categories", []) and not m.get("hidden"))
+                          if planner.can_craft(m, recipe) and not m.get("hidden"))
         belts = self.base_belts(params.get("belts") or [n for n, b in d.raw["transport-belt"].items() if not b.get("hidden")])
         allowed = params.get("inserters") or None
         machine = d.raw["assembling-machine"].get(params.get("machine")) or d.raw.get("furnace", {}).get(params.get("machine"), {})
@@ -892,12 +891,12 @@ class Service:
         if not items and not fluids:
             return []
         machine = d.raw["assembling-machine"].get(params.get("machine")) or d.raw.get("furnace", {}).get(params.get("machine"))
-        cats = set(machine.get("crafting_categories", [])) if machine else {r.get("category", "crafting")}
+        cats = set(machine.get("crafting_categories", [])) if machine else set(planner.categories(r))
         main = {x.get("name") for x in r.get("results") or []}
         out = []
         for rn, rr in recipes.items():
             if rn == params.get("recipe") or rr.get("hidden") or "recycling" in rr.get("category", "") \
-                    or rr.get("category", "crafting") not in cats:
+                    or not planner.in_cats(rr, cats):
                 continue
             res = rr.get("results") or []
             if len(res) != 1 or res[0]["name"] in main:  # (one product: an item, or a fluid piped out)
@@ -931,7 +930,7 @@ class Service:
             if rr.get("hidden") or len(rr.get("results") or []) != 1:
                 continue
             res = rr["results"][0]
-            if res.get("type", "item") == "item" and rr.get("category", "crafting") in machines_for:
+            if res.get("type", "item") == "item" and planner.in_cats(rr, machines_for):
                 makers.setdefault(res["name"], []).append(rn)
         final_machine = params.get("machine")
         out = []
@@ -943,7 +942,7 @@ class Service:
             recipes = sorted(makers.get(ing["name"], []), key=lambda n: (n != ing["name"], n))
             opts = []
             for rn in recipes[:40]:
-                ms = sorted(machines_for.get(d.raw["recipe"][rn].get("category", "crafting"), []))
+                ms = sorted({m for c in planner.categories(d.raw["recipe"][rn]) for m in machines_for.get(c, [])})
                 opts.append({"recipe": rn, "machines": ms,
                              "default_machine": final_machine if final_machine in ms else (ms[0] if ms else None)})
             out.append({"item": ing["name"], "fluid": False, "amount": ing.get("amount"), "recipes": opts})
@@ -963,13 +962,13 @@ class Service:
         for rn, r in recipes.items():
             res = r.get("results") or []
             cat = r.get("category", "crafting")
-            if r.get("hidden") or "recycling" in cat or cat not in machines_for:
+            if r.get("hidden") or "recycling" in cat or not planner.in_cats(r, machines_for):
                 continue
             if not any(o["name"] == fluid for o in res):
                 continue
             if len(res) > 1 and not all_fluid(r):
                 continue  # several products with items among them: no layout for that yet
-            ms = sorted(machines_for[cat])
+            ms = sorted({m for c in planner.categories(r) for m in machines_for.get(c, [])})
             byproducts = []
             others = [o["name"] for o in res if o["name"] != fluid]
             for b in others:
@@ -979,8 +978,7 @@ class Service:
                 choices.append({"value": "out", "label": "send it out (output pipe)"})
                 for cn, c in recipes.items():
                     cres = c.get("results") or []
-                    ccat = c.get("category", "crafting")
-                    if c.get("hidden") or len(cres) != 1 or ccat not in machines_for:
+                    if c.get("hidden") or len(cres) != 1 or not planner.in_cats(c, machines_for):
                         continue
                     if any(i["name"] == b for i in c.get("ingredients", [])) and cres[0]["name"] in [fluid] + others                             and cres[0]["name"] != b:
                         choices.append({"value": "convert:" + cn, "label": f"convert: {cn} -> {cres[0]['name']}"})
