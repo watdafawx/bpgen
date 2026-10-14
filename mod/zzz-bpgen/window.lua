@@ -2014,9 +2014,9 @@ function M.upgrade_lane(player, u)
     if to and to ~= (ghost and e.ghost_name or e.name) then
       if ghost then  -- (a ghost can't be ordered to upgrade: the same ghost, of the faster tier)
         local spec = { name = "entity-ghost", inner_name = to, position = e.position, direction = e.direction,
-          force = player.force, player = player }
+          force = player.force, player = player, raise_built = true }
         if kind == "underground-belt" then spec.type = e.belt_to_ground_type end
-        e.destroy()
+        e.destroy({ raise_destroy = true })
         local g = s.create_entity(spec)
         if g then mine[#mine + 1] = g n = n + 1 end
       elseif e.order_upgrade({ target = to, force = player.force, player = player }) then
@@ -2832,7 +2832,7 @@ local function unplace(player)
   place.clear_outline(player)
   local n = 0
   for _, g in pairs(placed[player.index] or {}) do
-    if g.valid and (g.type == "entity-ghost" or g.type == "tile-ghost") then g.destroy() n = n + 1 end
+    if g.valid and (g.type == "entity-ghost" or g.type == "tile-ghost") then g.destroy({ raise_destroy = true }) n = n + 1 end
   end
   for _, e in pairs(unmark[player.index] or {}) do  -- (the belts its splitters would have replaced: kept)
     if e.valid and e.to_be_deconstructed() then e.cancel_deconstruction(player.force, player) end
@@ -3550,7 +3550,7 @@ end
 --- a paste of the handed plan tied into the base (ingame.connect's answer and every ghost of it), or why not
 function M.on_connected(player, res, ghosts, marks, area)
   if res.error then
-    if res.trace then safe.log("bpgen.ingame: " .. res.trace) end
+    safe.log("bpgen.ingame:connect: " .. tostring(res.error) .. (res.trace and (" | " .. res.trace) or ""))
     return say(player, T("cant", tostring(res.error)))
   end
   placed[player.index], unmark[player.index] = ghosts, marks

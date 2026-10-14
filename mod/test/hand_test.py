@@ -84,4 +84,20 @@ for _ in range(5):
     json.loads(ingame.hand(json.dumps({"player": 1, "snapshot": snapshot(100), "seed": seed})))
 stale = json.loads(ingame.connect(json.dumps({"player": 1, "id": old, "built": [], "snapshot": snapshot(600)})))
 assert "older plan" in stale.get("error", ""), stale
+# the paste told as a delta since hand()'s snapshot (no new snapshot): tied in as from a full one; a delta from
+# another snapshot than the one kept: rescan
+h3 = json.loads(ingame.hand(json.dumps({"player": 1, "snapshot": snapshot(700), "seed": seed})))
+held = ingame._players[1]["hands"][h3["id"]]["entities"]
+built, ghosts = put_down(False, 0, (0, 0), 0)
+delta = json.loads(ingame.connect(json.dumps({"player": 1, "id": h3["id"], "built": built, "delta": {
+    "since": 700, "now": 705, "surface": "nauvis", "built": ghosts, "removed": []}})))
+assert "error" not in delta and not delta.get("rescan"), delta
+assert ingame._players[1]["site"].snap["tick"] == 705, "the site kept moves on to the delta's tick"
+full = json.loads(ingame.connect(json.dumps({"player": 1, "id": h3["id"], "built": built,
+                                             "snapshot": snapshot(710, ghosts)})))
+assert delta["blueprint"] == full["blueprint"], "a delta ties it in as the full snapshot does"
+stale = json.loads(ingame.connect(json.dumps({"player": 1, "id": h3["id"], "built": built, "delta": {
+    "since": 700, "now": 720, "surface": "nauvis", "built": [], "removed": []}})))
+assert stale.get("rescan"), stale
+print("delta: as the full snapshot; stale delta: rescan")
 print("ok")

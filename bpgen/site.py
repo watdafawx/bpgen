@@ -55,3 +55,27 @@ class Site:
         if b is not None:
             b = dict(b, load={}, lanes=[dict(ln) for ln in b["lanes"]])
         return g, b
+
+    def with_delta(self, built, removed, tick, decorate):
+        """this site as the base is now: what was built since (records as the snapshot's, ghosts too; one standing
+        where another was - fast-replaced, a ghost built for real, turned - takes its place) and what was removed
+        ({name, position}), read at `tick`. The bus found again only when a real belt or pipe changed.
+        -> a new Site (this one stays as it was)"""
+        def at(e):
+            return round(e["position"]["x"], 2), round(e["position"]["y"], 2)
+        gone = {(r["name"], at(r)) for r in removed}
+        spots = {at(e) for e in built}
+        ents = [e for e in self.snap["entities"] if (e["name"], at(e)) not in gone and at(e) not in spots]
+        powered = {e.get("network"): e.get("powered") for e in ents if e.get("network") is not None}
+        for e in built:
+            e = decorate(dict(e))
+            if e.get("network") is not None and "powered" not in e:  # (a new pole: as its network's others)
+                e["powered"] = bool(powered.get(e["network"]))
+            ents.append(e)
+        out = Site(dict(self.snap, entities=ents, tick=tick))
+        changed = [e for e in list(built) + list(removed)
+                   if not e.get("ghost") and (e.get("type") in extend.BELT_TYPES + ("pipe", "pipe-to-ground")
+                                              or "belt" in e["name"] or "splitter" in e["name"] or "pipe" in e["name"])]
+        if not changed and self._bus is not _UNSET:
+            out._bus = self._bus
+        return out

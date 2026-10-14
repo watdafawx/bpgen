@@ -137,6 +137,7 @@ local function start_job(player_index, fn, input, job)
 end
 
 local snapshot  -- (below: an area of the base, for bpgen to build next to)
+local record  -- (below: one entity as the snapshot records it)
 -- what makes power: a pole on the same network as one of these has power to give (a mall's own poles may not)
 local POWER_SOURCES = { ["generator"] = true, ["burner-generator"] = true, ["solar-panel"] = true,
   ["accumulator"] = true, ["electric-energy-interface"] = true, ["fusion-generator"] = true,
@@ -206,12 +207,78 @@ local compat = require("compat")
 local web = require("web")  -- (the window as a web page: fse's shells)
 local sandbox = require("sandbox")  -- ("Try in sandbox": the plan in a lab with the base round it)
 local hand = require("hand")  -- (a plan put down by hand, then tied into the base)
-hand.setup({ measure = measure, around = around, start_job = start_job })
+
+-- The area round the base Python keeps a site of for the player (the snapshot Place by my base read, or the last
+-- paste's): what was built or removed in it since, so the next paste or Re-route there sends only that (a delta)
+-- instead of reading the area again. {tick, surface, area = {x1, y1, x2, y2}, built = {records}, removed = {...}}
+local sites = safe.stored("sites")
+local DELTA_MAX = 3000  -- (more changes than this: read the area again)
+
+local function site_set(player, snap)
+  sites[player.index] = { tick = snap.tick, surface = snap.surface, area = snap.area, built = {}, removed = {} }
+end
+
+--- what changed in the player's site since it was read, when `box` ({x1, y1, x2, y2}, with its margin) lies in it;
+--- the site moves on to now (Python applies it). -> {since, now, surface, built, removed} or nil (read it again)
+local function site_delta(player, box)
+  local s = sites[player.index]
+  if not (s and s.surface == player.surface.name and box[1] >= s.area[1] and box[2] >= s.area[2]
+      and box[3] <= s.area[3] and box[4] <= s.area[4]) then
+    return nil
+  end
+  local d = { since = s.tick, now = game.tick, surface = s.surface, built = s.built, removed = s.removed }
+  s.tick, s.built, s.removed = game.tick, {}, {}
+  return d
+end
+
+local function inside(s, e)
+  local p = e.position
+  return s.surface == e.surface.name and p.x >= s.area[1] and p.x <= s.area[3] and p.y >= s.area[2] and p.y <= s.area[4]
+end
+
+local function site_built(e)
+  local ent = e.entity or e.created_entity
+  if not (ent and ent.valid) then return end
+  for index, s in pairs(sites) do
+    if inside(s, ent) then
+      local r = record(ent, ent.force)
+      if r then
+        s.built[#s.built + 1] = r
+        if #s.built + #s.removed > DELTA_MAX then sites[index] = nil end
+      end
+    end
+  end
+end
+
+local function site_removed(e)
+  local ent = e.entity
+  if not (ent and ent.valid) then return end
+  for index, s in pairs(sites) do
+    if inside(s, ent) then
+      local name = ent.type == "entity-ghost" and ent.ghost_name or ent.name
+      local p, dropped = ent.position, false
+      for i = #s.built, 1, -1 do  -- (built since the site was read, and gone again: as if never built)
+        local b = s.built[i]
+        if b.name == name and math.abs(b.position.x - p.x) < 0.01 and math.abs(b.position.y - p.y) < 0.01 then
+          table.remove(s.built, i)
+          dropped = true
+          break
+        end
+      end
+      if not dropped then s.removed[#s.removed + 1] = { name = name, position = { x = p.x, y = p.y } } end
+      if #s.built + #s.removed > DELTA_MAX then sites[index] = nil end
+    end
+  end
+end
+
+hand.setup({ measure = measure, around = around, start_job = start_job, site_set = site_set, site_delta = site_delta })
 -- the last plan as a blueprint for the player's cursor (params: seed, bus, section, turn): measured round them first
 local function hand_plan(player, params)
   if not in_game() then return false, "start the game with the fse loader" end
   local w, h = window.plan_size(player)
-  local r = math.min(250, math.max(PLACE_R, math.ceil(math.max(w or 0, h or 0) / 2) + PLACE_R / 2))
+  -- (room for the plan, its taps and poles (PLACE_R round it) and for moving it about with the cursor: a paste in
+  -- this area is tied in from what changed since, without reading the ground again)
+  local r = math.min(250, math.ceil(math.max(w or 0, h or 0) / 2) + PLACE_R + 32)
   measure(player, around(params.seed or player.position, r), "hand", params)
   return true
 end
@@ -225,6 +292,7 @@ window.setup({
   craftable = craftable, unlocked = unlocked, bonuses = bonuses,
   start = function(player, request)
     if not in_game() then return false, "start the game with the fse loader" end
+    request.player = player.index  -- (bpgen keeps each player's last plan: Place by my base finds this one)
     helpers.write_file("bpgen/request.json", helpers.table_to_json(request), false)
     local function go()
       return start_job(player.index, "bpgen.ingame:plan", helpers.table_to_json(request),
@@ -392,6 +460,7 @@ local function finish(job, out)
   end
   if job.hand then return window.on_hand(player, res) end
   if job.connect then
+    if res.rescan then return hand.rescan(player, job) end  -- (Python's site isn't the one the delta was from)
     if res.error then return window.on_connected(player, res) end
     return window.on_connected(player, res, hand.connected(player, res, job))
   end
@@ -848,6 +917,29 @@ local function runs(positions)
   return out
 end
 
+--- an entity of `force` (or a ghost) as the snapshot records it, or nil (not one bpgen builds round)
+record = function(e, force)
+  local t = e.type
+  if OBSTACLE[t] or SKIP[t] or t == "resource" or not (e.force == force or t == "entity-ghost") then return nil end
+  local name, ty = e.name, t
+  if t == "entity-ghost" then name, ty = e.ghost_name, e.ghost_type end
+  local b = e.bounding_box
+  local out = { name = name, type = ty, position = { x = e.position.x, y = e.position.y }, direction = e.direction,
+    box = { b.left_top.x, b.left_top.y, b.right_bottom.x, b.right_bottom.y } }
+  if t == "entity-ghost" then out.ghost = true end
+  if ty == "assembling-machine" or ty == "furnace" then
+    local r = e.get_recipe()
+    if not r and ty == "furnace" and t ~= "entity-ghost" then r = e.previous_recipe and e.previous_recipe.name end
+    out.recipe = type(r) == "string" and r or (r and r.name) or nil
+  end
+  if ty == "underground-belt" then out.ug_type = e.belt_to_ground_type end
+  if (ty == "loader" or ty == "loader-1x1") then out.ug_type = e.loader_type end
+  if BELTS[t] then out.lanes = lanes(e) end
+  if t == "electric-pole" then out.network = e.electric_network_id end
+  if PIPES[t] then out.fluid = pipe_fluid(e) end
+  return out
+end
+
 snapshot = function(player, area, keep)  -- keep: the snapshot back instead of written to snapshot.json
   local surface = player.surface
   local ents, obstacles = {}, {}
@@ -857,28 +949,13 @@ snapshot = function(player, area, keep)  -- keep: the snapshot back instead of w
     if OBSTACLE[t] then
       local b = e.bounding_box
       obstacles[#obstacles + 1] = { b.left_top.x, b.left_top.y, b.right_bottom.x, b.right_bottom.y, t }
-    elseif not SKIP[t] and t ~= "resource" and (e.force == player.force or t == "entity-ghost") then
-      local name, ty = e.name, t
-      if t == "entity-ghost" then name, ty = e.ghost_name, e.ghost_type end
-      local b = e.bounding_box
-      local out = { name = name, type = ty, position = { x = e.position.x, y = e.position.y }, direction = e.direction,
-        box = { b.left_top.x, b.left_top.y, b.right_bottom.x, b.right_bottom.y } }
-      if t == "entity-ghost" then out.ghost = true end
-      if ty == "assembling-machine" or ty == "furnace" then
-        local r = e.get_recipe()
-        if not r and ty == "furnace" and t ~= "entity-ghost" then r = e.previous_recipe and e.previous_recipe.name end
-        out.recipe = type(r) == "string" and r or (r and r.name) or nil
+    else
+      local out = record(e, player.force)
+      if out then
+        if t == "electric-pole" then poles[#poles + 1] = out end
+        if POWER_SOURCES[t] and e.electric_network_id then powered[e.electric_network_id] = true end
+        ents[#ents + 1] = out
       end
-      if ty == "underground-belt" then out.ug_type = e.belt_to_ground_type end
-      if (ty == "loader" or ty == "loader-1x1") then out.ug_type = e.loader_type end
-      if BELTS[t] then out.lanes = lanes(e) end
-      if t == "electric-pole" then
-        out.network = e.electric_network_id
-        poles[#poles + 1] = out
-      end
-      if POWER_SOURCES[t] and e.electric_network_id then powered[e.electric_network_id] = true end
-      if PIPES[t] then out.fluid = pipe_fluid(e) end
-      ents[#ents + 1] = out
     end
   end
   for _, p in ipairs(poles) do p.powered = p.network ~= nil and powered[p.network] == true end
@@ -933,6 +1010,7 @@ after.place_base = function(player, snap, params)
   start_job(player.index, "bpgen.ingame:place", helpers.table_to_json(params), { player = player.index, recipe = "", window = true })
 end
 after.hand = function(player, snap, params)
+  site_set(player, snap)  -- (Python keeps this one: pastes in it send what changed since)
   params.snapshot, params.player = snap, player.index
   params.seed = params.seed or { x = player.position.x, y = player.position.y }
   start_job(player.index, "bpgen.ingame:hand", helpers.table_to_json(params), { player = player.index, hand = true })
@@ -997,9 +1075,16 @@ for _, ev in pairs({ defines.events.on_space_platform_built_entity, defines.even
                      defines.events.script_raised_built }) do
   on_event(ev, function(e)
     hub_wire(e)
+    site_built(e)
     hand.on_built(e)
   end)
 end
+for _, ev in pairs({ defines.events.on_player_mined_entity, defines.events.on_robot_mined_entity,
+                     defines.events.on_entity_died, defines.events.script_raised_destroy,
+                     defines.events.on_space_platform_mined_entity }) do
+  on_event(ev, site_removed)
+end
+on_event(defines.events.on_player_rotated_entity, site_built)  -- (turned: recorded again, in its place)
 on_event(defines.events.on_player_alt_selected_area, on_selected)
 
 -- for automated tests (no player to press the hotkey in a headless run)

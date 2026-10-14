@@ -1,4 +1,15 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.26.2
+Date: 2026-10-14
+  Changes:
+    - A paste of the plan from Place by my base, and Re-route, are tied in straight away: bpgen keeps track of what
+      is built and removed round your base after its look round it, and sends only that, instead of reading the area
+      again and measuring its belts for half a second each time. Place by my base looks a little wider round you
+      for it.
+  Bugfixes:
+    - Place by my base after a plain Plan said "plan something first" (since 0.25.0).
+    - Re-route, Move and Undo now tell the game the ghosts they take away are gone (other mods see it too).
+---------------------------------------------------------------------------------------------------
 Version: 0.26.1
 Date: 2026-10-14
   Bugfixes:

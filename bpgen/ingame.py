@@ -595,8 +595,11 @@ def hand(request: str) -> str:
 
 def connect(request: str) -> str:
     """the plan from hand() put down by the player, tied into their base: {"player", "id", "built": [{i, x, y,
-    direction}] (its ghosts, as the game built them), "snapshot" (round it, measured after)} -> {"blueprint" (only
-    what connects it: taps, lanes, poles; absolute, so it lands where it belongs) or None, "absolute", "notes"}"""
+    direction}] (its ghosts, as the game built them), "snapshot" (round it, measured after) or "delta" ({since,
+    now, surface, built, removed}: what changed since the snapshot this player's site was read from: hand()'s, or
+    the last connect's)} -> {"blueprint" (only what connects it: taps, lanes, poles; absolute, so it lands where it
+    belongs) or None, "absolute", "notes"}, or {"rescan": true} (a delta that doesn't fit the site kept here: the
+    game sends a snapshot instead)"""
     from bpgen import extend
     t = time.perf_counter()
     try:
@@ -617,7 +620,15 @@ def connect(request: str) -> str:
         with _lock:
             s = _svc()
             s.progress = lambda text: _note(text, 2)
-            site = _site(s, st, req["snapshot"])
+            delta = req.get("delta")
+            if delta:
+                site = st["site"]
+                if site is None or site.snap.get("tick") != delta.get("since")                         or site.snap.get("surface") != delta.get("surface"):
+                    return json.dumps({"rescan": True})
+                site = st["site"] = site.with_delta(delta.get("built") or [], delta.get("removed") or [],
+                                                    delta.get("now"), s.decorate)
+            else:
+                site = _site(s, st, req["snapshot"])
             placed = s.connect({"site": site, "posed": posed, "belt": last.get("belt"), "needs": last.get("needs"),
                                 "label": (last.get("label") or "bpgen") + ": connected"})
         absolute = _absolute(placed) if placed["box"] else None

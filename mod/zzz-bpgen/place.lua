@@ -89,7 +89,7 @@ function M.place(player, bp, c, box, section)
         for _, e in pairs(player.surface.find_entities_filtered({ area = g.bounding_box, to_be_deconstructed = true })) do
           if e.type ~= "entity-ghost" then e.cancel_deconstruction(player.force) end
         end
-        g.destroy()
+        g.destroy({ raise_destroy = true })
       end
     end
     c = { x = c.x + dx, y = c.y + dy }

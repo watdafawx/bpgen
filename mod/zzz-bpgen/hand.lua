@@ -10,7 +10,7 @@ local place = require("place")
 local ui = require("ui")
 
 local M = {}
-local ctx  -- from control.lua: measure(player, area, kind, data), around(c, r), start_job
+local ctx  -- from control.lua: measure(player, area, kind, data), around(c, r), start_job, site_set, site_delta
 
 local held = safe.stored("hand_held")        -- player index -> {id, blueprint, spot = render ids}: in their cursor
 local pending = safe.stored("hand_pending")  -- player index -> {id, tick, built = {{i, x, y, direction}}, ghosts}
@@ -78,15 +78,30 @@ function M.on_built(e)
   p.ghosts[#p.ghosts + 1] = ent
 end
 
---- the ground round a paste measured, then bpgen connects it (ingame.connect); paste: {id, built, ghosts, blueprint}
-local function connect(player, paste)
+--- bpgen connects a paste (ingame.connect); paste: {id, built, ghosts, blueprint}. Inside the area Python keeps
+--- a site of (Place by my base's look round, or the last paste's): only what changed there since, at once; else (or
+--- `full`) the ground round it read and measured first
+local function connect(player, paste, full)
   local x1, y1, x2, y2
   for _, b in ipairs(paste.built) do
     x1, y1 = math.min(x1 or b.x, b.x), math.min(y1 or b.y, b.y)
     x2, y2 = math.max(x2 or b.x, b.x), math.max(y2 or b.y, b.y)
   end
   local r = math.min(250, math.ceil(math.max(x2 - x1, y2 - y1) / 2) + MARGIN)
-  ctx.measure(player, ctx.around({ x = (x1 + x2) / 2, y = (y1 + y2) / 2 }, r), "connect", paste)
+  local cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+  local delta = not full and ctx.site_delta(player, { cx - r, cy - r, cx + r, cy + r })
+  if delta then
+    ctx.start_job(player.index, "bpgen.ingame:connect", helpers.table_to_json({ player = player.index, id = paste.id,
+      built = paste.built, delta = delta }), { player = player.index, connect = true, paste = paste })
+    return
+  end
+  ctx.measure(player, ctx.around({ x = cx, y = cy }, r), "connect", paste)
+end
+
+--- Python's site wasn't the one a delta was from (another plan read the ground since): the paste read in full
+function M.rescan(player, job)
+  local paste = job.paste or {}
+  if paste.built and #paste.built > 0 then connect(player, paste, true) end
 end
 
 --- a paste gathered: on to be connected
@@ -106,8 +121,9 @@ function M.tick()
   end
 end
 
---- the measured ground round a paste: to Python
+--- the measured ground round a paste: to Python (which keeps it as the player's site: later pastes there send deltas)
 function M.measured(player, snap, paste)
+  ctx.site_set(player, snap)
   ctx.start_job(player.index, "bpgen.ingame:connect", helpers.table_to_json({ player = player.index, id = paste.id,
     built = paste.built, snapshot = snap }), { player = player.index, connect = true, paste = paste })
 end
@@ -185,11 +201,11 @@ end
 local function take_away(player, rec, plan_too)
   local built = 0
   for _, g in ipairs(rec.links or {}) do
-    if g.valid and g.type == "entity-ghost" then g.destroy() end
+    if g.valid and g.type == "entity-ghost" then g.destroy({ raise_destroy = true }) end  -- (raised: the site sees it go)
   end
   for _, g in ipairs(plan_too and rec.plan or {}) do
     if g.valid then
-      if g.type == "entity-ghost" then g.destroy() else built = built + 1 end
+      if g.type == "entity-ghost" then g.destroy({ raise_destroy = true }) else built = built + 1 end
     end
   end
   for _, e in ipairs(rec.marks or {}) do
