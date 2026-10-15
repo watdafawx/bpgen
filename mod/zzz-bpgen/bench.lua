@@ -51,13 +51,14 @@ function M.ground(s, x1, y1, x2, y2)
     end
   end
   s.force_generate_chunk_requests()
+  -- (only what isn't lab ground yet: set_tiles over the whole area again costs ~150 ms for a 150-tile plan)
   local tiles = {}
-  for x = math.floor(x1), math.ceil(x2) do
-    for y = math.floor(y1), math.ceil(y2) do
-      tiles[#tiles + 1] = { name = (x + y) % 2 == 0 and "lab-dark-1" or "lab-dark-2", position = { x, y } }
-    end
+  for _, t in pairs(s.find_tiles_filtered({ area = { { math.floor(x1), math.floor(y1) }, { math.ceil(x2) + 1, math.ceil(y2) + 1 } },
+      name = { "lab-dark-1", "lab-dark-2" }, invert = true })) do
+    local p = t.position
+    tiles[#tiles + 1] = { name = (p.x + p.y) % 2 == 0 and "lab-dark-1" or "lab-dark-2", position = p }
   end
-  s.set_tiles(tiles, true, false, false, false)
+  if tiles[1] then s.set_tiles(tiles, true, false, false, false) end
 end
 
 -- power: an electric energy interface and a substation by one of the design's poles (or its corner)

@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.27.3
+Date: 2026-10-15
+  Optimizations:
+    - Showing a plan in the preview no longer stalls the game: its ground is only laid where it isn't already
+      (about 200 ms down to 40 ms for a 1400-building plan).
+    - Reopening the window shows the last plan's preview as it was, without building it again.
+---------------------------------------------------------------------------------------------------
 Version: 0.27.2
 Date: 2026-10-15
   Changes:

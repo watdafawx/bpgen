@@ -315,7 +315,10 @@ end
 
 local function preview_surface()
   local s = game.surfaces[PREVIEW]
-  if s then return s end
+  if s then
+    if not s.generate_with_lab_tiles then s.generate_with_lab_tiles = true end  -- (saves before it)
+    return s
+  end
   s = game.create_surface(PREVIEW, {
     default_enable_all_autoplace_controls = false,
     autoplace_settings = {
@@ -327,13 +330,28 @@ local function preview_surface()
     peaceful_mode = true,
   })
   s.always_day = true
+  s.generate_with_lab_tiles = true  -- (new chunks come as lab ground: bench.ground has little left to set)
   pcall(function() s.show_clouds = false end)
   return s
 end
 
 
---- builds the blueprint on the preview surface; returns center, width, height (tiles) or nil, error
-local function build_preview(player, bp, box, section)
+-- player index -> the plan on the preview now: {key, out = {center, w, h, where}}: a reopened window shows it as it
+-- is, not built again (not saved: after a load it's built again once)
+local shown = {}
+
+--- builds the blueprint on the preview surface; returns center, width, height (tiles) or nil, error. `reuse`: the
+--- same plan already there (untouched since) is kept as it is
+local function build_preview(player, bp, box, section, reuse)
+  local key = bp .. "|" .. tostring(section) .. "|" .. (box and table.concat(box, ",") or "")
+  local was = shown[player.index]
+  shown[player.index] = nil
+  local last_area = storage.bpgen_last_preview and storage.bpgen_last_preview[player.index]
+  if reuse and was and was.key == key and last_area and game.surfaces[PREVIEW]
+      and game.surfaces[PREVIEW].count_entities_filtered({ area = last_area, force = PREVIEW, limit = 1 }) > 0 then
+    shown[player.index] = was
+    return was.out[1], was.out[2], was.out[3], was.out[4]
+  end
   local s = preview_surface()
   local f = preview_force()
   pcall(player.force.set_surface_hidden, s, true)
@@ -375,11 +393,13 @@ local function build_preview(player, bp, box, section)
   end
   local half = math.max(w, h) + 12
   if box then half = math.max(box[3], box[4]) / 2 + 12 end
-  -- (the last preview goes first: around this player's spot, and wherever an absolute one landed)
+  -- (the last preview goes first: where it was built; not known (older saves): around this player's spot, and
+  -- wherever an absolute one landed)
   storage.bpgen_last_preview = storage.bpgen_last_preview or {}
   local last = storage.bpgen_last_preview[player.index]
-  for _, area in ipairs({ { { ox - 1500, oy - 1500 }, { ox + 1500, oy + 1500 } },
-                          { { player.index * 4096 - 1500, -1500 }, { player.index * 4096 + 1500, 1500 } }, last }) do
+  local old = last and { last } or { { { ox - 1500, oy - 1500 }, { ox + 1500, oy + 1500 } },
+                                     { { player.index * 4096 - 1500, -1500 }, { player.index * 4096 + 1500, 1500 } } }
+  for _, area in ipairs(old) do
     for _, e in pairs(s.find_entities_filtered({ area = area })) do
       if e.valid and e.type ~= "character" then e.destroy() end
     end
@@ -431,7 +451,9 @@ local function build_preview(player, bp, box, section)
   player.force.chart(s, { { x1 - 4, y1 - 4 }, { x2 + 4, y2 + 4 } })
   -- (where a test run finds the plan's sources and sinks: as the harness, the built area's top-left)
   local where = { origin = { x = math.floor(x1 + 0.5), y = math.floor(y1 + 0.5) }, area = { { x1 - 8, y1 - 8 }, { x2 + 8, y2 + 8 } } }
-  return { x = (x1 + x2) / 2, y = (y1 + y2) / 2 }, x2 - x1, y2 - y1, where
+  local center = { x = (x1 + x2) / 2, y = (y1 + y2) / 2 }
+  shown[player.index] = { key = key, out = { center, x2 - x1, y2 - y1, where } }
+  return center, x2 - x1, y2 - y1, where
 end
 
 -- (for headless tests: a stand-in player { index, force })
@@ -1788,7 +1810,7 @@ function M.open(player, prefill)
   if show_last then
     local r = results[player.index]
     if r and r.blueprint and r.res then
-      M.on_result(player, r.res)
+      M.on_result(player, r.res, true)  -- (the preview as it was left: not built again)
       if kept.stale then stale(player, true) end
     end
   end
@@ -2421,7 +2443,7 @@ local function show_result(frame, res, w, h, need)
   find(frame, "bpgen_notes").caption = join(notes, "\n")
 end
 
-function M.on_result(player, res)
+function M.on_result(player, res, reuse)
   local frame = player.gui.screen[NAME]
   if not frame then return false end
   web.dirty(player)
@@ -2448,7 +2470,7 @@ function M.on_result(player, res)
   if old then bench.stop(old.id) end
   test_speed_off(frame)  -- (a test run's fast-forward: off with it)
   find(frame, "bpgen_test_status").caption = ""
-  local center, w, h, where = build_preview(player, res.blueprint, res.absolute and res.absolute.box)
+  local center, w, h, where = build_preview(player, res.blueprint, res.absolute and res.absolute.box, nil, reuse)
   local sec = find(frame, "bpgen_section")
   sec.items = res.sections or {}
   sec.visible = res.sections ~= nil and #res.sections > 1
@@ -3090,6 +3112,7 @@ local function on_click(e)
       test_speed_off(frame)
       glow(player, false)
     else
+      shown[player.index] = nil  -- (the test run changes the preview: built again next time)
       bench.test(player.index, r.res.test, r.where.origin, r.where.area, PREVIEW)
       find(frame, "bpgen_test").caption = T("stop-test")
       find(frame, "bpgen_test_status").caption = T("starting-dots")
