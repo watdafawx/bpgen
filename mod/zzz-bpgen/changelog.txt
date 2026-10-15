@@ -1,4 +1,15 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.27.1
+Date: 2026-10-15
+  Changes:
+    - Esc (and E) close the bpgen window as they close the game's own windows. A window opened over it (the
+      inventory, a machine's) leaves it open, and Esc is bpgen's again once that one closes.
+    - The window opens as you left it: its pickers, fields, ticks and tab, the mall's products and more lines.
+    - The last plan stays in the preview when the window is closed and opened again (Plan breathes if you
+      changed something after it).
+  Bugfixes:
+    - Closing the window with its X now stops a test run (and its fast-forward) as the shortcut does.
+---------------------------------------------------------------------------------------------------
 Version: 0.27.0
 Date: 2026-10-14
   Changes:

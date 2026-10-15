@@ -946,12 +946,71 @@ local function close(player, keep_shell)
   if not keep_shell then web.close(player) end
 end
 M.close = close
+-- (closed by the library, its X: what's stuck to it went with it, the test run stops as with close)
+if stdwin and stdwin.on_close then
+  stdwin.on_close(function(player, name) if name == NAME then test_stop(player.index) end end)
+end
+
+-- the window's settings as the player last left them (its pickers, fields, ticks, mode, products, more lines): kept
+-- on every change, so the window opens again as it was closed (the X, Esc, the shortcut)
+local forms = safe.stored("forms")  -- player index -> { mode, values = {name -> {e|t|s|i}}, products, lines, stale }
+local NOT_KEPT = { bpgen_only_unlocked = true, bpgen_section = true, bpgen_docked = true, bpgen_web = true,
+  bpgen_size = true }
+
+local function keep_form(player)
+  local frame = player.gui.screen[NAME]
+  if not (frame and frame.valid) then return end
+  local old = forms[player.index]
+  local out = { values = {}, products = {}, stale = old and old.stale or nil }
+  local function walk(el)
+    for _, c in pairs(el.children) do
+      local n = c.name
+      if n ~= "" and n:sub(1, 6) == "bpgen_" and not NOT_KEPT[n] then
+        local t = c.type
+        if t == "choose-elem-button" then out.values[n] = { e = c.elem_value or false }
+        elseif t == "textfield" then out.values[n] = { t = c.text }
+        elseif t == "checkbox" then out.values[n] = { s = c.state }
+        elseif t == "drop-down" then out.values[n] = { i = c.selected_index } end
+      end
+      if c.type == "choose-elem-button" and c.tags.bpgen_product and c.elem_value then
+        out.products[#out.products + 1] = c.elem_value
+      end
+      walk(c)
+    end
+  end
+  walk(frame)
+  local tabs = find(frame, "bpgen_tabs")
+  out.mode = tabs and tabs.tags.mode
+  out.lines = M.more_lines(frame)
+  forms[player.index] = out
+end
+
+--- the kept settings put back in a new window (not the recipe and machine: open's prefill does those, with what
+--- follows from them)
+local function restore_form(frame, kept)
+  for name, v in pairs(kept.values or {}) do
+    local el = name ~= "bpgen_recipe" and name ~= "bpgen_machine" and find(frame, name)
+    if el then
+      -- (a picked thing gone from the game since, or an index past a list that got shorter: left as it is)
+      pcall(function()
+        if v.e ~= nil and el.type == "choose-elem-button" then el.elem_value = v.e or nil
+        elseif v.t and el.type == "textfield" then el.text = v.t
+        elseif v.s ~= nil and el.type == "checkbox" then
+          el.state = v.s
+          local target = el.tags.bpgen_toggle and find(frame, el.tags.bpgen_toggle)
+          if target then target.visible = v.s end
+        elseif v.i and el.type == "drop-down" and v.i <= #el.items then el.selected_index = v.i end
+      end)
+    end
+  end
+end
 
 --- Plan breathes (and a note says so) when the settings changed since the last plan
 local function stale(player, on)
   local frame = player.gui.screen[NAME]
   local plan, note = find(frame, "bpgen_plan"), find(frame, "bpgen_stale")
   if not (plan and note) then return end
+  if forms[player.index] then forms[player.index].stale = on or nil end
   note.visible = on
   ui.set_role(plan, on and "pulse" or "ok")
   web.dirty(player)
@@ -987,8 +1046,10 @@ local function changed(e)
     or el.name == "bpgen_docked" or el.name == "bpgen_web" then return end
   local root = el
   while root.parent and root.parent.parent do root = root.parent end
-  if root.name ~= NAME or not results[e.player_index] then return end
+  if root.name ~= NAME then return end
   local player = game.get_player(e.player_index)
+  keep_form(player)
+  if not results[e.player_index] then return end
   stale(player, true)
   badges_of(root)
 end
@@ -1013,7 +1074,9 @@ local function set_mode(frame, mode)
     if m == mode then find(frame, "bpgen_mode_tip").caption = T("mode-" .. m .. "-tip") end
   end
   M.steps(frame)
-  web.dirty(game.get_player(frame.player_index))
+  local player = game.get_player(frame.player_index)
+  if forms[player.index] then forms[player.index].mode = mode end
+  web.dirty(player)
 end
 
 --- the step bar: 1 What (a mode, always), 2 How (until there is a plan), 3 Where (a plan to place)
@@ -1065,10 +1128,35 @@ local function patch_count(player)
   return n == 0 and T("no-patches") or T("patches-picked", n)
 end
 
+-- Esc: the window is the player's opened GUI (as the game's own windows), so Esc and E close it. Another window
+-- opened over it (the inventory, a machine's) leaves it open, and it is the opened GUI again once that one closes.
+-- Looked at on the next tick: by then the game says whether something else took its place.
+local esc_check = safe.stored("esc_check")  -- player index -> "closed" (it lost Esc) or "back" (another GUI closed)
+
+local function esc_tick()
+  for i, what in pairs(esc_check) do
+    esc_check[i] = nil
+    local player = game.get_player(i)
+    local frame = player and player.connected and player.gui.screen[NAME]
+    if frame and frame.valid and frame.visible and player.opened_gui_type == defines.gui_type.none then
+      if what == "closed" then close(player) else player.opened = frame end
+    end
+  end
+end
+
 --- the window and its stuck frames shown or hidden
 local function window_shown(player, on)
   local frame = player.gui.screen[NAME]
   local as_web = web.model(player)
+  -- (hidden: Esc isn't its any more, it doesn't close it; shown again: Esc is)
+  if frame and not as_web then
+    if not on and player.opened_gui_type == defines.gui_type.custom and player.opened == frame then
+      frame.visible = false
+      player.opened = nil
+    elseif on and player.opened_gui_type == defines.gui_type.none then
+      esc_check[player.index] = "back"
+    end
+  end
   if frame then frame.visible = on and not as_web end  -- (the web window's Lua one stays hidden: the shell hides)
   if as_web then web.show(player, on) end
   for _, c in pairs(ui.attached(player, NAME)) do
@@ -1633,7 +1721,27 @@ function M.open(player, prefill)
   end
   badges_of(frame)
 
-  -- filled in (a hovered machine; tests: a mode, mall products, science per minute, options shown)
+  -- as the player left it (prefill.fresh: as new), then filled in (a hovered machine; tests: a mode, mall products,
+  -- science per minute, options shown)
+  local kept = not prefill.fresh and forms[player.index] or nil
+  -- (the last plan back in the preview, unless a recipe comes with it: that one gets planned now)
+  local show_last = kept and not prefill.rebuilt and prefill.recipe == nil
+  if kept then
+    restore_form(frame, kept)
+    local was = prefill
+    prefill = setmetatable({}, { __index = was })
+    prefill.mode = was.mode or kept.mode
+    if was.products == nil then prefill.products = kept.products end
+    if was.lines == nil then prefill.lines = kept.lines end
+    local v = kept.values or {}
+    if was.recipe == nil and v.bpgen_recipe and v.bpgen_recipe.e then
+      prefill.recipe = v.bpgen_recipe.e
+      local m = v.bpgen_machine and v.bpgen_machine.e
+      if m then prefill.machine, prefill.machine_quality = m.name, m.quality end
+    end
+    if prefill.recipe and not prototypes.recipe[prefill.recipe] then prefill.recipe = nil end
+    if prefill.machine and not prototypes.entity[prefill.machine] then prefill.machine = nil end
+  end
   set_mode(frame, prefill.mode or "line")
   for _, r in ipairs(prefill.products or {}) do
     local t = find(frame, "bpgen_products")
@@ -1676,6 +1784,16 @@ function M.open(player, prefill)
     return M.open(player, prefill)
   end
   M.restrict(player)
+  if show_last then
+    local r = results[player.index]
+    if r and r.blueprint and r.res then
+      M.on_result(player, r.res)
+      if kept.stale then stale(player, true) end
+    end
+  end
+  keep_form(player)
+  -- (Esc and E close it as the game's windows: the player's opened GUI, unless another one is open)
+  if not as_web and frame.valid and player.opened_gui_type == defines.gui_type.none then player.opened = frame end
   return frame
 end
 
@@ -3479,6 +3597,15 @@ M.handlers = {
       for _, p in pairs(game.players) do test_speed_off(p.gui.screen[NAME]) end
     end
     camera_tick()
+    if storage.bpgen_state and next(storage.bpgen_state.esc_check or {}) then esc_tick() end  -- (stored: no next())
+  end,
+  [defines.events.on_gui_closed] = function(e)
+    local el = e.element
+    local player = game.get_player(e.player_index)
+    local frame = player.gui.screen[NAME]
+    if not (frame and frame.valid and frame.visible) then return end
+    if el and el.valid and el == frame then esc_check[e.player_index] = "closed"
+    elseif not esc_check[e.player_index] then esc_check[e.player_index] = "back" end
   end,
   -- (a player gone: their test run, and its fast-forward, with them)
   [defines.events.on_player_left_game] = function(e) test_stop(e.player_index) end,
@@ -3506,6 +3633,7 @@ M.handlers = {
     changed(e)
     on_elem_changed(e)
     M.restrict(game.get_player(e.player_index))  -- (pickers it added)
+    keep_form(game.get_player(e.player_index))  -- (and what it filled in: a recipe's machine)
   end,
   [defines.events.on_gui_confirmed] = function(e)
     local n = e.element and e.element.valid and e.element.name
