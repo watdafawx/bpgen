@@ -117,7 +117,8 @@ local function revive(ghosts)
   for _, g in pairs(ghosts) do
     if g.valid and (g.type == "entity-ghost" or g.type == "tile-ghost") then
       local plans = g.type == "entity-ghost" and g.insert_plan or nil
-      local _, ent, proxy = g.silent_revive({ return_item_request_proxy = true })
+      local _, ent, proxy = g.silent_revive({ return_item_request_proxy = true,
+        raise_revive = script.active_mods["power-propagation"] ~= nil })  -- (its hidden poles power the plan)
       if ent then tame(ent) built[#built + 1] = ent end
       if ent and plans then bench.insert_plans(ent, plans) end
       if proxy and proxy.valid then proxy.destroy() end

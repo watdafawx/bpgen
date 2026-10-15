@@ -81,14 +81,19 @@ local function power(s, force, area, min_pos)
     eei.electric_buffer_size = 1e12
   end
   local sub = s.create_entity({ name = "substation", position = sub_at or add(p, { x = 2, y = 2 }), force = force })
-  if sub_at and sub and poles[1] then
+  -- (wired to the design's nearest pole: its supply area alone may cover none of it, e.g. Power Propagation's plans
+  -- with one pole, the buildings carrying the power)
+  if sub and poles[1] then
     local best, bd
-    for _, pole in pairs(poles) do
-      local d = (pole.position.x - sub.position.x) ^ 2 + (pole.position.y - sub.position.y) ^ 2
-      if not bd or d < bd then best, bd = pole, d end
+    for _, pole in pairs(poles) do  -- (not one it's wired to already: a substation an earlier run left)
+      local d = pole.valid and pole.electric_network_id ~= sub.electric_network_id
+        and (pole.position.x - sub.position.x) ^ 2 + (pole.position.y - sub.position.y) ^ 2
+      if d and (not bd or d < bd) then best, bd = pole, d end
     end
-    sub.get_wire_connector(defines.wire_connector_id.pole_copper, true)
-      .connect_to(best.get_wire_connector(defines.wire_connector_id.pole_copper, true), false)
+    if best then
+      sub.get_wire_connector(defines.wire_connector_id.pole_copper, true)
+        .connect_to(best.get_wire_connector(defines.wire_connector_id.pole_copper, true), false)
+    end
   end
 end
 

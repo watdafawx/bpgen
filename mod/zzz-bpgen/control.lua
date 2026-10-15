@@ -530,7 +530,12 @@ on_nth(6, function()
   if not warmed then
     warmed = true
     -- (loads bpgen's data before the first plan; its answer is collected and dropped)
-    local id = in_game() and native.start("py", "bpgen.ingame:warm", "")
+    -- (with Power Propagation's startup settings: its powered buildings carry power, plans need fewer poles)
+    local pp = script.active_mods["power-propagation"] and settings.startup["power-propagation-range"] and {
+      range = settings.startup["power-propagation-range"].value,
+      buildings = settings.startup["power-propagation-through-powered-buildings"] == nil
+        or settings.startup["power-propagation-through-powered-buildings"].value } or nil
+    local id = in_game() and native.start("py", "bpgen.ingame:warm", helpers.table_to_json({ propagation = pp }))
     if id then local_jobs[id] = { warm = true } end
     -- (bpgen's copy of the mods' data stale: the mods changed; a headless game reads them again meanwhile)
     local sid = in_game() and native.start("py", "bpgen.ingame:stale", helpers.table_to_json(script.active_mods))

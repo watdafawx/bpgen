@@ -22,6 +22,7 @@ import math
 import zlib
 from dataclasses import dataclass, field
 
+from bpgen import propagation
 from bpgen.calibrate import ZERO, level_key, template_inserters
 from bpgen.effects import BEACON_MODULES, MACHINE_MODULES, EffectError, Modules, machine_effects, quality_level
 
@@ -634,12 +635,14 @@ CIRCUIT_RED = 1  # defines.wire_connector_id.circuit_red
 POLE_REACH = 9
 WIRE_REACH = {POLE: POLE_REACH, "small-electric-pole": 7.5, "substation": 18, "big-electric-pole": 32}  # (vanilla)
 PIPE_UG_MAX = 10  # tiles a pipe-to-ground pair may span
+_DATA = None  # the game data configure() was given (Power Propagation's pruning reads prototypes from it)
 
 
 def configure(data):
     """take the power pole and pipes from the game data: the layouts need a 1x1 pole that powers 7x7 and wires 9
     tiles (the medium pole, or the pack's nearest equivalent), a pipe and a pipe-to-ground"""
-    global POLE, POLE_REACH, PIPE, UNDERGROUND, PIPE_UG_MAX
+    global POLE, POLE_REACH, PIPE, UNDERGROUND, PIPE_UG_MAX, _DATA
+    _DATA = data
 
     def one_by_one(p):
         (x1, y1), (x2, y2) = p.get("collision_box") or ((0, 0), (0, 0))
@@ -698,6 +701,10 @@ def insert_plans(modules, inventory):
 
 
 def blueprint_string(entities, label, game_version=(2, 0, 77), description=None, tiles=None):
+    # (Power Propagation on in the game: the poles its powered buildings make redundant left out; not on a
+    # platform, whose power reaches everywhere)
+    if propagation.RANGE is not None and _DATA is not None and not tiles:
+        entities = propagation.prune(_DATA, entities)
     bp_entities = []
     for i, e in enumerate(entities, 1):
         be = {"entity_number": i, "name": e["name"], "position": e["position"]}

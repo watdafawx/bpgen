@@ -412,7 +412,8 @@ local function build_preview(player, bp, box, section)
     if g.valid and (g.type == "entity-ghost" or g.type == "tile-ghost") then
       -- (modules go straight in: the preview shows them, and a test run needs them)
       local plans = g.type == "entity-ghost" and g.insert_plan or nil
-      local _, ent, proxy = g.silent_revive({ return_item_request_proxy = true })
+      local _, ent, proxy = g.silent_revive({ return_item_request_proxy = true,
+        raise_revive = script.active_mods["power-propagation"] ~= nil })  -- (its hidden poles power the plan)
       if ent and plans then bench.insert_plans(ent, plans) end
       if proxy and proxy.valid then proxy.destroy() end
     end

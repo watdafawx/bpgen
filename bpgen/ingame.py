@@ -165,9 +165,17 @@ def _svc():
     return _service
 
 
-def warm(_: str = "") -> str:
-    """load bpgen's data ahead of the first plan (the mod calls this when the game loads)"""
+def warm(game: str = "") -> str:
+    """load bpgen's data ahead of the first plan (the mod calls this when the game loads, with what of the game's
+    settings the planner follows: {"propagation": Power Propagation's startup settings, or absent})"""
     t = time.perf_counter()
+    try:
+        from bpgen import propagation
+        propagation.configure((json.loads(game or "{}") or {}).get("propagation"))
+        if propagation.RANGE is not None:
+            print(f"bpgen: Power Propagation on (range {propagation.RANGE}): blueprints leave out the poles it covers")
+    except ValueError:
+        pass
     with _lock:
         _svc()
     _post_icons()

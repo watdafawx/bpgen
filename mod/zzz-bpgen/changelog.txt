@@ -1,4 +1,14 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.27.2
+Date: 2026-10-15
+  Changes:
+    - Power Propagation: with it on, plans leave out the poles its powered buildings make redundant (each group of
+      buildings keeps one pole, at the west end, to tie into your grid). Its range comes from your startup
+      setting; with "through powered buildings" off, plans keep all their poles.
+    - The preview, test runs and the sandbox build the plan so Power Propagation powers it there too.
+  Bugfixes:
+    - A test run's power is wired to the plan's nearest pole (it reached only the machines in its substation's area).
+---------------------------------------------------------------------------------------------------
 Version: 0.27.1
 Date: 2026-10-15
   Changes:
