@@ -33,6 +33,11 @@ the same, for a machine whose first fluid passes through it east-west and whose 
     inserter row        output inserters, long-handed input inserters, a pole
     machine row         touching: fluid 1 flows from each machine into the next, fed at the west end
     fluid 2 pipe        along the machines' south edge
+
+a fluid made from nothing (Krastorio 2's atmospheric condenser: oxygen, nitrogen, hydrogen from the air)
+    pole row            a pole above each machine
+    machine row         touching (their outputs may join: it is all the one fluid)
+    output pipe         along the machines' south edge; its east end is the output
 """
 import math
 from dataclasses import dataclass, field
@@ -67,7 +72,7 @@ class FluidPlan:
 
     @property
     def machines(self):
-        return self.per_row if self.kind in ("fluid-fluid", "fluid-in", "two-fluid-items", "side-fluid") else 2 * self.per_row
+        return self.per_row if self.kind in ("fluid-fluid", "fluid-in", "two-fluid-items", "side-fluid", "air") else 2 * self.per_row
 
 
 def _cols(machine, size, kind, direction):
@@ -138,6 +143,8 @@ def plan_fluid(data, calib, recipe, machine, belt, bonuses=None, allowed=None, t
     if out.get("type", "item") == "item" and not items and len(fluids) == 1:
         return _plan_fluid_in(data, calib, m, r, recipe, machine, belt, size, fluids[0], out, bonuses, allowed,
                               target_rate, productivity)
+    if out.get("type") == "fluid" and not items and not fluids:
+        return _plan_air(m, r, recipe, machine, belt, size, out, target_rate, productivity)
     if out.get("type", "item") == "item" and len(fluids) == 2 and 1 <= len(items) <= 2:
         side = side_fluid_facing(m, size)
         if side:
@@ -244,6 +251,30 @@ def _plan_side_fluid(data, calib, m, r, recipe, machine, belt, size, items, flui
     return FluidPlan("side-fluid", recipe, machine, belt, size, n, craft_rate, out["name"], opm, target, lanes,
                      [fluids[a]["name"], fluids[b]["name"]], need, ins_in, ins_out, in_cols=[row, col], notes=notes,
                      facing=facing)
+
+
+def _plan_air(m, r, recipe, machine, belt, size, out, target_rate, productivity):
+    """no ingredients, a fluid out (see the module notes): one row"""
+    half = (size - 1) / 2
+    for facing in (NORTH, EAST, SOUTH, WEST):
+        conns = [(fb.get("production_type"), *_turned(pc, facing)) for fb in m.get("fluid_boxes", [])
+                 for pc in fb.get("pipe_connections", []) if pc.get("connection_type", "normal") == "normal"]
+        outs = sorted(int(x + half) for kind, x, y, d in conns if d == SOUTH and kind in ("output", "input-output"))
+        # (touching machines join whatever opens west and east: only outputs may)
+        if outs and all(kind in ("output", "input-output") for kind, x, y, d in conns if d in (EAST, WEST)):
+            break
+    else:
+        raise PlanError(f"{machine}: needs a fluid output on one edge, and only outputs on the edges beside it")
+    craft_rate = m["crafting_speed"] / r.get("energy_required", 0.5)
+    opm = craft_rate * _amount(out) * (1 + productivity)
+    target = target_rate or opm
+    n = max(1, math.ceil(target / opm - 1e-9))
+    use = target / (n * opm)
+    notes = [f"each machine runs at {use:.0%} of full speed"] if use < 0.5 else []
+    north = {int(x + half) for kind, x, y, d in conns if d == NORTH}
+    pole_col = next((c for c in range(size) if c not in north), 0)  # (a pole on a north opening is harmless anyway)
+    return FluidPlan("air", recipe, machine, belt, size, n, craft_rate, out["name"], opm, target, [], [], {},
+                     out_cols=outs, in_cols=[pole_col], notes=notes, facing=facing)
 
 
 def _plan_fluid_fluid(m, r, recipe, machine, belt, size, fluid, out, target_rate, productivity):
@@ -396,6 +427,17 @@ def layout(p: FluidPlan):
         sinks.append({"kind": "fluid", "position": {"x": width + 0.5, "y": Y["out"] + 0.5}, "item": p.output})
         return ents, sources, sinks
 
+    if p.kind == "air":
+        y_out = 1 + s
+        for x in range(width + 1):
+            ents.append({"name": planner.PIPE, "position": {"x": x + 0.5, "y": y_out + 0.5}})
+        for k in range(p.per_row):
+            x0 = k * s
+            ents.append({"name": p.machine, "position": {"x": x0 + s / 2, "y": 1 + s / 2}, "direction": p.facing,
+                         "recipe": p.recipe})
+            ents.append({"name": planner.POLE, "position": {"x": x0 + p.in_cols[0] + 0.5, "y": 0.5}})
+        sinks.append({"kind": "fluid", "position": {"x": width + 0.5, "y": y_out + 0.5}, "item": p.output})
+        return ents, sources, sinks
     if p.kind == "side-fluid":
         row = p.in_cols[0]
         Y = {"in": 0, "out": 1, "io": 2, "mach": 3, "f2": 3 + s}
@@ -484,6 +526,7 @@ def describe(p: FluidPlan):
     what = {"fluid-out": "fluid output into a pipe", "two-fluid": "two fluid inputs, items out",
             "two-fluid-items": "two fluids and items in, items out",
             "side-fluid": "two fluids (one through the machines) and items in, items out",
+            "air": "nothing in, fluid out",
             "fluid-fluid": "fluid in, fluid out", "fluid-in": "fluid in, items out"}[p.kind]
     return (f"{p.output}: {p.machines} x {p.machine}, {p.expected:.2f}/s; {what}"
             + (f"; inserter {ins.count} x {ins.name}" if ins else ""))

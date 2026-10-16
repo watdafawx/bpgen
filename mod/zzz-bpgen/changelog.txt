@@ -1,4 +1,10 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.27.7
+Date: 2026-10-16
+  Features:
+    - Line: recipes made from nothing (Krastorio 2 atmospheric condenser: oxygen, nitrogen, hydrogen) plan: the
+      condensers stand side by side with a pole above each and an output pipe along their south side.
+---------------------------------------------------------------------------------------------------
 Version: 0.27.6
 Date: 2026-10-16
   Features:
