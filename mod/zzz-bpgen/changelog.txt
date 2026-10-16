@@ -1,4 +1,10 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.27.5
+Date: 2026-10-16
+  Bugfixes:
+    - Line: a machine with its fluid inputs on its south side (e.g. the advanced assembler from Returns) failed
+      with "has no north-facing fluid input". It is now placed turned around, its fluid input towards the pipe.
+---------------------------------------------------------------------------------------------------
 Version: 0.27.4
 Date: 2026-10-16
   Bugfixes:

@@ -122,6 +122,7 @@ class Plan:
     poles_out: bool = False  # small machines with 2 input belts: poles in both output rows, input slots all free
     height: int = 0  # machine depth across the row when it isn't square (0: same as size)
     rotated: bool = False  # placed facing east/west (a narrow machine turned so its long side faces the belts)
+    flipped: bool = False  # machine turned 180 degrees from its side (its fluid input is on its south side)
 
     @property
     def machines(self):
@@ -182,19 +183,27 @@ def belt_capacity(data, belt, stack=1):
 
 
 def fluid_input_column(machine, size, height=None):
-    """column (0 = west) of a fluid input on the machine's north edge, facing north, when placed facing north"""
+    """(column, flipped): column (0 = west) of a fluid input on the machine's north edge, facing north, when placed
+    facing north - or, flipped, placed facing south (a machine whose inputs are on its south side, outputs north)"""
     height = height or size
+    found = {}
     for fb in machine.get("fluid_boxes", []):
         if fb.get("production_type") not in ("input", "input-output"):
             continue
         for pc in fb.get("pipe_connections", []):
-            if pc.get("connection_type", "normal") != "normal" or pc.get("direction", NORTH) != NORTH:
+            d = pc.get("direction", NORTH)
+            if pc.get("connection_type", "normal") != "normal" or d not in (NORTH, SOUTH):
                 continue
             x, y = pc["position"] if isinstance(pc["position"], list) else (pc["position"]["x"], pc["position"]["y"])
+            if d == SOUTH:  # turned 180 degrees it is on the north edge
+                x, y = -x, -y
             col = x + (size - 1) / 2
             if y == -(height - 1) / 2 and col == int(col):
-                return int(col)
-    raise PlanError(f"{machine['name']} has no north-facing fluid input this template can feed")
+                found.setdefault(d == SOUTH, int(col))
+    for flipped in (False, True):
+        if flipped in found:
+            return found[flipped], flipped
+    raise PlanError(f"{machine['name']} has no north- or south-facing fluid input this template can feed")
 
 
 def _half(proto):
@@ -365,7 +374,7 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
         raise PlanError(f"{machine} is {size}x{height}: beacons are laid out for square machines")
     if fluids and size % 2 == 0:
         raise PlanError(f"{machine}: fluid recipes in even-sized machines aren't supported yet")
-    fluid_col = fluid_input_column(m, size, height) if fluids else None
+    fluid_col, flipped = fluid_input_column(m, size, height) if fluids else (None, False)
 
     modules, beacon_modules = modules or Modules(), beacon_modules or Modules()
     beacon_size = per_machine_beacons = pad = 0
@@ -507,7 +516,7 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
                 belts, need, ins_near, ins_far, ins_out, fluid, fluid_need, fluid_col, modules, beacon, beacon_modules,
                 beacon_size, per_machine_beacons, pad, speed, productivity, packing, notes=notes,
                 furnace=furnace, fuel=fuel, fuel_rate=fuel_rate, poles_out=poles_out,
-                height=height if height != size else 0, rotated=rotated)
+                height=height if height != size else 0, rotated=rotated, flipped=flipped)
 
 
 def layout(p: Plan):
@@ -582,6 +591,8 @@ def layout(p: Plan):
         for side, facing, toward_machine, fcol in sides:
             recipe = {} if p.furnace else {"recipe": p.recipe}
             m_dir = ({NORTH: EAST, SOUTH: WEST}[facing]) if p.rotated else facing
+            if p.flipped:
+                m_dir = {NORTH: SOUTH, SOUTH: NORTH}[m_dir]
             put(p.machine, x0 + s / 2, Y["mach_" + side] + hs / 2, m_dir, **recipe, **machine_mods)
             # input row: inserters pick from the input side (they face it)
             slots = list(range(s))
