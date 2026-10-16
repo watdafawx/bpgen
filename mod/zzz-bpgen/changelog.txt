@@ -1,4 +1,48 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.27.10
+Date: 2026-10-16
+  Features:
+    - Line: every recipe that makes only fluids plans with a pipe per output when the fluid lines don't fit it
+      (heavy and light oil cracking, K2 electrolysis and heavy water), its machines turned a quarter when their
+      inputs and outputs are on the sides.
+    - Line: recipes with 3-4 items and two fluids, or three fluids, say which mixes the fluid lines take.
+  Bugfixes:
+    - Line: several-fluid layouts whose machines side by side would join an input to an output now refuse.
+---------------------------------------------------------------------------------------------------
+Version: 0.27.9
+Date: 2026-10-16
+  Features:
+    - Line: the fluid lines take machines of any square size, not only 3x3 (foundry casting with two molten
+      metals, foundry melting, the K2 matter plant): each is turned until its fluid inputs face the pipes and, for
+      a fluid output, its outputs have an edge of their own on the output pipe.
+    - Line: recipes with 5 or 6 belt items (spidertron, tank, power armor MK2, rocket silo) plan as one row of
+      machines: two input belts on the north side, the output belt south, and a third input belt past it that
+      long-handed inserters reach over the output belt.
+    - Line: machines whose fluid input is on a side (machining assembler) are turned a quarter to reach the pipe,
+      unless machines side by side would join an input to an output.
+  Bugfixes:
+    - Line: lines of machines 5 tiles wide or more (foundry, cryogenic plant and bigger) left inserters unpowered
+      and power poles unwired. Poles are now added wherever something has no power, and wired together.
+    - Line: recipes listing one product several times (at different chances) are counted as one product.
+    - Line: pipe connections some mods put just off the tile grid (machining assembler) are found.
+---------------------------------------------------------------------------------------------------
+Version: 0.27.8
+Date: 2026-10-16
+  Features:
+    - Line: recipes with several outputs plan. Item outputs all ride the output belt; past its east end a filter
+      splitter per by-product sorts it onto its own belt (uranium processing, kovarex, asteroid crushing, yumako
+      and jellynut processing, scrap recycling, and about 260 modded recipes).
+    - Line: recipes with an item and a fluid output (emptying barrels and cans, honey processing) plan: the pipe
+      above and below the line carries the fluid away, the machines turned to face it with their output.
+    - Line: items from one fluid or from nothing, several of them (void crafting), plan as one row onto a belt,
+      sorted the same way; machines whose fluid input is on a side are turned a quarter to reach the pipe.
+    - Line: all-fluid recipes with several outputs (advanced oil processing, coal liquefaction) plan in the Line
+      tab too, a pipe per output, sized for the main one.
+    - Line: recipes that make nothing, and mixes of fluid and item outputs with no layout yet, now say so.
+  Bugfixes:
+    - Line: outputs with a chance and a fixed amount (seed recycling, Mystical Agriculture) counted as certain:
+      their lines were planned too small.
+---------------------------------------------------------------------------------------------------
 Version: 0.27.7
 Date: 2026-10-16
   Features:

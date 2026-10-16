@@ -85,6 +85,10 @@ def _stage(data, calib, spec, belt, need, stage_kw):
         stage_kw = {k: v for k, v in stage_kw.items() if k not in pinned}
         sp = planner.plan(data, calib, spec["recipe"], spec["machine"], belt, target_rate=need, **stage_kw)
         sp.notes.append(f"the pinned inserters don't fit here ({e}); picked its own")
+    if sp.byproducts:  # (their belts would end inside the chain: planned as separate blocks instead)
+        raise planner.PlanError(f"{spec['recipe']} makes {', '.join(sp.byproducts)} too")
+    if sp.rows == 1:
+        raise planner.PlanError(f"{spec['recipe']}: its one-row layout doesn't chain yet")
     for _ in range(8):  # rounding can leave a stage just short: add a machine per row
         if sp.machines * sp.output_per_machine >= need * 1.01:
             break
@@ -97,6 +101,8 @@ def plan_chain(data, calib, params, make, **plan_kw):
     """params: final plan() kwargs incl. recipe/machine/belt; make: {item: {"recipe":..., "machine":...}}"""
     final_plan = planner.plan(data, calib, params["recipe"], params["machine"], params["belt"],
                               whole_belt_items=list(make), **plan_kw)
+    if final_plan.rows == 1:  # (its belts on both sides: planned as separate blocks instead)
+        raise planner.PlanError(f"{params['recipe']}: its one-row layout doesn't chain yet")
     f_ents, f_src, f_sinks = planner.layout(final_plan)
     chain = Chain(Block(final_plan, f_ents, f_src, f_sinks))
     stage_kw = {k: v for k, v in plan_kw.items() if k in ("bonuses", "allowed", "beacon", "beacon_modules", "beacon_quality",

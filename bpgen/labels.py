@@ -76,11 +76,12 @@ def add_labels(data, entities, sources, sinks, output, output_rate):
     for k in sinks:
         x, y = math.floor(k["position"]["x"]), math.floor(k["position"]["y"])
         what = k.get("item") or output
-        text = f"bpgen output: {what}" + (f" {output_rate:.2f}/s" if what == output and output_rate else "")
+        rate = output_rate if what == output else k.get("rate", 0)  # (a by-product's sink names its rate)
+        text = f"bpgen output: {what}" + (f" {rate:.2f}/s" if rate else "")
         lines.append(text[len("bpgen "):])
         t = spot([(x, y - 1), (x, y + 1), (x + 1, y - 1), (x + 1, y + 1)])
         if t and what:
-            labels.append(_combinator(t, [(what, output_rate * 60 if what == output else 0)], text, fluids))
+            labels.append(_combinator(t, [(what, rate * 60)], text, fluids))
     # a blueprint's origin is its top-left corner and labels can sit outside the old box: shift back to (0, 0)
     ents = entities + labels
     mx = min(math.floor(e["position"]["x"] - size_of(e["name"], e.get("direction", 0))[0] / 2 + 0.01) for e in ents)

@@ -270,6 +270,18 @@ class Service:
             "blueprint": planner.blueprint_string(ents, f"{p.output} x{p.machines}", description=description),
         }
 
+    def plan_multi_line(self, params):
+        """a recipe making only fluids (see fluidlines.plan_multi): a pipe row per output, sized for its main one"""
+        from bpgen import base
+        r = self.data.raw["recipe"][params["recipe"]]
+        m = self.data.raw["assembling-machine"].get(params["machine"]) or self.data.raw.get("furnace", {})[params["machine"]]
+        main = planner.main_result(r)
+        rate = (params.get("rate_per_min") or 0) / 60 or (  # (no rate set: one machine's worth)
+            m["crafting_speed"] / r.get("energy_required", 0.5) * planner._amount(main))
+        return base.special_section(self, {"multi": True, "recipe": params["recipe"], "machine": params["machine"],
+                                           "target": main["name"], "rate": rate, "belt": params.get("belt"),
+                                           "productivity": params.get("productivity") or 0})
+
     def plan_mall(self, params, progress=None, cancel=None):
         if params.get("feed") == "robots":
             return self.plan_bot_mall(params)
@@ -590,13 +602,21 @@ class Service:
                 p = planner.plan(self.data, calib, params["recipe"], params["machine"], params["belt"], **kw)
             except planner.PlanError as e:
                 # fluid output, or more fluids than the belt template's one pipe: the fluid lines (fluidlines.py)
+                # (and recipes with no item ingredients: their items come out of a fluid line's machine row)
                 r = self.data.raw["recipe"].get(params["recipe"]) or {}
-                if not any(x.get("type") == "fluid" for x in (r.get("ingredients") or []) + (r.get("results") or [])):
+                if (not any(x.get("type") == "fluid" for x in (r.get("ingredients") or []) + (r.get("results") or []))
+                        and any(x.get("type", "item") == "item" for x in r.get("ingredients") or [])):
                     raise
                 try:
                     return self.plan_fluid(params, progress, cancel)
                 except planner.PlanError as e2:
-                    raise planner.PlanError(f"{e}; as a fluid line: {e2}") from e2
+                    outs = planner.results_of(r)
+                    if not outs or any(x.get("type", "item") != "fluid" for x in outs):
+                        raise planner.PlanError(f"{e}; as a fluid line: {e2}") from e2
+                    try:  # fluids out (advanced oil processing, cracking): a pipe row per output
+                        return self.plan_multi_line(params)
+                    except planner.PlanError as e3:
+                        raise planner.PlanError(f"{e}; as a fluid line: {e2}; with a pipe per output: {e3}") from e3
             ents, sources, sinks = planner.layout(p)
         ents, sources, sinks, description = labels.add_labels(self.data, ents, sources, sinks, p.output, p.expected_output)
         label = f"{p.recipe} x{p.machines} {p.expected_output:g}/s"

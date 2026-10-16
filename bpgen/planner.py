@@ -13,6 +13,10 @@ Layout (y grows downward, everything flows east), mirrored around the output bel
     machine row B
     ... input side mirrored
 An inserter only fills the far lane of a belt, so one machine row per output lane.
+5-6 belt items: one machine row instead (_plan_two_sided): two input belts north, the output belt south, a third
+input belt past it reached by long-handed inserters. Machines 5 wide or more get extra poles (power_up).
+Several item outputs share the output belt; past its east end a filter splitter per by-product sorts it onto its
+own belt (sort_tail). An item recipe with a fluid output and no fluid input uses the pipe rows to carry it away.
 """
 import base64
 import contextvars
@@ -30,6 +34,7 @@ NORTH, EAST, SOUTH, WEST = 0, 4, 8, 12
 POLE = "medium-electric-pole"  # supply 7x7, wire reach 9
 POLE_EVERY = 2  # machines
 PIPE, UNDERGROUND = "pipe", "pipe-to-ground"
+PIPE_FLOW = 6000  # per second, about what one pipe moves
 MARGIN = 0.95  # use at most this share of a measured inserter rate
 MAX_PER_ROW = 40  # a full belt of a slow recipe can need hundreds of machines
 # Inserters can't pack a lane perfectly (they drop into whatever gap passes), so a row sized to exactly
@@ -123,20 +128,78 @@ class Plan:
     height: int = 0  # machine depth across the row when it isn't square (0: same as size)
     rotated: bool = False  # placed facing east/west (a narrow machine turned so its long side faces the belts)
     flipped: bool = False  # machine turned 180 degrees from its side (its fluid input is on its south side)
+    turn: int = 0  # (a square machine) turned this much more, both rows: its pipe connection is on a side
+    fluid_out: bool = False  # the pipe rows carry a fluid output away (east) instead of an input in
+    rows: int = 2  # machine rows: 1 for the two-sided layout (5-6 belt items)
+    south: list = field(default_factory=list)  # two-sided: the far belt's lanes south of the output belt
+    ins_south: InserterChoice | None = None  # two-sided: the long-handed inserters reaching it
+    byproducts: dict = field(default_factory=dict)  # other item outputs -> per machine; they share the output belt
+    out_share: float = 1.0  # the main output's share of what the output inserters move
+    splitter: str | None = None  # sorts each by-product off the output belt
 
     @property
     def machines(self):
-        return 2 * self.per_row
+        return self.rows * self.per_row
 
     @property
     def expected_output(self):
-        return min(self.belt_capacity * self.packing, self.machines * self.output_per_machine)
+        return min(self.belt_capacity * self.rows / 2 * self.packing * self.out_share,
+                   self.machines * self.output_per_machine)
 
 
 def _amount(entry):
     if "amount" in entry:
-        return entry["amount"]
+        return entry["amount"] * entry.get("probability", 1)
     return (entry.get("amount_min", 0) + entry.get("amount_max", 0)) / 2 * entry.get("probability", 1)
+
+
+def _yield(entry, productivity):
+    """per craft, with productivity (which skips the part a recipe marks ignored_by_productivity)"""
+    a = _amount(entry)
+    return a + max(0, a - entry.get("ignored_by_productivity", 0)) * productivity
+
+
+def results_of(r):
+    """a recipe's outputs, one entry per product (some list one several times, at different chances), what a
+    script fills in (amount 0) left out; a single output comes back as it is"""
+    res = [x for x in r.get("results") or [] if _amount(x) > 0]
+    if len({(x.get("type", "item"), x["name"]) for x in res}) == len(res):
+        return res
+    merged = {}
+    for x in res:
+        k = (x.get("type", "item"), x["name"])
+        if k in merged:
+            m = merged[k]
+            m["amount"] += _amount(x)
+            m["ignored_by_productivity"] = m.get("ignored_by_productivity", 0) + x.get("ignored_by_productivity", 0)
+        else:
+            merged[k] = {"type": k[0], "name": k[1], "amount": _amount(x),
+                         "ignored_by_productivity": x.get("ignored_by_productivity", 0)}
+    return list(merged.values())
+
+
+def main_result(r, kind=None):
+    """the output a line is named and sized for: the recipe's main_product, else the one named like the recipe,
+    else the largest (uranium processing: uranium-238); kind "item"/"fluid": among those only"""
+    res = [x for x in results_of(r) if kind is None or x.get("type", "item") == kind]
+    by_name = {x["name"]: x for x in res}
+    return (by_name.get(r.get("main_product") or "") or by_name.get(r.get("name") or "")
+            or max(res, key=_amount, default=None))
+
+
+def no_output(r):
+    """why a recipe with nothing (measurable) to make has no line"""
+    if not list(r.get("results") or []):
+        return "this recipe makes nothing (it uses its ingredients up): no line to plan"
+    return "this recipe's outputs are left for a script to fill in (0 in its data): no line to plan"
+
+
+def splitter_for(data, belt):
+    """the splitter of this belt tier: same speed, the one named like the belt first (None: the pack has none)"""
+    speed = data.raw["transport-belt"][belt]["speed"]
+    same = sorted(n for n, s in data.raw.get("splitter", {}).items() if s["speed"] == speed and not s.get("hidden"))
+    named = belt.replace("transport-belt", "splitter")
+    return named if named in same else (same[0] if same else None)
 
 
 def energy(text):
@@ -194,7 +257,7 @@ def fluid_input_column(machine, size, height=None):
             d = pc.get("direction", NORTH)
             if pc.get("connection_type", "normal") != "normal" or d not in (NORTH, SOUTH):
                 continue
-            x, y = pc["position"] if isinstance(pc["position"], list) else (pc["position"]["x"], pc["position"]["y"])
+            x, y = conn_xy(pc)
             if d == SOUTH:  # turned 180 degrees it is on the north edge
                 x, y = -x, -y
             col = x + (size - 1) / 2
@@ -204,6 +267,60 @@ def fluid_input_column(machine, size, height=None):
         if flipped in found:
             return found[flipped], flipped
     raise PlanError(f"{machine['name']} has no north- or south-facing fluid input this template can feed")
+
+
+def conn_xy(pc):
+    """a pipe connection's position, on the half-tile grid (some mods put them at -2.2 or -2.15 on a 5x5's edge:
+    the game opens them onto the same tile as -2)"""
+    x, y = pc["position"] if isinstance(pc["position"], list) else (pc["position"]["x"], pc["position"]["y"])
+    return round(x * 2) / 2, round(y * 2) / 2
+
+
+def turned(pc, facing):
+    """(x, y, direction) of a pipe connection with the machine placed facing `facing`"""
+    x, y = conn_xy(pc)
+    d = pc.get("direction", NORTH)
+    for _ in range(facing // 4):  # a quarter turn clockwise
+        x, y, d = -y, x, (d + 4) % 16
+    return x, y, d
+
+
+def side_column(machine, size, kinds, index=1, touching=True):
+    """(column, turn): a square machine turned by `turn` has the index-th (1-based) fluid box of a production type
+    in `kinds` opening north from its north edge, at that column. Turns tried: none, 180, then a quarter either way;
+    with `touching` (machines side by side in a row) only turns where neighbours' side connections don't meet"""
+    boxes = [fb for fb in machine.get("fluid_boxes", []) if fb.get("production_type") in kinds]
+    if not boxes:
+        raise PlanError(f"{machine['name']} has no {' or '.join(kinds)} fluid box")
+    fb = boxes[min(index, len(boxes)) - 1]
+    half = (size - 1) / 2
+    joined = False
+    for turn in (NORTH, SOUTH, EAST, WEST):
+        for pc in fb.get("pipe_connections", []):
+            if pc.get("connection_type", "normal") != "normal":
+                continue
+            x, y, d = turned(pc, turn)
+            if d == NORTH and y == -half and x + half == int(x + half):
+                if touching and side_joins(machine, size, turn):
+                    joined = True
+                    continue
+                return int(x + half), turn
+    if joined:
+        raise PlanError(f"{machine['name']}: turned to reach its fluid connection, machines side by side would join "
+                        f"fluid boxes")
+    raise PlanError(f"{machine['name']}: no normal pipe connection on its {' or '.join(kinds)} fluid box")
+
+
+def side_joins(m, size, facing):
+    """machines placed touching in a row, facing `facing` (or turned 180 from it): does a fluid connection on one's
+    east edge meet one on the next one's west edge, an input and an output (an output would flow into the
+    neighbour's input; two outputs pass nothing, two inputs only share)?"""
+    half = (size - 1) / 2
+    conns = [(fb.get("production_type") == "output", *turned(pc, facing)) for fb in m.get("fluid_boxes", [])
+             for pc in fb.get("pipe_connections", []) if pc.get("connection_type", "normal") == "normal"]
+    east = {(y, out) for out, x, y, d in conns if d == EAST and x == half}
+    west = {(y, out) for out, x, y, d in conns if d == WEST and x == -half}
+    return any(y1 == y2 and o1 != o2 for y1, o1 in east for y2, o2 in west)
 
 
 def _half(proto):
@@ -335,7 +452,7 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
         raise PlanError(f"{machine} can't craft {recipe} (category {' or '.join(categories(r))})")
     size, height = _dims(m)  # width along the row, depth across it (machine facing north)
     rotated = False
-    if size < height and not any(i.get("type") == "fluid" for i in r.get("ingredients", [])):
+    if size < height and not any(i.get("type") == "fluid" for i in list(r.get("ingredients") or []) + list(r.get("results") or [])):
         size, height, rotated = height, size, True  # turned sideways: its long side gets the inserters
     bonuses = bonuses or ZERO
 
@@ -364,17 +481,41 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
     items = [i for i in ingredients if i.get("type", "item") == "item"]
     if len(fluids) > 1:
         raise PlanError(f"{len(fluids)} fluid ingredients: this template handles one")
-    if not 1 <= len(items) <= 4:
-        raise PlanError(f"{len(items)} item ingredients: this template handles 1-4")
-    results = [x for x in r.get("results", []) if x.get("type", "item") == "item"]
-    if len(results) != 1 or len(r.get("results", [])) != 1:
-        raise PlanError("recipes with several outputs or a fluid output: not supported yet")
-    out = results[0]
+    if not 1 <= len(items) <= 6:
+        raise PlanError(f"{len(items)} item ingredients: this template handles 1-6 (5-6: one row, belts on both sides)")
+    results = [x for x in results_of(r) if x.get("type", "item") == "item"]
+    # a fluid output (no fluid input): the pipe rows carry it away, the machines turned to face them with it
+    fluid_out = [x for x in results_of(r) if x.get("type") == "fluid"]
+    if fluid_out and (fluids or len(fluid_out) > 1):
+        raise PlanError("a fluid in and a fluid out, or two fluids out: this template has one pipe per side")
+    results = [x for x in results if _amount(x) > 0]  # (outputs a script fills in list 0)
+    if not results:
+        raise PlanError(no_output(r))
+    # several outputs: all ride the output belt, a filter splitter per by-product sorts it off at the end
+    out = main_result(r, "item") if len(results) > 1 else results[0]
+    extra = [x for x in results if x["name"] != out["name"]]
+    splitter = splitter_for(data, belt) if extra else None
+    if extra and not splitter:
+        raise PlanError(f"{recipe} has several outputs: sorting them needs a splitter for {belt}")
     if beacon and size != height:
         raise PlanError(f"{machine} is {size}x{height}: beacons are laid out for square machines")
-    if fluids and size % 2 == 0:
+    if (fluids or fluid_out) and size % 2 == 0:
         raise PlanError(f"{machine}: fluid recipes in even-sized machines aren't supported yet")
-    fluid_col, flipped = fluid_input_column(m, size, height) if fluids else (None, False)
+    turn = 0
+    try:
+        fluid_col, flipped = fluid_input_column(m, size, height) if fluids else (None, False)
+        if fluids and size == height and not beacon and side_joins(m, size, SOUTH if flipped else NORTH):
+            raise PlanError(f"{machine}: machines side by side would join fluid boxes")
+    except PlanError:
+        if size != height:
+            raise
+        # (its fluid input on a side: the machines turned a quarter, unless touching ones would join fluid boxes)
+        fluid_col, turn = side_column(m, size, ("input", "input-output"), fluids[0].get("fluidbox_index", 1))
+        flipped = False
+    if fluid_out:
+        if size != height:
+            raise PlanError(f"{machine} is {size}x{height}: a fluid output needs a square machine here")
+        fluid_col, turn = side_column(m, size, ("output",), fluid_out[0].get("fluidbox_index", 1))
 
     modules, beacon_modules = modules or Modules(), beacon_modules or Modules()
     beacon_size = per_machine_beacons = pad = 0
@@ -396,25 +537,39 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
     productivity = min(productivity + mod_prod, r.get("maximum_productivity", 3.0))
     craft_rate = m["crafting_speed"] * speed / r.get("energy_required", 0.5)
     out_per_machine = craft_rate * _amount(out) * (1 + productivity)
+    byproducts = {x["name"]: craft_rate * _yield(x, productivity) for x in extra}
+    if extra:
+        out_per_machine = craft_rate * _yield(out, productivity)
+    full_main = out_per_machine
+    out_all = out_per_machine + sum(byproducts.values())  # what the output inserters move
     cap = belt_capacity(data, belt)
     lane_cap = cap / 2
-    exact = lane_cap * OUTPUT_SLACK / out_per_machine  # machines a row needs (each row fills one output lane)
+    exact = lane_cap * OUTPUT_SLACK / out_all  # machines a row needs (each row fills one output lane)
     target = _ceil(exact)
     notes = []
-    if target_rate:  # a set rate, or a chain stage making what the next block eats (each row fills one output lane)
+    # (5-6 belt items: one row, sized in _plan_two_sided)
+    two_sided = len(items) + (m.get("energy_source", {}).get("type") == "burner") > 4
+    if two_sided:
+        pass
+    elif target_rate:  # a set rate, or a chain stage making what the next block eats (each row fills one output lane)
         wanted = max(1, _ceil(target_rate / 2 * 1.03 / out_per_machine))
         if wanted > target:
             notes.append(f"{target_rate * 60:g}/min is more than one {belt} carries ({cap * 60:g}/min): planned a full belt")
         else:
             target, exact = wanted, target_rate / 2 * 1.03 / out_per_machine
-    if per_row:
+    if per_row and not two_sided:
         if per_row != target:
             notes.append(f"machines per row set to {per_row} (a full belt needs {target})")
         target = exact = per_row
-    elif target > max_per_row and not target_rate:
+    elif target > max_per_row and not target_rate and not two_sided:
         notes.append(f"a full belt needs {target} machines per row; capped at {max_per_row}")
         target = exact = max_per_row
 
+    if fluid_out and not per_row:  # (one pipe per row carries the fluid output away)
+        most = max(1, _floor(PIPE_FLOW / (craft_rate * _yield(fluid_out[0], productivity))))
+        if target > most:
+            notes.append(f"a pipe carries about {PIPE_FLOW}/s of {fluid_out[0]['name']}: {most} machines per row")
+            target = exact = most
     rates = {i["name"]: craft_rate * _amount(i) for i in items}  # per machine
     fuel, fuel_rate = None, 0.0
     es = m.get("energy_source", {})
@@ -423,14 +578,22 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
         fuel_rate = energy(m["energy_usage"]) * (1 + mod_consumption) / (fuel_value * es.get("effectivity", 1))
         rates[fuel] = rates.get(fuel, 0) + fuel_rate
         notes.append(f"burner: each machine burns {fuel_rate:.3f} {fuel}/s, fed on the input belt")
-        if len(rates) > 4:
-            raise PlanError(f"{len(rates) - 1} ingredients plus fuel: this template handles 4 belt items")
+        if len(rates) > 6:
+            raise PlanError(f"{len(rates) - 1} ingredients plus fuel: this template handles 6 belt items")
+    if len(rates) > 4:  # (one machine row with belts on both sides)
+        if beacon:
+            raise PlanError(f"{len(rates)} belt items: their one-row layout has no beacons yet")
+        return _plan_two_sided(
+            data, calib, belt, recipe, machine, m, size, height, rates, near_ins, far_ins, out_ins, bonus, zero,
+            craft_rate, out_per_machine, out_all, byproducts, full_main, out, fluids, fluid_out, fluid_col, flipped,
+            turn, target_rate, per_row, max_per_row, notes, modules, speed, productivity, splitter, furnace, fuel,
+            fuel_rate, rotated)
     # the fluid entry takes one input slot; without beacons so does a power pole on alternate machines
     # (with beacons the poles sit above the beacons instead)
-    slots = size - (1 if fluids else 0) if beacon else size - 1
+    slots = size - (1 if fluids or fluid_out else 0) if beacon else size - 1
     # a 2x2 with 3+ belt items needs both input tiles for inserters: its poles move to the output rows, where
     # the 7x7 supply still reaches the input inserters 3 rows away
-    poles_out = not beacon and not fluids and height <= 2 and size <= 2 and len(rates) > 2
+    poles_out = not beacon and not fluids and not fluid_out and height <= 2 and size <= 2 and len(rates) > 2
     if poles_out:
         slots = size
     failures = []
@@ -448,7 +611,7 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
     throttle = 1.0
     found = None
     for throttle in INSERTER_THROTTLE:
-        if not out_keeps_up(out_per_machine * throttle):
+        if not out_keeps_up(out_all * throttle):
             continue
         t_rates = {it: v * throttle for it, v in rates.items()}
         # (slower machines: as many more as the row really needs, from its need before rounding - one machine at
@@ -458,7 +621,7 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
                              whole_belt_items, failures)
         if found:
             break
-    if not found and not out_keeps_up(out_per_machine * INSERTER_THROTTLE[-1]):
+    if not found and not out_keeps_up(out_all * INSERTER_THROTTLE[-1]):
         raise PlanError(failures[-1])
     if not found:
         def best(names):
@@ -471,6 +634,7 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
     if throttle < 1:
         craft_rate *= throttle
         out_per_machine *= throttle
+        out_all *= throttle
         rates = t_rates
         target = t_target
         notes.append(f"its inserters can't keep one {machine} busy: each runs at {throttle:.0%} speed, "
@@ -480,6 +644,7 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
         scale *= drain
         craft_rate *= scale
         out_per_machine *= scale
+        out_all *= scale
         rates = {it: r * scale for it, r in rates.items()}
         notes.append(f"one {machine} is faster than its input belt: it runs at {scale:.1%} speed (the belt is the limit)"
                      + ("; its inserters have little headroom, so planned for ~85% of the belt" if drain < 1 else ""))
@@ -496,7 +661,7 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
     ins_out = None
     for names, key, capped in ((plain, zero, True), (plain, bonus, False), (out_ins, bonus, False)):
         try:
-            ins_out = pick_inserter(calib, names, belt, "machine_to_belt", key, out_per_machine, out_slots)
+            ins_out = pick_inserter(calib, names, belt, "machine_to_belt", key, out_all, out_slots)
             ins_out.hand = 1 if capped and bonus(ins_out.name) != zero(ins_out.name) else 0
             break
         except PlanError as e:
@@ -512,15 +677,180 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
     need = {it: rates[it] * per_row for it in rates}
     fluid = fluids[0]["name"] if fluids else None
     fluid_need = craft_rate * _amount(fluids[0]) * per_row if fluids else 0.0
+    if fluid_out:  # (what each row's pipe carries out)
+        fluid, fluid_need = fluid_out[0]["name"], craft_rate * _yield(fluid_out[0], productivity) * per_row
+    byproducts = {k: v * out_per_machine / full_main for k, v in byproducts.items()}  # (as throttled)
+    if extra:
+        notes.append(f"its by-products ({', '.join(byproducts)}) share the output belt; a filter splitter per "
+                     f"by-product sorts it onto its own belt at the east end")
     return Plan(recipe, machine, belt, size, per_row, craft_rate, out["name"], out_per_machine, cap, lane_cap,
                 belts, need, ins_near, ins_far, ins_out, fluid, fluid_need, fluid_col, modules, beacon, beacon_modules,
                 beacon_size, per_machine_beacons, pad, speed, productivity, packing, notes=notes,
                 furnace=furnace, fuel=fuel, fuel_rate=fuel_rate, poles_out=poles_out,
-                height=height if height != size else 0, rotated=rotated, flipped=flipped)
+                height=height if height != size else 0, rotated=rotated, flipped=flipped, byproducts=byproducts,
+                out_share=out_per_machine / out_all if extra else 1.0, splitter=splitter, turn=turn,
+                fluid_out=bool(fluid_out))
+
+
+def _plan_two_sided(data, calib, belt, recipe, machine, m, size, height, rates, near_ins, far_ins, out_ins, bonus,
+                    zero, craft_rate, out_per_machine, out_all, byproducts, full_main, out, fluids, fluid_out,
+                    fluid_col, flipped, turn, target_rate, per_row, max_per_row, notes, modules, speed, productivity,
+                    splitter, furnace, fuel, fuel_rate, rotated):
+    """5-6 belt items: one machine row, two input belts north (near and long-handed inserters, as the template),
+    the output belt south, and a third input belt past it that long-handed inserters reach over the output belt.
+    One item per lane, the hungriest nearest"""
+    if not far_ins:
+        raise PlanError(f"{len(rates)} belt items need long-handed inserters calibrated for {belt}")
+    cap = belt_capacity(data, belt)
+    lane_cap = cap / 2
+    order = sorted(rates, key=lambda it: -rates[it])
+    lanes = order + [None] * (6 - len(order))
+    near, far, south = lanes[0:2], lanes[2:4], lanes[4:6]
+    # (north: the fluid's tap or a pole takes a slot; south: a pole on alternate machines)
+    slots_n, slots_s = size - 1, size - 1
+    target = _ceil(lane_cap * OUTPUT_SLACK / out_all)  # the output belt's far lane
+    if target_rate:
+        wanted = max(1, _ceil(target_rate * 1.03 / out_per_machine))
+        if wanted > target:
+            notes.append(f"{target_rate * 60:g}/min is more than a lane of {belt} carries: planned a full lane")
+        else:
+            target = wanted
+    if per_row:
+        target = per_row
+    elif target > max_per_row:
+        notes.append(f"a full lane needs {target} machines; capped at {max_per_row}")
+        target = max_per_row
+    failures = []
+    found = None
+    for throttle in INSERTER_THROTTLE:
+        t = {it: v * throttle for it, v in rates.items()}
+        try:
+            ins_out = pick_inserter(calib, [n for n in out_ins if "stack-inserter" not in n] or out_ins, belt,
+                                    "machine_to_belt", zero, out_all * throttle, slots_s)
+            ins_s = pick_inserter(calib, far_ins, belt, "belt_to_machine", bonus, sum(t[i] for i in south if i),
+                                  slots_s - ins_out.count) if any(south) else None
+            ins_near = pick_inserter(calib, near_ins, belt, "belt_to_machine", bonus, sum(t[i] for i in near if i),
+                                     slots_n)
+            ins_far = pick_inserter(calib, far_ins, belt, "belt_to_machine", bonus, sum(t[i] for i in far if i),
+                                    slots_n - ins_near.count)
+            found = throttle
+            break
+        except PlanError as e:
+            failures.append(str(e))
+    if found is None:
+        raise PlanError(failures[-1])
+    ins_out.hand = 1 if bonus(ins_out.name) != zero(ins_out.name) else 0
+    # (each item has a lane: as many machines as the hungriest lane feeds)
+    fed = min(_floor(lane_cap / (v * found)) for v in rates.values())
+    per = max(1, min(target, fed) if not per_row else per_row)
+    if not per_row and fed < target:
+        tight = max(rates, key=rates.get)
+        notes.append(f"input-limited: {tight} (one lane, {lane_cap:.1f}/s) feeds only {per} machines")
+    if found < 1:
+        craft_rate *= found
+        out_per_machine *= found
+        notes.append(f"its inserters can't keep one {machine} busy: each runs at {found:.0%} speed")
+    rates = {it: v * found for it, v in rates.items()}
+    byproducts = {k: v * out_per_machine / full_main for k, v in byproducts.items()}
+    notes.append(f"{len(rates)} belt items: one row of machines, two input belts north, the output belt south and "
+                 f"a third input belt past it ({', '.join(i for i in south if i)}) that long-handed inserters reach "
+                 f"over the output belt")
+    if byproducts:
+        notes.append(f"its by-products ({', '.join(byproducts)}) share the output belt; a filter splitter per "
+                     f"by-product sorts it onto its own belt at the east end")
+    fluid = fluids[0]["name"] if fluids else None
+    fluid_need = craft_rate * _amount(fluids[0]) * per if fluids else 0.0
+    if fluid_out:
+        fluid, fluid_need = fluid_out[0]["name"], craft_rate * _yield(fluid_out[0], productivity) * per
+    need = {it: v * per for it, v in rates.items()}
+    return Plan(recipe, machine, belt, size, per, craft_rate, out["name"], out_per_machine, cap, lane_cap,
+                [list(near), list(far)], need, ins_near, ins_far, ins_out, fluid, fluid_need, fluid_col, modules,
+                None, Modules(), 0, 0, 0, speed, productivity, 1.0, notes=notes, furnace=furnace, fuel=fuel,
+                fuel_rate=fuel_rate, height=height if height != size else 0, rotated=rotated, flipped=flipped,
+                byproducts=byproducts, out_share=out_per_machine / (out_per_machine + sum(byproducts.values())),
+                splitter=splitter, turn=turn, fluid_out=bool(fluid_out), rows=1, south=list(south), ins_south=ins_s)
+
+
+def _layout_two_sided(p: Plan):
+    """pipe / tap (with a fluid), far belt, near belt, input inserters, machines, output inserters and long-handed
+    ones, the output belt, the south belt"""
+    s = p.size
+    hs = p.height or s
+    width = p.per_row * s
+    wet = p.fluid is not None
+    Y, y = {}, 0
+    for name, h in ((("pipe", 1), ("tap", 1)) if wet else ()) + (("far", 1), ("near", 1), ("ins", 1), ("mach", hs),
+                                                                 ("io", 1), ("out", 1), ("south", 1)):
+        Y[name] = y
+        y += h
+    ents = []
+
+    def put(name, x, yy, direction=None, **kw):
+        e = {"name": name, "position": {"x": x, "y": yy}}
+        if direction is not None:
+            e["direction"] = direction
+        e.update(kw)
+        ents.append(e)
+    for x in range(width):
+        for name in ("far", "near") + (("south",) if any(p.south) else ()):
+            put(p.belt, x + 0.5, Y[name] + 0.5, EAST)
+        if wet:
+            put(PIPE, x + 0.5, Y["pipe"] + 0.5)
+    for x in range(width + 1):
+        put(p.belt, x + 0.5, Y["out"] + 0.5, EAST)
+    if p.fluid_out:
+        put(PIPE, width + 0.5, Y["pipe"] + 0.5)
+    m_dir = ((EAST if p.rotated else SOUTH if p.flipped else NORTH) + p.turn) % 16
+    recipe = {} if p.furnace else {"recipe": p.recipe}
+    mods = {"modules": p.modules.items, "inventory": MACHINE_MODULES} if p.modules.count else {}
+    for k in range(p.per_row):
+        x0 = k * s
+        has_pole = k % POLE_EVERY == 0
+        put(p.machine, x0 + s / 2, Y["mach"] + hs / 2, m_dir, **recipe, **mods)
+        slots = list(range(s))
+        if wet:
+            slots.remove(p.fluid_col)
+            put(UNDERGROUND, x0 + p.fluid_col + 0.5, Y["ins"] + 0.5, SOUTH)  # normal side into the machine
+            put(UNDERGROUND, x0 + p.fluid_col + 0.5, Y["tap"] + 0.5, NORTH)  # normal side up to the pipe
+            if has_pole:
+                put(POLE, x0 + (s - 1 if p.fluid_col != s - 1 else 0) + 0.5, Y["tap"] + 0.5)
+        elif has_pole:
+            put(POLE, x0 + slots.pop() + 0.5, Y["ins"] + 0.5)
+        for choice in (p.ins_near, p.ins_far):  # (they face where they pick up: north)
+            for _ in range(choice.count):
+                put(choice.name, x0 + slots.pop(0) + 0.5, Y["ins"] + 0.5, NORTH)
+        slots = list(range(s))
+        if has_pole:
+            put(POLE, x0 + slots.pop() + 0.5, Y["io"] + 0.5)
+        extra = {"override_stack_size": p.ins_out.hand} if p.ins_out.hand else {}
+        for _ in range(p.ins_out.count):  # picking from the machine, dropping on the output belt's far lane
+            put(p.ins_out.name, x0 + slots.pop(0) + 0.5, Y["io"] + 0.5, NORTH, **extra)
+        if p.ins_south:
+            for _ in range(p.ins_south.count):  # picking from the south belt over the output belt
+                put(p.ins_south.name, x0 + slots.pop(0) + 0.5, Y["io"] + 0.5, SOUTH)
+    sources = []
+    for name, lanes in (("near", p.belts[0]), ("far", p.belts[1]), ("south", p.south)):
+        if any(lanes):
+            sources.append({"kind": "belt", "position": {"x": 0.5, "y": Y[name] + 0.5}, "lanes": list(lanes),
+                            "rates": {it: p.input_need[it] for it in set(lanes) if it}})
+    if wet and not p.fluid_out:
+        sources.append({"kind": "fluid", "position": {"x": -0.5, "y": Y["pipe"] + 0.5}, "fluid": p.fluid,
+                        "rates": {p.fluid: p.fluid_need}})
+    sinks = [{"kind": "belt", "position": {"x": width + 0.5, "y": Y["out"] + 0.5}}]
+    if p.fluid_out:
+        sinks.append({"kind": "fluid", "position": {"x": width + 0.5, "y": Y["pipe"] + 0.5}, "item": p.fluid,
+                      "rate": p.fluid_need})
+    if p.byproducts:
+        sinks[0:1] = sort_tail(ents, p.belt, p.splitter, {k: v * p.machines for k, v in p.byproducts.items()},
+                               p.output, width + 1, Y["out"], Y["south"])
+    power_up(ents, sources, sinks)
+    return ents, sources, sinks
 
 
 def layout(p: Plan):
     """-> (entities, sources, sinks) with positions relative to the top-left corner"""
+    if p.rows == 1:
+        return _layout_two_sided(p)
     s = p.size
     hs = p.height or s  # machine rows' depth
     bs = p.beacon_size
@@ -568,6 +898,9 @@ def layout(p: Plan):
             put(PIPE, x + 0.5, Y["pipe_b"] + 0.5)
     for x in range(width + 1):  # one extra tile so every output passes the end
         put(p.belt, x + 0.5, Y["belt"] + 0.5, EAST)
+    if p.fluid_out:  # (an output pipe: one more tile past the last machine, its end)
+        put(PIPE, width + 0.5, Y["pipe_a"] + 0.5)
+        put(PIPE, width + 0.5, Y["pipe_b"] + 0.5)
 
     # side A faces north (inputs above), side B is side A turned 180 degrees
     sides = (
@@ -593,6 +926,7 @@ def layout(p: Plan):
             m_dir = ({NORTH: EAST, SOUTH: WEST}[facing]) if p.rotated else facing
             if p.flipped:
                 m_dir = {NORTH: SOUTH, SOUTH: NORTH}[m_dir]
+            m_dir = (m_dir + p.turn) % 16
             put(p.machine, x0 + s / 2, Y["mach_" + side] + hs / 2, m_dir, **recipe, **machine_mods)
             # input row: inserters pick from the input side (they face it)
             slots = list(range(s))
@@ -623,11 +957,39 @@ def layout(p: Plan):
         for i, lanes in enumerate(p.belts):
             sources.append({"kind": "belt", "position": {"x": 0.5, "y": Y[("near_", "far_")[i] + side] + 0.5},
                             "lanes": lanes, "rates": {it: p.input_need[it] for it in set(lanes) if it}})
-        if fluid:
+        if fluid and not p.fluid_out:
             sources.append({"kind": "fluid", "position": {"x": -0.5, "y": Y["pipe_" + side] + 0.5}, "fluid": p.fluid,
                             "rates": {p.fluid: p.fluid_need}})
     sinks = [{"kind": "belt", "position": {"x": width + 0.5, "y": Y["belt"] + 0.5}}]
+    if p.fluid_out:
+        sinks += [{"kind": "fluid", "position": {"x": width + 0.5, "y": Y["pipe_" + side] + 0.5}, "item": p.fluid,
+                   "rate": p.fluid_need} for side in "ab"]
+    if p.byproducts:
+        sinks[0:1] = sort_tail(ents, p.belt, p.splitter, {k: v * p.machines for k, v in p.byproducts.items()},
+                               p.output, width + 1, Y["belt"], y - 1)
+    if max(s, hs) >= 5 or p.turn or p.fluid_out or p.byproducts:  # (wide machines outgrow a pole on every other one)
+        power_up(ents, sources, sinks)
     return ents, sources, sinks
+
+
+def sort_tail(ents, belt, splitter, rates, output, x, yb, bottom):
+    """sorts by-products off an output belt on row yb that ends at x - 1: past its end a filter splitter per
+    by-product, 3 tiles apart; the by-product leaves by its south half, one tile east, then turns south down to row
+    `bottom`; the rest goes on east. -> sinks, the main output's first"""
+    def put(name, xx, yy, direction, **kw):
+        ents.append(dict({"name": name, "position": {"x": xx, "y": yy}, "direction": direction}, **kw))
+    sinks = []
+    for item, rate in rates.items():
+        put(splitter, x + 0.5, yb + 1.0, EAST, filter={"name": item, "quality": "normal", "comparator": "="},
+            output_priority="right")
+        put(belt, x + 1.5, yb + 0.5, EAST)
+        put(belt, x + 2.5, yb + 0.5, EAST)
+        put(belt, x + 1.5, yb + 1.5, EAST)
+        for yy in range(yb + 1, bottom + 1):
+            put(belt, x + 2.5, yy + 0.5, SOUTH)
+        sinks.append({"kind": "belt", "position": {"x": x + 2.5, "y": bottom + 0.5}, "item": item, "rate": rate})
+        x += 3
+    return [{"kind": "belt", "position": {"x": x - 0.5, "y": yb + 0.5}, "item": output}] + sinks
 
 
 def measure_ticks(p: Plan, minimum=7200):
@@ -673,6 +1035,130 @@ def configure(data):
         UNDERGROUND = "pipe-to-ground" if "pipe-to-ground" in ptgs else sorted(ptgs)[0]
         conns = (ptgs[UNDERGROUND].get("fluid_box") or {}).get("pipe_connections") or []
         PIPE_UG_MAX = max((c.get("max_underground_distance") or 0 for c in conns), default=0) or PIPE_UG_MAX
+
+
+def power_up(ents, sources=(), sinks=()):
+    """adds poles (POLE) on free tiles, within the layout's box grown by one, until every electric machine, beacon and
+    inserter overlaps a pole's supply area and the poles' wires join them all: most uncovered entities first, then a
+    pole at a time from the nearest unwired group towards the rest. Tiles where a belt or pipe comes in or goes out
+    stay free. -> poles added (raises PlanError when there is no room)"""
+    from bpgen.chain import _sizer, _tiles
+    data = _DATA
+    if data is None or POLE not in data.raw.get("electric-pole", {}) or POLE not in WIRE_REACH:
+        return 0  # (pole_wires couldn't wire it anyway)
+    size_of = _sizer(data)
+    taken = set()
+    for e in ents:
+        taken |= _tiles(e, size_of)
+    xs, ys = [t[0] for t in taken], [t[1] for t in taken]
+    box = (min(xs) - 1, min(ys) - 1, max(xs) + 1, max(ys) + 1)
+    for src in sources:  # (the tile a belt or pipe comes in from, and the one an output leaves onto)
+        x, y = math.floor(src["position"]["x"]), math.floor(src["position"]["y"])
+        taken |= {(x - 1, y), (x, y)}
+    for k in sinks:
+        x, y = math.floor(k["position"]["x"]), math.floor(k["position"]["y"])
+        taken |= {(x + 1, y), (x, y + 1)}
+
+    def proto(name):
+        for t in ("assembling-machine", "furnace", "inserter", "beacon", "electric-pole"):
+            if name in data.raw.get(t, {}):
+                return t, data.raw[t][name]
+        return None, None
+    poles = []  # (x, y, supply, wire reach) of pole centers
+    needs = []  # tile boxes (x1, y1, x2, y2) of what needs power
+    for e in ents:
+        t, pr = proto(e["name"])
+        if t == "electric-pole":
+            poles.append((e["position"]["x"], e["position"]["y"], pr.get("supply_area_distance", 3.5),
+                          WIRE_REACH.get(e["name"], 0)))
+        elif t and (pr.get("energy_source") or {}).get("type") == "electric":
+            ts = _tiles(e, size_of)
+            needs.append((min(a for a, _ in ts), min(b for _, b in ts), max(a for a, _ in ts) + 1,
+                          max(b for _, b in ts) + 1))
+    supply = data.raw["electric-pole"][POLE].get("supply_area_distance", 3.5)
+    wire = WIRE_REACH.get(POLE, POLE_REACH)  # (as far as pole_wires will wire it)
+
+    def covers(px, py, sup, b):
+        return abs(px - (b[0] + b[2]) / 2) < sup + (b[2] - b[0]) / 2 and abs(py - (b[1] + b[3]) / 2) < sup + (b[3] - b[1]) / 2
+
+    def free(t):
+        return t not in taken and box[0] <= t[0] <= box[2] and box[1] <= t[1] <= box[3]
+    added = []
+
+    def add(t):
+        taken.add(t)
+        poles.append((t[0] + 0.5, t[1] + 0.5, supply, wire))
+        added.append(t)
+        ents.append({"name": POLE, "position": {"x": t[0] + 0.5, "y": t[1] + 0.5}})
+    left = [b for b in needs if not any(covers(px, py, sp, b) for px, py, sp, _ in poles)]
+    while left:
+        count = {}
+        r = math.ceil(supply)
+        for b in left:
+            for x in range(b[0] - r, b[2] + r):
+                for y in range(b[1] - r, b[3] + r):
+                    if free((x, y)) and covers(x + 0.5, y + 0.5, supply, b):
+                        count[(x, y)] = count.get((x, y), 0) + 1
+        if not count:
+            raise PlanError("no room for a power pole within reach of some of its inserters (a row packed with them)")
+        b0 = left[0]  # (ties: inside the layout's own box, then nearest the first thing left unpowered)
+        best = max(count, key=lambda t: (count[t], box[0] < t[0] < box[2] and box[1] < t[1] < box[3],
+                                         -abs(t[0] + 0.5 - (b0[0] + b0[2]) / 2) - abs(t[1] + 0.5 - (b0[1] + b0[3]) / 2),
+                                         -t[1], -t[0]))
+        add(best)
+        left = [b for b in left if not covers(best[0] + 0.5, best[1] + 0.5, supply, b)]
+    while True:  # wires: grow the first pole's group until it holds them all
+        group, edge = {0}, [0]
+        while edge:
+            i = edge.pop()
+            for j, q in enumerate(poles):
+                if j not in group and (poles[i][0] - q[0]) ** 2 + (poles[i][1] - q[1]) ** 2 <= min(poles[i][3], q[3]) ** 2:
+                    group.add(j)
+                    edge.append(j)
+        if len(group) == len(poles):
+            return len(added)
+        # a pole within reach of the group, nearer the closest pole outside it; when that is boxed in (a row of
+        # big machines between), the fewest poles on free tiles around, each hop within wire reach
+        _, i, j = min(((poles[i][0] - q[0]) ** 2 + (poles[i][1] - q[1]) ** 2, i, j) for i in group
+                      for j, q in enumerate(poles) if j not in group)
+        (ax, ay), (bx, by) = poles[i][:2], poles[j][:2]
+        r = min(poles[i][3], wire)
+        before = (ax - bx) ** 2 + (ay - by) ** 2
+        spots = [t for t in near_tiles(ax, ay, r)
+                 if free(t) and (t[0] + 0.5 - bx) ** 2 + (t[1] + 0.5 - by) ** 2 < before]
+        if spots:
+            add(min(spots, key=lambda t: ((t[0] + 0.5 - bx) ** 2 + (t[1] + 0.5 - by) ** 2, t[1], t[0])))
+            continue
+        prev = {}
+        for k in group:
+            for t in near_tiles(poles[k][0], poles[k][1], min(poles[k][3], wire)):
+                if free(t):
+                    prev.setdefault(t, None)
+        goals = {t for k, q in enumerate(poles) if k not in group for t in near_tiles(q[0], q[1], min(q[3], wire))}
+        frontier, goal = list(prev), None
+        while frontier and goal is None:
+            nxt = []
+            for c in frontier:
+                if c in goals:
+                    goal = c
+                    break
+                for t in near_tiles(c[0] + 0.5, c[1] + 0.5, wire):
+                    if t not in prev and free(t):
+                        prev[t] = c
+                        nxt.append(t)
+            frontier = nxt
+        if goal is None:
+            raise PlanError("no free tiles to wire its power poles together")
+        while goal is not None:
+            add(goal)
+            goal = prev[goal]
+
+
+def near_tiles(x, y, r):
+    """tiles whose centers are within r of (x, y)"""
+    return [(tx, ty) for tx in range(math.floor(x - r), math.ceil(x + r) + 1)
+            for ty in range(math.floor(y - r), math.ceil(y + r) + 1)
+            if (tx + 0.5 - x) ** 2 + (ty + 0.5 - y) ** 2 <= r * r]
 
 
 def pole_wires(entities):
@@ -766,13 +1252,19 @@ def describe(p: Plan):
     lines = [
         f"{p.recipe}: {p.machines} x {p.machine} ({p.per_row} per row), {p.belt}",
         f"  output  {p.output}: {p.expected_output:.2f}/s of {p.belt_capacity:.2f}/s belt "
-        f"({p.output_per_machine:.3f}/s per machine)",
+        f"({p.output_per_machine:.3f}/s per machine)"
+        + "".join(f"; {k} {v * p.machines:.2f}/s" for k, v in p.byproducts.items())
+        + (f"; {p.fluid} {p.fluid_need:.1f}/s per row (pipe)" if p.fluid_out else ""),
         f"  inputs  per row: " + ", ".join(f"{k} {v:.2f}/s" for k, v in p.input_need.items())
-        + (f", {p.fluid} {p.fluid_need:.1f}/s (pipe)" if p.fluid else ""),
+        + (f", {p.fluid} {p.fluid_need:.1f}/s (pipe)" if p.fluid and not p.fluid_out else ""),
         f"          {belts}",
         f"  inserters near {ins(p.ins_near)}" + (f"; far {ins(p.ins_far)}" if p.ins_far else ""),
         f"  inserters out  {ins(p.ins_out)}" + (f", hand size capped at {p.ins_out.hand}" if p.ins_out.hand else ""),
     ]
+    if p.rows == 1:
+        lines[0] = lines[0].replace(f"({p.per_row} per row)", "(one row, belts on both sides)")
+        lines.insert(-1, f"          south belt lanes {[x or '-' for x in p.south]}"
+                     + (f", long-handed {ins(p.ins_south)}" if p.ins_south else ""))
     if p.modules.count or p.beacon:
         n = 2 * (p.per_row + 1 + 2 * p.beacon_pad)
         beacons = f"; {n} x {p.beacon} with {p.beacon_modules} ({p.beacons_per_machine} per machine)" if p.beacon else ""
