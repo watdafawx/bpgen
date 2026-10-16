@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.27.6
+Date: 2026-10-16
+  Features:
+    - Line: Krastorio 2 bio lab recipes (biomass, biter virus: two fluids and an item) plan. The bio labs stand
+      side by side so the first fluid flows through them all, the second comes along a pipe on their south side,
+      and long-handed inserters reach the items over the output belt.
+---------------------------------------------------------------------------------------------------
 Version: 0.27.5
 Date: 2026-10-16
   Bugfixes:
