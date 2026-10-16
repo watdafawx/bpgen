@@ -274,7 +274,8 @@ def lane_options(rates, lane_cap, target, whole_belt=()):
 
 
 
-INSERTER_THROTTLE = (1.0, 0.85, 0.7, 0.55, 0.4, 0.3, 0.2)
+# (down to 1%: a modded machine crafting 40/s outruns any 2 inserters 10 times over)
+INSERTER_THROTTLE = (1.0, 0.85, 0.7, 0.55, 0.4, 0.3, 0.2, 0.15, 0.1, 0.07, 0.05, 0.035, 0.025, 0.015, 0.01)
 
 
 def _pick_inputs(calib, belt, bonus, near_ins, far_ins, slots, rates, lane_cap, target, whole_belt_items, failures):

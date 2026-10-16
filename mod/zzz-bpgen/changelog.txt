@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.27.4
+Date: 2026-10-16
+  Bugfixes:
+    - Line: a very fast modded machine (crafting speed 20, e.g. the advanced assembler from Returns) with only
+      early inserters unlocked failed with "can't feed one machine through its 2 input inserter slots". Machines
+      the inserters can't keep busy now slow down as far as 1% (was 20%), with more of them per row.
+---------------------------------------------------------------------------------------------------
 Version: 0.27.3
 Date: 2026-10-15
   Optimizations:
