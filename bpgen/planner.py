@@ -242,7 +242,7 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
         p = _plan_two_sided(
             data, calib, belt, recipe, machine, m, size, height, c, near_ins, far_ins, out_ins, bonus, zero,
             out, fluids, fluid_out, fluid_col, flipped, turn, target_rate, per_row, max_per_row, notes, modules,
-            splitter, furnace, rotated)
+            splitter, furnace, rotated, slots_n=pose.slots, slots_s=pose.out_slots)
         by_role = _fluid_needs(shape, p.craft_rate, c.productivity, p.per_row)
         p.fluid_needs = _by_name(by_role)
         p.fluid_inputs, p.fluid_outputs = _of_role(by_role, "in"), _of_role(by_role, "out")
@@ -315,7 +315,7 @@ def _loop_notes(by_role, rows):
 
 def _plan_two_sided(data, calib, belt, recipe, machine, m, size, height, c, near_ins, far_ins, out_ins, bonus,
                     zero, out, fluids, fluid_out, fluid_col, flipped, turn, target_rate, per_row, max_per_row, notes,
-                    modules, splitter, furnace, rotated):
+                    modules, splitter, furnace, rotated, slots_n=None, slots_s=None):
     """5-6 belt items: one machine row, two input belts north (near and long-handed inserters, as the template),
     the output belt south, and a third input belt past it that long-handed inserters reach over the output belt.
     One item per lane, the hungriest nearest. c: the machine's rates (rates.crafting)"""
@@ -325,8 +325,10 @@ def _plan_two_sided(data, calib, belt, recipe, machine, m, size, height, c, near
     order = sorted(rates, key=lambda it: -rates[it])
     lanes = order + [None] * (6 - len(order))
     near, far, south = lanes[0:2], lanes[2:4], lanes[4:6]
-    # (north: the fluid's tap or a pole takes a slot; south: a pole on alternate machines)
-    slots_n, slots_s = size - 1, size - 1
+    # (the pose's free columns: north, the fluid's tap or a pole takes one; south, a pole on alternate machines and
+    # any riser of a pipe south - size - 1 each when the caller doesn't say)
+    slots_n = size - 1 if slots_n is None else slots_n
+    slots_s = size - 1 if slots_s is None else slots_s
     target, cap, lane_cap = lane_target(data, belt, c, target_rate, per_row, max_per_row, notes)
     f = pick_feed_row(calib, belt, bonus, zero, near_ins, far_ins, out_ins, slots_n, slots_s, c, near, far, south,
                       lane_cap, target, per_row, machine)
