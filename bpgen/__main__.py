@@ -15,9 +15,10 @@ import sys
 import time
 from pathlib import Path
 
-from bpgen import calibrate, harness, pack, planner
+from bpgen import calibrate, harness, planner
 from bpgen.data import Data
 from bpgen.effects import Modules
+from bpgen.service import Service
 
 ROOT = Path(__file__).resolve().parent.parent
 from bpgen.config import PATHS
@@ -35,14 +36,12 @@ def verify(data, p, bp, sources, sinks, bonuses, mod_dir, productivity=0.0):
         print("  harness:", err)
 
 
-def emit(p, ents):
-    label = f"{p.recipe} x{p.machines} {p.expected_output:g}/s"
-    bp = planner.blueprint_string(ents, label)
+def emit(name, bp):
     out = ROOT / "out"
     out.mkdir(exist_ok=True)
-    (out / f"{p.recipe}.txt").write_text(bp)
+    (out / f"{name}.txt").write_text(bp)
     subprocess.run("clip", input=bp.encode(), shell=True)
-    print(f"  blueprint copied to clipboard ({len(bp)} chars, also out/{p.recipe}.txt)")
+    print(f"  blueprint copied to clipboard ({len(bp)} chars, also out/{name}.txt)")
     return bp
 
 
@@ -61,7 +60,6 @@ def add_beacon_args(ap):
 
 def cmd_plan(args):
     data = Data.load(args.dump)
-    planner.configure(data)
     calib = json.loads((ROOT / "data" / "calibration.json").read_text())
     bonuses = calibrate.BONUS_LEVELS[args.bonus]
     try:
@@ -72,56 +70,53 @@ def cmd_plan(args):
         return 1
     ents, sources, sinks = planner.layout(p)
     print(planner.describe(p))
-    bp = emit(p, ents)
+    bp = emit(p.recipe, planner.blueprint_string(ents, f"{p.recipe} x{p.machines} {p.expected_output:g}/s"))
     if args.verify:
         verify(data, p, bp, sources, sinks, bonuses, ROOT / "mods" / "vanilla")
 
 
-def handle_request(req, args):
+def handle_request(s, req, args):
+    """one Ctrl+Shift+B request, planned as the in-game window plans it (Service.params, Service.request)"""
     print(f"\n[{time.strftime('%H:%M:%S')}] request: {req['recipe']} in {req['machine']}", flush=True)
-    if pack.sync():
+    if s.sync():
         print("  your mods or settings changed: re-dumped prototype data")
-    data = Data.load(pack.DATA)
-    planner.configure(data)
-    bonuses = {k: req["bonuses"].get(k, 0) for k in calibrate.ZERO}
-    if bonuses["belt_stack_size_bonus"]:
+    if (req.get("bonuses") or {}).get("belt_stack_size_bonus"):
         print("  note: belt stacking research isn't modelled yet; the plan assumes unstacked input belts")
-        bonuses["belt_stack_size_bonus"] = 0
-    belts = [b for b in req["belts"] if b in data.raw["transport-belt"]]
-    belt = args.belt or max(belts, key=lambda b: data.raw["transport-belt"][b]["speed"])
-    if belt not in belts:
-        print(f"  warning: {belt} isn't researched in this save")
-    inserters = calibrate.template_inserters(data, req["inserters"]) + calibrate.template_inserters(data, req["inserters"], 2)
-    table_path = ROOT / "data" / "calibration-pack.json"
-    calib = calibrate.calibrate(table_path, pack.PACK, inserters, [belt], [bonuses, calibrate.ZERO], data=data)
+    params = s.params(req, {"belt": args.belt, "beacon_modules": args.beacon_modules, "beacon": args.beacon,
+                            "beacon_quality": args.beacon_quality})
+    if params["belt"] not in params["belts"]:
+        print(f"  warning: {params['belt']} isn't researched in this save")
     try:
-        productivity = req.get("recipe_productivity", 0) or 0
-        modules = Modules([(m["name"], m.get("quality") or "normal", m["count"])
-                           for m in (req.get("modules") or []) if isinstance(m, dict)])
-        p = planner.plan(data, calib, req["recipe"], req["machine"], belt, bonuses=bonuses, allowed=inserters,
-                         productivity=productivity, modules=modules,
-                         machine_quality=req.get("machine_quality", "normal"), **beacon_args(args))
+        answer = s.request(params)
     except planner.PlanError as e:
         print(f"  can't plan this one: {e}")
         return
-    ents, sources, sinks = planner.layout(p)
-    print(planner.describe(p))
-    bp = emit(p, ents)
+    result = answer["result"]
+    text = result.get("text") or answer["label"]
+    print(text)
+    for note in answer["notes"]:
+        if note not in text:  # (the plan's own notes are in its text already)
+            print("  note:", note)
+    emit(req["recipe"], answer["blueprint"])
     if args.verify:
         print("  verifying in your pack (loads all mods twice, a few minutes) ...", flush=True)
-        verify(data, p, bp, sources, sinks, bonuses, pack.PACK, productivity)
+        v = s.verify(result)
+        print(f"  verified: {v['measured']:.2f}/s measured from the blueprint string ({v['ratio']:.1%} of plan)")
+        for err in v.get("errors") or []:
+            print("  harness:", err)
 
 
 def cmd_watch(args):
     print(f"watching {REQUEST} - hover an assembler in game and press Ctrl+Shift+B (Ctrl+C to stop)", flush=True)
     last = REQUEST.stat().st_mtime if REQUEST.exists() else 0
+    s = Service("pack")
     while True:
         time.sleep(0.5)
         if not REQUEST.exists() or REQUEST.stat().st_mtime == last:
             continue
         last = REQUEST.stat().st_mtime
         try:
-            handle_request(json.loads(REQUEST.read_text(encoding="utf-8")), args)
+            handle_request(s, json.loads(REQUEST.read_text(encoding="utf-8")), args)
         except Exception as e:  # keep watching after a bad request
             print(f"  error: {e!r}", flush=True)
         print("\nwaiting for the next request ...", flush=True)

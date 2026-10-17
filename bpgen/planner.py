@@ -20,6 +20,7 @@ own belt (sort_tail). An item recipe with a fluid output and no fluid input uses
 """
 import math
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 from bpgen import ents as entlib, geom
 from bpgen.ents import adder
@@ -33,9 +34,7 @@ from bpgen.rates import (_pick_inputs, byproducts_at, craft_rate_of, crafting, f
                          pick_feed_row, pick_out_only, row_target, Feed)
 
 NORTH, EAST, SOUTH, WEST = 0, 4, 8, 12
-POLE = "medium-electric-pole"  # supply 7x7, wire reach 9
 POLE_EVERY = 2  # machines
-PIPE, UNDERGROUND = "pipe", "pipe-to-ground"
 
 
 def categories(r):
@@ -393,17 +392,32 @@ def warmup_ticks(data, p: Plan):
 
 
 CIRCUIT_RED = entlib.CIRCUIT_RED
-POLE_REACH = 9
-WIRE_REACH = {POLE: POLE_REACH, "small-electric-pole": 7.5, "substation": 18, "big-electric-pole": 32}  # (vanilla)
-PIPE_UG_MAX = 10  # tiles a pipe-to-ground pair may span
-_DATA = None  # the game data configure() was given (Power Propagation's pruning reads prototypes from it)
+WIRE_REACH = {"medium-electric-pole": 9, "small-electric-pole": 7.5, "substation": 18, "big-electric-pole": 32}  # (vanilla)
 
 
-def configure(data):
-    """take the power pole and pipes from the game data: the layouts need a 1x1 pole that powers 7x7 and wires 9
-    tiles (the medium pole, or the pack's nearest equivalent), a pipe and a pipe-to-ground"""
-    global POLE, POLE_REACH, PIPE, UNDERGROUND, PIPE_UG_MAX, _DATA
-    _DATA = data
+class Settings(NamedTuple):
+    """what the layouts take from the game data: a 1x1 pole that powers 7x7 and wires 9 tiles (the medium pole, or the
+    pack's nearest equivalent), a pipe and a pipe-to-ground (and how far a pair of those may span)"""
+    POLE: str = "medium-electric-pole"
+    POLE_REACH: float = 9
+    PIPE: str = "pipe"
+    UNDERGROUND: str = "pipe-to-ground"
+    PIPE_UG_MAX: int = 10
+
+
+def settings(data):
+    """the Settings for this game data (worked out once, kept on it); vanilla's without data"""
+    if data is None:
+        return Settings()
+    got = data.__dict__.get("_planner_settings")
+    if got is None:
+        got = data.__dict__["_planner_settings"] = _settings_of(data)
+    return got
+
+
+def _settings_of(data):
+    d = Settings()
+    pole, reach, pipe, ug, ug_max = d
 
     def one_by_one(p):
         (x1, y1), (x2, y2) = p.get("collision_box") or ((0, 0), (0, 0))
@@ -412,23 +426,41 @@ def configure(data):
              if not p.get("hidden") and one_by_one(p) and p.get("supply_area_distance", 0) >= 3.5
              and p.get("maximum_wire_distance", 0) >= 9}
     if poles:
-        POLE = "medium-electric-pole" if "medium-electric-pole" in poles else             min(poles, key=lambda n: (poles[n]["supply_area_distance"], poles[n]["maximum_wire_distance"], n))
-        POLE_REACH = poles[POLE]["maximum_wire_distance"]
+        pole = "medium-electric-pole" if "medium-electric-pole" in poles else             min(poles, key=lambda n: (poles[n]["supply_area_distance"], poles[n]["maximum_wire_distance"], n))
+        reach = poles[pole]["maximum_wire_distance"]
     pipes = [n for n, p in data.raw.get("pipe", {}).items() if not p.get("hidden")]
     if pipes:
-        PIPE = "pipe" if "pipe" in pipes else sorted(pipes)[0]
+        pipe = "pipe" if "pipe" in pipes else sorted(pipes)[0]
     ptgs = {n: p for n, p in data.raw.get("pipe-to-ground", {}).items() if not p.get("hidden")}
     if ptgs:
-        UNDERGROUND = "pipe-to-ground" if "pipe-to-ground" in ptgs else sorted(ptgs)[0]
-        conns = (ptgs[UNDERGROUND].get("fluid_box") or {}).get("pipe_connections") or []
-        PIPE_UG_MAX = max((c.get("max_underground_distance") or 0 for c in conns), default=0) or PIPE_UG_MAX
+        ug = "pipe-to-ground" if "pipe-to-ground" in ptgs else sorted(ptgs)[0]
+        conns = (ptgs[ug].get("fluid_box") or {}).get("pipe_connections") or []
+        ug_max = max((c.get("max_underground_distance") or 0 for c in conns), default=0) or ug_max
+    return Settings(pole, reach, pipe, ug, ug_max)
+
+
+_followed = [None]  # (the game data the planner follows: the last loaded, Data.load hands it over)
+
+
+def configure(data):
+    """follow this game data: planner.POLE, PIPE, UNDERGROUND, PIPE_UG_MAX, POLE_REACH and _DATA are read from it.
+    Data.load calls it, so nobody else has to; calling it again changes nothing"""
+    _followed[0] = data
+
+
+def __getattr__(name):  # (planner.POLE and the rest: the followed data's, whenever they are read)
+    if name in Settings._fields:
+        return getattr(settings(_followed[0]), name)
+    if name == "_DATA":
+        return _followed[0]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 insert_plans = entlib.insert_plans
 
 
 def blueprint_string(entities, label, game_version=(2, 0, 77), description=None, tiles=None):
-    return entlib.blueprint_string(entities, label, game_version, description, tiles, data=_DATA)
+    return entlib.blueprint_string(entities, label, game_version, description, tiles, data=_followed[0])
 
 
 def describe(p: Plan):

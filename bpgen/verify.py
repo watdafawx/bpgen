@@ -58,13 +58,15 @@ DEFAULT_CASES = [
      {"modules": "productivity-module-3:4", "beacon": "beacon", "beacon_modules": "speed-module-3:2"}),
     # lines with fluids the row solver lays out (0.28): fluid in, items out (foundry, 5x5); items and a fluid in, a
     # fluid out; items in, a fluid out (foundry); fluids only; two fluids and an item in a 5x5
-    # (electrolyte in the 4x4 electromagnetic plant isn't laid out yet: its two fluid inputs are on its west and east
-    # edges, which machines touching in a row can't reach)
     ("casting-iron", "foundry", "transport-belt"),
     ("sulfuric-acid", "chemical-plant", "transport-belt"),
     ("molten-iron", "foundry", "transport-belt"),
     ("heavy-oil-cracking", "chemical-plant", "transport-belt"),
     ("lithium", "cryogenic-plant", "transport-belt", {"rate": 300}),  # (5/s: a full belt of it is 32 plants)
+    # a fluid that opens only on the machine's west or east edge: a pipe down a gap beside each machine (0.28.1)
+    ("electrolyte", "electromagnetic-plant", "transport-belt"),
+    # (quantum processors, the gap east of each plant, plan too, but only Aquilo's pressure crafts them: the lab
+    # surface the harness builds on is Nauvis)
 ]
 
 
@@ -76,8 +78,7 @@ def main():
     ap.add_argument("--only", default="", help="only the cases whose id contains this")
     args = ap.parse_args()
 
-    data = Data.load(args.dump)
-    planner.configure(data)  # (the pole, pipes and power pass read the game data from it)
+    data = Data.load(args.dump)  # (the planner follows it: its pole, pipes and power pass)
     calib = json.loads((ROOT / "data" / "calibration.json").read_text())
     plans, cases = [], []
     for recipe, machine, belt, *extra in DEFAULT_CASES:

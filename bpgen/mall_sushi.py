@@ -20,10 +20,10 @@ while its chest has fewer than `stock`, so the first ones down the loop don't ta
 """
 import math
 
-from bpgen import base, chain, mall_grid
+from bpgen import base, chain, mall_grid, planner
 from bpgen.ents import adder
 from bpgen.mall_grid import _ings, _result
-from bpgen.planner import EAST, NORTH, SOUTH, WEST, PIPE, POLE, UNDERGROUND, PlanError
+from bpgen.planner import EAST, NORTH, SOUTH, WEST, PlanError
 
 PX, PY = 7, 5  # column pitch (inserters, machine, inserters, loop, plates), row pitch (machine, out, chest)
 LONG = "long-handed-inserter"
@@ -134,7 +134,7 @@ def plan_sushi(data, products, machine, belt, inputs=None, allowed=None, chest="
     yb = PY * rows - 1  # (the last row's chest)
     ins = next((x for x in ("fast-inserter", "inserter", "burner-inserter") if not allowed or x in allowed), "inserter")
     long_ = LONG if not allowed or LONG in allowed else ins
-    pole = POLE if POLE in data.raw.get("electric-pole", {}) else next(iter(data.raw.get("electric-pole", {})), POLE)
+    pole = planner.POLE if planner.POLE in data.raw.get("electric-pole", {}) else next(iter(data.raw.get("electric-pole", {})), planner.POLE)
     ug, _ = chain.related_belts(data, belt)
     ents = []
 
@@ -220,9 +220,9 @@ def plan_sushi(data, products, machine, belt, inputs=None, allowed=None, chest="
         put(machine, x0 + 1, y0 + 1, recipe=rn)
         if k in wet:  # (its input pipe above it: under the loop's top to a pipe beyond the inputs)
             x = x0 + 1
-            put(UNDERGROUND, x, -1, SOUTH)
-            put(UNDERGROUND, x, -6, NORTH)
-            put(PIPE, x, -7)
+            put(planner.UNDERGROUND, x, -1, SOUTH)
+            put(planner.UNDERGROUND, x, -6, NORTH)
+            put(planner.PIPE, x, -7)
             sources.append({"kind": "fluid", "fluid": mall_grid._fluids(data, rn)[0],
                             "position": {"x": x - 0.5, "y": -6.5}})
         ings = set(_ings(data, rn))

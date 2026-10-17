@@ -21,7 +21,7 @@ The bus head is laid out flowing north, then turned to the chosen direction and 
 import math
 
 from bpgen import chain, extend, geom, oil, planner, router
-from bpgen.planner import EAST, NORTH, POLE, SOUTH, WEST, PlanError
+from bpgen.planner import EAST, NORTH, SOUTH, WEST, PlanError
 
 DIR_VEC = {NORTH: (0, -1), EAST: (1, 0), SOUTH: (0, 1), WEST: (-1, 0)}
 TURNS = {"north": 0, "east": 1, "south": 2, "west": 3}
@@ -87,7 +87,7 @@ def smelter_column(x0, top, n, furnace, inserter, belt, recipe=None):
         out.append(ent(inserter, x0 + 1.5, r + 1.5, EAST))   # picks from the furnace, onto the output belt
         out.append(ent(inserter, x0 + 11.5, r + 1.5, WEST))
         for px in (1, 5, 11):
-            out.append(ent(POLE, x0 + px + 0.5, r + 0.5))
+            out.append(ent(planner.POLE, x0 + px + 0.5, r + 0.5))
     for y in range(top + 1, bottom + 1):  # (the ore belt stops a row short: it mustn't feed the merge row)
         out.append(ent(belt, x0 + 6.5, y + 0.5, NORTH))
     for y in range(top - 1, bottom + 1):
@@ -116,8 +116,8 @@ def burner_column(x0, top, n, furnace, inserter, belt, recipe=None):
         out.append(ent(inserter, x0 + 1.5, r + 1.5, EAST))  # plates out
         out.append(ent(inserter, x0 + 9.5, r + 1.5, WEST))
         if i % 2 == 0:
-            out.append(ent(POLE, x0 + 4.5, r + 0.5))
-            out.append(ent(POLE, x0 + 9.5, r + 0.5))
+            out.append(ent(planner.POLE, x0 + 4.5, r + 0.5))
+            out.append(ent(planner.POLE, x0 + 9.5, r + 0.5))
     for y in range(top + 1, bottom + 2):  # (a row short at the top, as the electric column; one past the bottom)
         out.append(ent(belt, x0 + 5.5, y + 0.5, NORTH))
     for y in range(top - 1, bottom + 1):
@@ -327,19 +327,19 @@ def band(ore, ya, yb, x0, x1, drill, belt, toward_east, r, sides=(-1, 1)):
                 ents.append(ent(belt, cx + 3.5, y + 0.5, SOUTH if sgn < 0 else NORTH))
             for p in poles:
                 if (sgn < 0 and p >= far - 1) or (sgn > 0 and p <= far + 1):
-                    ents.append(ent(POLE, cx + 1.5, p + 0.5))
-                    ents.append(ent(POLE, cx + 5.5, p + 0.5))
+                    ents.append(ent(planner.POLE, cx + 1.5, p + 0.5))
+                    ents.append(ent(planner.POLE, cx + 5.5, p + 0.5))
         if got:
             xs.append(cx + 3)
     if not xs:
         return None
     # header-side poles across the band's empty columns too, so the wires reach from one column to the next
-    have = {(e["position"]["x"], e["position"]["y"]) for e in ents if e["name"] == POLE}
+    have = {(e["position"]["x"], e["position"]["y"]) for e in ents if e["name"] == planner.POLE}
     for cx in range(min(xs) - 3, max(xs) - 2, 7):
         for p in [H + sgn for sgn in sides]:
             for px in (cx + 1.5, cx + 5.5):
                 if (px, p + 0.5) not in have:
-                    ents.append(ent(POLE, px, p + 0.5))
+                    ents.append(ent(planner.POLE, px, p + 0.5))
     lo, hi = min(xs) - 1, max(xs) + 1
     d = EAST if toward_east else WEST
     for x in range(lo, hi + 1):
@@ -628,7 +628,7 @@ def plan(svc, params):
             oil_ents += [svc.decorate({"name": inserter, "position": {"x": t[0] - 0.5, "y": t[1] + 0.5},
                                        "direction": WEST}),
                          svc.decorate({"name": oil.CHEST, "position": {"x": t[0] - 1.5, "y": t[1] + 0.5}}),
-                         svc.decorate({"name": POLE, "position": {"x": t[0] - 1.5, "y": t[1] - 0.5}})]
+                         svc.decorate({"name": planner.POLE, "position": {"x": t[0] - 1.5, "y": t[1] - 0.5}})]
             notes.append(f"oil: fill the chest at ({t[0] - 2}, {t[1]}) with "
                          + " ".join(f"[item={i}]" for i in coal_src[1]))
             coal_src = None
@@ -728,7 +728,7 @@ def plan(svc, params):
                 wforeign.update({t: "crude-oil" for e in pj + [svc.decorate(x) for x in pipes or []]
                                  for t in extend.footprint(e)})
                 at = {(math.floor(e["position"]["x"]), math.floor(e["position"]["y"])) for e in oil_ents
-                      if e["name"] in (oil.PIPE, oil.PIPE_UG)}
+                      if e["name"] in (planner.PIPE, planner.UNDERGROUND)}
                 into = next((d for d, v in router.DIRS.items() if (water_inlet[0] + v[0], water_inlet[1] + v[1]) in at),
                             EAST)
                 blocked.discard(water_inlet)
@@ -776,7 +776,7 @@ def plan(svc, params):
         run = extend.pole_chain(extend.nearest(head_poles, t), t, blocked) if t not in blocked else None
         if run is not None:
             blocked.add(t)
-            lines += run + [{"name": POLE, "position": {"x": t[0] + 0.5, "y": t[1] + 0.5}}]
+            lines += run + [{"name": planner.POLE, "position": {"x": t[0] + 0.5, "y": t[1] + 0.5}}]
             end_pole = list(t)
     if oil_block:  # (the oil block and each pumpjack's pole: onto the network, each from the nearest pole so far)
         net = extend.pole_tiles(head_ents) + extend.pole_tiles(lines)

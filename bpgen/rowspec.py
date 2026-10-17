@@ -15,18 +15,6 @@ NORTH, EAST, SOUTH, WEST = 0, 4, 8, 12
 
 
 @dataclass
-class Ins:
-    """inserters an ins/out band names itself (the fluid lines'), `count` of `name`. reach "in": they face the machine
-    (output inserters, picking up from it); "out": they face away (picking up from the belt beyond). They stand in the
-    band's free columns, from the first or, with `end`, from the last; `cols` (row A, as placed) names theirs instead"""
-    name: str
-    count: int
-    reach: str  # "in" | "out"
-    end: bool = False
-    cols: list | None = None
-
-
-@dataclass
 class Band:
     """one row of stuff beside the machines (per side, mirrored for row B)"""
     kind: str  # belt | pipe | ins | out | riser | gap (an empty row between stacked pipes)
@@ -36,20 +24,19 @@ class Band:
     fluid: str | None = None  # pipe: the fluid
     rate: float = 0.0  # pipe: per row (source / sink rate); belt(out) unused
     riser: int | None = None  # pipe: machine column of the riser into this pipe (as placed, row A)
+    gap: str = ""  # pipe: "w" / "e" - reaches the machines by a pipe down the gap west / east of each of them
+    gap_row: int = 0  # pipe, with gap: the row (0 = the machine's north row) of the port it meets there
     extra: bool = False  # belt / pipe: one tile longer than the row (the output passes the end)
     shared: bool = False  # between the two rows: one band, not mirrored
     height: int = 1
     # poles standing in this band, per machine (None: none from this band; the RowSpec's pole rules still apply):
-    # "slot-last": the last free column; "col": column pole_col (as placed, row A); "first-free": the first column
-    # that holds no riser
+    # "slot-last": the last free column; "first-free": the first column that holds no riser
     pole: str | None = None
-    pole_col: int = 0
     pole_every: int = 1  # every n-th machine (1: each)
     pole_last: bool = False  # the last machine too, whatever pole_every says
     pole_b: bool = True  # row B's copy of the band has the poles too
-    inserters: list = field(default_factory=list)  # ins/out band: [Ins] (empty: the plan's own ins_near / ins_far / ins_out)
     # what a sink says: belt: "" the position only, "item" and the output item; pipe: "" item and rate, "item" the
-    # item only, "rates" the item and rates {item: rate}
+    # item only
     sink: str = ""
 
 
@@ -71,7 +58,6 @@ class RowSpec:
     pole_in_tap: bool = False  # the input-side pole stands in the riser row (col size-1, or 0 when the riser is there)
     poles_out: bool = False  # poles in both rows' output bands, input slots all free
     power_up: bool = False  # run power.power_up afterwards (wide / turned machines outgrow the slot poles)
-    byproducts_total: bool = False  # the plan's byproducts are per second for the whole line (the fluid lines')
     machine_sources: list = field(default_factory=list)  # [(fluid, rate, row)]: fluid fed into the machine row itself
     sort_tail_bottom: str = "last"  # sort_tail's bottom row: "last" (the layout's last row) or a band name
     # direct insertion: the machines along a row, one letter each - "E" the line's recipe, "C" the made item's

@@ -10,4 +10,8 @@ class Data:
 
     @classmethod
     def load(cls, path):
-        return cls(json.loads(Path(path).read_text(encoding="utf-8")))
+        """the dump at path; the planner follows it from now on (its pole and pipes: planner.configure)"""
+        data = cls(json.loads(Path(path).read_text(encoding="utf-8")))
+        from bpgen import planner  # (local: planner imports half of bpgen)
+        planner.configure(data)
+        return data

@@ -900,7 +900,7 @@ def pose(ground, plan_entities, sources, sinks=None, seed=None, avoid_ore=True, 
                      + (f" and {np_} pipe{'s' if np_ > 1 else ''} beside them" if np_ else "")
                      + ("; built where you asked, taking from its lanes" if bus == "here" else "; built beside it on the "
                         f"{FLOW_NAME[(main['axis'] + 4 + (0 if side > 0 else 8)) % 16]} side, taking from its lanes")
-                     + (f" (turned to face it)" if k else ""))
+                     + (" (turned to face it)" if k else ""))
     elif bus == "on":
         notes.append("no main bus found in the snapshot (3+ long straight belts side by side, flowing the same way); "
                      "placed near the belts it taps instead")

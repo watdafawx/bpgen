@@ -76,7 +76,7 @@ class App:
     def plan(self, params, progress=None, cancel=None):
         if self.service.sync(progress, cancel):
             self.data_id += 1
-        return self.service.plan(params, progress, cancel)
+        return self.service.request(params, progress, cancel)["result"]
 
     def watch(self):
         last = REQUEST.stat().st_mtime if REQUEST.exists() else 0
@@ -91,7 +91,7 @@ class App:
                 self.request = self.service.last_request()
                 self.request_seq += 1
                 print(f"[{time.strftime('%H:%M:%S')}] request: {self.request['recipe']} in {self.request['machine']}")
-                params = self.service.params_from_request(self.request, self.defaults)
+                params = self.service.params(self.request, self.defaults)
                 self.auto_job = self.job("plan", self.plan, params)
             except Exception as e:
                 print("watch error:", e)
@@ -171,7 +171,7 @@ def make_handler(app):
                 return self.send(200, (WEB / "index.html").read_bytes(), "text/html; charset=utf-8")
             if url.path == "/api/state":
                 req = app.request
-                params = app.service.params_from_request(req, app.defaults) if req else None
+                params = app.service.params(req, app.defaults) if req else None
                 bg = app.jobs.get(app.background) if app.background else None
                 background = {"id": app.background, "state": bg["state"], "stage": bg["stage"],
                               "started": bg["started"], "error": bg.get("error")} if bg else None

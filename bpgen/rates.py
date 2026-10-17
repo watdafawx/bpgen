@@ -33,8 +33,17 @@ THROTTLE_DRAIN = 0.85  # a belt-limited machine whose inserters have no headroom
 # How full the output lanes get when output inserters must drop several items per swing (measured with
 # speed-moduled gears/cable, 3 machines per row: full hands 94.6-96.1%, stack inserters 91.7%).
 PACKING_FULL_HAND, PACKING_STACK = 0.95, 0.92
-# (down to 1%: a modded machine crafting 40/s outruns any 2 inserters 10 times over)
-INSERTER_THROTTLE = (1.0, 0.85, 0.7, 0.55, 0.4, 0.3, 0.2, 0.15, 0.1, 0.07, 0.05, 0.035, 0.025, 0.015, 0.01)
+# (a modded machine crafting 40/s outruns any 2 inserters 10 times over, and one with a 0.002 s recipe at speed 20
+# crafts 10000/s: below 1% the steps shrink by 30% each, down to about a millionth, so every machine a belt could
+# feed at all plans - slowed to what its inserters move)
+INSERTER_THROTTLE = (1.0, 0.85, 0.7, 0.55, 0.4, 0.3, 0.2, 0.15, 0.1, 0.07, 0.05, 0.035, 0.025, 0.015, 0.01,
+                     *(0.01 * 0.7 ** i for i in range(1, 25)))
+
+
+def pct(x):
+    """a share as a percentage for a note: whole numbers down to 1%, two significant digits below"""
+    return f"{x:.0%}" if x >= 0.0095 else f"{x * 100:.2g}%"
+
 
 EPS = 1e-9  # effect sums like 2.0000000000000004 must not cost a machine in floor()/ceil()
 
@@ -436,7 +445,7 @@ def pick_feed(calib, belt, bonus, zero, near_ins, far_ins, out_ins, slots, out_s
         out_all *= throttle
         rates = t_rates
         target = t_target
-        notes.append(f"its inserters can't keep one {machine} busy: each runs at {throttle:.0%} speed, "
+        notes.append(f"its inserters can't keep one {machine} busy: each runs at {pct(throttle)} speed, "
                      f"{target} per row instead")
 
     if scale < 1:
@@ -502,7 +511,7 @@ def pick_out_only(calib, belt, bonus, zero, out_ins, out_slots, c, target, machi
         raise PlanError(failures[-1])
     out_all = c.out_all * throttle
     if throttle < 1:
-        notes.append(f"its inserters can't keep one {machine} busy: each runs at {throttle:.0%} speed")
+        notes.append(f"its inserters can't keep one {machine} busy: each runs at {pct(throttle)} speed")
     ins_out, packing = _pick_out(calib, belt, bonus, zero, out_ins, out_slots, out_all, notes)
     return Feed(target, 0, (), None, None, ins_out, throttle, 1.0, packing, {}, c.craft_rate * throttle,
                 c.out_per_machine * throttle, out_all, notes)
@@ -557,6 +566,6 @@ def pick_feed_row(calib, belt, bonus, zero, near_ins, far_ins, out_ins, slots_n,
     if found < 1:
         craft_rate *= found
         out_per_machine *= found
-        notes.append(f"its inserters can't keep one {machine} busy: each runs at {found:.0%} speed")
+        notes.append(f"its inserters can't keep one {machine} busy: each runs at {pct(found)} speed")
     rates = {it: v * found for it, v in rates.items()}
     return RowFeed(per, found, ins_near, ins_far, ins_out, ins_s, rates, craft_rate, out_per_machine, notes)

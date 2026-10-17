@@ -9,7 +9,6 @@ import struct
 import os
 import shutil
 import subprocess
-from pathlib import Path
 
 from bpgen import settings_dat
 from bpgen.harness import FACTORIO, ROOT, RUN

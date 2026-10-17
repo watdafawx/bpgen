@@ -41,6 +41,7 @@ CASES = {
     "move": {"script": T + "move_test.py"},
     "power": {"script": T + "power_test.py"},
     "ports": {"script": T + "ports_test.py"},
+    "inserter-limit": {"script": T + "inserter_limit_test.py"},
     "rowsolve": {"script": T + "rowsolve_test.py"},
     "refit": {"script": T + "refit_test.py"},
     "ship": {"script": T + "ship_test.py"},

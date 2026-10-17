@@ -1102,5 +1102,36 @@
    "long-handed-inserter",
    "fast-inserter"
   ]
+ },
+ "shape-electrolyte-gap": {
+  "recipe": "electrolyte",
+  "machine": "electromagnetic-plant",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ]
+ },
+ "shape-quantum-gap": {
+  "recipe": "quantum-processor",
+  "machine": "electromagnetic-plant",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 6
  }
 }

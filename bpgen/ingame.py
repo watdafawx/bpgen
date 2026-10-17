@@ -7,142 +7,54 @@ process. The zzz-bpgen mod sends the same request it writes to request.json:
 The interpreter stays loaded between plans, so bpgen's data (the pack's prototypes, the inserter measurements)
 loads once, on the first plan or on warm(). Nothing is measured in game (that needs a headless game): a plan that
 needs an unmeasured inserter setup says so instead.
+
+This module is the transport: each function parses what the mod sends, calls the one Session (session.py: the
+Service, each player's plans, the progress) and answers in JSON. A plan itself is Service.request (request.py), as
+for the web app and the console.
 """
 import json
 import math
-import threading
+import sys
 import time
 import traceback
-from pathlib import Path
+import types
 
-from bpgen import ents as entlib, geom
+from bpgen import geom
+from bpgen.request import absolute as _absolute, line_needs as _line_needs, section_needs as _section_needs  # noqa: F401
+from bpgen.session import Session, crash, post_icons
 
-_service = None
-_lock = threading.Lock()  # (plans share one Service: one at a time)
-_taking = None  # the thread re-reading the mods' data with a headless game (planning waits for it)
-# each player's own (a request's "player", 0 without one): "last": the last plan that isn't placed yet (entities,
-# sources, sinks...), what place() puts next to the base; "sections": a starter base's prints by name (place() can
-# put one of them next to the base); "where": where place() last put "last", {of: that plan, seed, offset} (the
-# window's arrows move it from there); "site": the ground round the base it was placed in (site.Site, read once)
-_players = {}
+SESSION = Session()
 
 
-def _state(req):
-    """the asking player's state (see _players)"""
-    return _players.setdefault(int(req.get("player") or 0), {"last": None, "sections": {}, "where": None, "site": None})
+class _Module(types.ModuleType):
+    """ingame._service and ingame._players (the tests set and read them): the Session's"""
+    _service = property(lambda m: SESSION.service, lambda m, v: setattr(SESSION, "service", v))
+    _players = property(lambda m: SESSION.players)
 
 
-def _site(s, st, snap, prune=None):
-    """the player's site for this snapshot: the kept one when it is the same snapshot (sent again while the window's
-    arrows, Rotate and Redo stay inside it), else read anew and kept. prune: [x1, y1, x2, y2] whose entities are
-    left out (a section being moved: its old place is free ground)"""
-    from bpgen import site
-    variant = tuple(prune) if prune else None
-    if st["site"] is None or st["site"].key != site.key_of(snap, variant) or snap.get("tick") is None:
-        snap = s.snapshot_view(snap)
-        if prune:
-            x1, y1, x2, y2 = prune
-            snap = dict(snap, entities=[e for e in snap["entities"] if not (
-                x1 <= e["position"]["x"] < x2 and y1 <= e["position"]["y"] < y2)])
-        st["site"] = site.Site(snap, variant)
-    return st["site"]
-# what the job running now has done, for the window's progress bar (read by progress(), without _lock: the job holds
-# it while it works). Appending to a list is atomic in CPython.
-STAGES = ("reading your request", "planning", "placing it next to your base", "finishing")
-_prog = {"stage": 0, "lines": [], "seen": 0, "in_stage": 0, "run": 0}
+sys.modules[__name__].__class__ = _Module
 
 
-def _post():
-    """the progress for the game thread to read without the GIL (fse 0.17.2+: native.call("py", "_note", ...));
-    a game thread calling progress() instead waits whenever this worker holds the GIL: the game stuttered"""
-    try:
-        import fse
-        note = fse.note
-    except (ImportError, AttributeError):
-        return
-    st = _prog["stage"]
-    frac = min(0.98, (st + min(0.9, 0.12 * _prog["in_stage"])) / len(STAGES))
-    note("bpgen.progress", json.dumps({"run": _prog["run"], "fraction": frac, "step": STAGES[st], "lines": _prog["lines"]}))
-
-
-def _note(text, stage=None):
-    """a line for the window's details; a stage (index into STAGES) moves the bar on"""
-    if stage is not None and stage != _prog["stage"]:
-        _prog["stage"], _prog["in_stage"] = stage, 0
-    _prog["in_stage"] += 1
-    _prog["lines"].append(str(text))
-    _post()
-
-
-def _begin():
-    _prog.update(stage=0, lines=[], seen=0, in_stage=0, run=_prog["run"] + 1)
-    _post()
+def _crash(e, request):
+    return json.dumps(crash(e, request))
 
 
 def progress(_: str = "") -> str:
     """the running job's progress: {"fraction", "step", "lines": new ones since the last call}"""
-    lines = _prog["lines"]
-    new = lines[_prog["seen"]:]
-    _prog["seen"] = len(lines)
-    st = _prog["stage"]
-    frac = min(0.98, (st + min(0.9, 0.12 * _prog["in_stage"])) / len(STAGES))
-    return json.dumps({"fraction": frac, "step": STAGES[st], "lines": new})
+    return SESSION.progress.read()
 
 
-def _crash(e, request):
-    """an unexpected error: the answer the window shows, and the request with its trace in run/ingame-error.json
-    (the game shows only the error line), so it can be planned again outside the game"""
-    trace = traceback.format_exc()
-    try:
-        out = Path(__file__).resolve().parents[1] / "run" / "ingame-error.json"
-        out.parent.mkdir(exist_ok=True)
-        out.write_text(json.dumps({"request": request, "trace": trace}))
-    except OSError:
-        pass
-    return json.dumps({"error": f"{type(e).__name__}: {e}", "trace": trace[-2000:]})
-
-
-def _post_icons():
-    """the icon table (pack.icon_specs) for the web window, as fse's note "bpgen.icons": web.lua reads it without
-    waiting for Python. A "kind<tab>name<tab>spec" line each: the game splits that in ~30 ms, JSON took ~400 ms"""
-    from bpgen import pack
-    try:
-        import fse
-        icons = json.loads(pack.ICONS.read_text(encoding="utf-8"))
-        fse.note("bpgen.icons", "".join(f"{kind}\t{n}\t{s}\n" for kind, t in icons.items() for n, s in t.items()))
-        fse.note("bpgen.icons.at", str(pack.ICONS.stat().st_mtime_ns))  # (a new table: web.lua reads it again)
-    except (ImportError, AttributeError, OSError):
-        pass
-
-
-def _reread():
-    """bpgen's copy of the mods' data, made again by a headless game (factorio --dump-data on a mirror of the user's
-    mods, about 2 minutes), on a thread: the game goes on. (Not taken from the game's own data stage: a mod named
-    zzz- doesn't load last, Factorio orders mods by dependency depth first, so it missed later mods' final fixes.)"""
-    global _taking, _service
-    from bpgen import pack
-
-    def work():
-        global _service
-        t = time.perf_counter()
-        try:
-            pack.sync()
-            _post_icons()
-            print(f"bpgen: mods' data re-read in {time.perf_counter() - t:.0f} s")
-        except Exception:  # noqa: BLE001 - logged; bpgen keeps its old copy
-            traceback.print_exc()
-        _service = None  # (the next plan loads the new copy)
-
-    _service = None
-    _taking = threading.Thread(target=work, name="bpgen-reread")
-    _taking.start()
+def plan(request: str) -> str:
+    """a request from the mod (recipe, machine, unlocked belts and inserters, bonuses...) -> {blueprint, label, text}
+    or {error} (Session.plan: Service.params, then Service.request)"""
+    return json.dumps(SESSION.plan(request))
 
 
 def stale(active: str = "") -> str:
     """at game load (`active`: the game's script.active_mods as JSON): bpgen's copy of the mods' data is stale and
     the game runs the user's own mods -> it is read again, headless, while the game goes on"""
     from bpgen import pack
-    if _taking is not None and _taking.is_alive():
+    if SESSION.reading():
         return json.dumps({"stale": True, "reading": True})
     try:
         if pack.up_to_date() or not pack.users_game(json.loads(active or "{}")):
@@ -150,21 +62,8 @@ def stale(active: str = "") -> str:
     except (OSError, ValueError):
         traceback.print_exc()
         return json.dumps({"stale": False})
-    _reread()
+    SESSION.reread()
     return json.dumps({"stale": True, "reading": True})
-
-
-def _svc():
-    global _service
-    if _taking is not None and _taking.is_alive():
-        _note("reading your mods' changes (about 2 minutes, once after they change)")
-        _taking.join()
-    if _service is None:
-        from bpgen.service import Service
-        s = Service("pack")
-        s.data  # (loads the pack's prototypes now, not inside the first plan)
-        _service = s
-    return _service
 
 
 def warm(game: str = "") -> str:
@@ -178,36 +77,13 @@ def warm(game: str = "") -> str:
             print(f"bpgen: Power Propagation on (range {propagation.RANGE}): blueprints leave out the poles it covers")
     except ValueError:
         pass
-    with _lock:
-        _svc()
-    _post_icons()
+    with SESSION.lock:
+        SESSION.svc()
+    post_icons()
     from bpgen import router
     print(f"bpgen: belt router in {'Rust (bpgen_fast)' if router._fast else 'Python (bpgen_fast not built)'}")
     return json.dumps({"ok": True, "seconds": round(time.perf_counter() - t, 3)})
 
-
-def _test_spec(out, params):
-    s = out["summary"]
-    from bpgen import calibrate
-    return {
-        # (as Service.verify: the planner's own warmup and measuring time, else what fluid lines need)
-        "warmup": s.get("warmup") or 60 * 60, "measure": s.get("measure") or 60 * 60,
-        "force": dict(params.get("bonuses") or calibrate.ZERO, belt_stack_size_bonus=0),
-        "recipe_productivity": {s["recipe"]: params.get("productivity") or 0} if s.get("recipe") else {},
-        "output": s.get("output"), "expected": s.get("expected"),
-        "case": {"id": "bp", "sources": out.get("sources") or [], "sinks": out.get("sinks") or []},
-    }
-
-
-def _mall_test_spec(data, out, params):
-    """a mall's test run: its input belts fed, nothing drained (its products stay in their chests); the window
-    counts what has reached them"""
-    from bpgen import calibrate, mall
-    s = out.get("summary") or {}
-    return {"warmup": 0, "measure": 20 * 3600, "output": None, "expected": None,
-            "force": dict(params.get("bonuses") or calibrate.ZERO, belt_stack_size_bonus=0), "recipe_productivity": {},
-            "products": [mall._only_result(data, r) or r for r in s.get("products") or []],
-            "case": {"id": "bp", "sources": out.get("sources") or [], "sinks": []}}
 
 # what the window may ask the service for (bpgen.ingame:api {"fn": ..., "params": {...}})
 API = {"recipe_tree", "options", "siblings", "mall_candidates", "save_check", "module_ideas", "history", "save_info",
@@ -221,17 +97,17 @@ def api(request: str) -> str:
     if fn == "shortages":  # (what the save uses faster than it makes, that bpgen can plan: the window's "what's short")
         from bpgen.service import SAVE_STATE
         try:
-            with _lock:
+            with SESSION.lock:
                 st = json.loads(SAVE_STATE.read_text(encoding="utf-8"))
-                rows = [r for r in _svc().production(st) if r["short"] > 0 and r["makeable"] and not r["fluid"]]
+                rows = [r for r in SESSION.svc().production(st) if r["short"] > 0 and r["makeable"] and not r["fluid"]]
             return json.dumps({"result": rows[:10]})
         except (OSError, ValueError) as e:
             return json.dumps({"error": f"no production numbers yet ({e})"})
     if fn not in API:
         return json.dumps({"error": f"no {fn}"})
     try:
-        with _lock:
-            m = getattr(_svc(), fn)
+        with SESSION.lock:
+            m = getattr(SESSION.svc(), fn)
             out = m(req["params"]) if "params" in req else m()
         return json.dumps({"result": out})
     except Exception as e:  # noqa: BLE001 - shown in the window
@@ -243,163 +119,10 @@ def measured(results: str) -> str:
     """the game measured inserter setups (a NotMeasured spec run on its preview surface): into the table"""
     from bpgen import calibrate
     cases = json.loads(results).get("cases") or []
-    with _lock:
-        calibrate.store(_svc().calib_path, cases)
+    with SESSION.lock:
+        calibrate.store(SESSION.svc().calib_path, cases)
     print(f"bpgen: {len(cases)} inserter setups measured in game")
     return json.dumps({"stored": len(cases)})
-
-
-def _line_needs(data, sm):
-    """{ingredient: items/s} a line takes at its expected output (its summary), or None (a mall, no one recipe)"""
-    r = data.raw["recipe"].get(sm.get("recipe") or "")
-    if not r or not sm.get("expected"):
-        return None
-    made = sum(p.get("amount", (p.get("amount_min", 0) + p.get("amount_max", 0)) / 2) * p.get("probability", 1)
-               for p in r.get("results") or [] if p.get("name") == sm.get("output"))
-    if not made:
-        return None
-    runs = sm["expected"] / made / (1 + (sm.get("productivity") or 0))
-    need = {i["name"]: runs * i["amount"] for i in r.get("ingredients") or [] if i.get("type") != "fluid"}
-    for st in sm.get("stages") or []:  # (made in the blueprint: what it's made from comes in instead)
-        sr = data.raw["recipe"].get(st.get("recipe") or "")
-        v = need.pop(st.get("item"), None)
-        out = sum(p.get("amount", 0) for p in (sr or {}).get("results") or [] if p.get("name") == st.get("item"))
-        if v is None or not out:
-            continue
-        for i in sr.get("ingredients") or []:
-            if i.get("type") != "fluid":
-                need[i["name"]] = need.get(i["name"], 0) + v / out * i["amount"]
-    return need
-
-
-def _section_needs(data, sec, base_summary):
-    """{item: items/s} a starter base's print takes from outside: a line's through its recipe, the whole base's what
-    it brings in; else None"""
-    if sec.get("kind") == "line":
-        return _line_needs(data, (sec.get("result") or {}).get("summary") or {})
-    if sec.get("kind") == "routed":
-        return {k: v / 60 for k, v in (base_summary.get("bring_in") or {}).items() if isinstance(v, (int, float))} or None
-    return None
-
-
-def _absolute(placed):
-    """what the window needs of a plan placed next to the base: its box, what it ties into, the bus's axis (its
-    arrows move it along the bus) and the bus lanes it overdraws (its upgrade buttons)"""
-    dl = placed.get("deliveries") or []
-    return {"box": placed["box"], "taps": len(placed.get("taps") or []),
-            "deliveries": len([d for d in dl if not d.get("new_lane")]),
-            "new_lanes": len([d for d in dl if d.get("new_lane")]), "axis": (placed.get("bus") or {}).get("axis"),
-            "upgrades": placed.get("upgrades") or [],
-            # (what has to be brought by hand, and where the product comes out: AI Crew feeds and empties these)
-            "inputs": placed.get("inputs") or [], "outputs": placed.get("outputs") or []}
-
-
-def _bus_feed(s, params, site):
-    """a production line fed from the player's main bus: the bus in the snapshot, and what the line takes from it.
-    Ingredients the bus doesn't carry are made inside the blueprint (params["make"], as if ticked in the window)
-    when there's a recipe for them. -> (the bus or None, notes)"""
-    from bpgen import base, planner
-    main = site.bus if site else None
-    if not main:
-        return None, ["no main bus around you (3+ long straight belts side by side): planned as a plain line"]
-    data = s.data
-    on_bus = {i for ln in main["lanes"] for i in ln.get("items") or [] if i}
-    r = data.raw["recipe"][params["recipe"]]
-    out_items = {x.get("name") for x in r.get("results") or []}
-    make = dict(params.get("make") or {})
-    machine_for = base.machines_by_category(data, [params.get("machine"), "assembling-machine-2", "electric-furnace",
-                                                   "stone-furnace"])
-    taken, made, missing = [], [], []
-    for ing in r.get("ingredients") or []:
-        n = ing["name"]
-        if ing.get("type") == "fluid":
-            continue
-        if n in make:
-            made.append(n)
-        elif n in on_bus:
-            taken.append(n)
-        else:
-            rn = base.pick_recipe(data, n, machine_for, on_bus, avoid=out_items)
-            if rn:
-                make[n] = {"recipe": rn, "machine": machine_for[planner.category_in(data.raw["recipe"][rn], machine_for)]}
-                made.append(n)
-            else:
-                missing.append(n)
-    params["make"] = make
-    notes = [f"from your bus: {' '.join(f'[item={i}]' for i in taken) or 'nothing'}"]
-    if made:
-        notes.append(f"made in the blueprint (not on your bus): {' '.join(f'[item={i}]' for i in made)}")
-    if missing:
-        notes.append(f"not on your bus and not made here: {' '.join(f'[item={i}]' for i in missing)}")
-    return main, notes
-
-
-def _mall_bus_feed(s, params, site):
-    """a grid mall fed from the player's main bus: what the bus carries comes in on its belts (tapped from the bus),
-    the parts it doesn't are made at the top. -> (the bus or None, notes)"""
-    from bpgen import base
-    main = site.bus if site else None
-    if not main:
-        return None, ["no main bus around you (3+ long straight belts side by side): only plates come in"]
-    on_bus = {i for ln in main["lanes"] for i in ln.get("items") or [] if i}
-    raw = base.raw_items(s.data) - base.MADE_HERE
-    plates = base.plate_items(s.data, raw)
-    params["inputs"] = sorted(raw | plates | base.plate_items(s.data, plates) | on_bus)
-    return main, [f"your bus carries {' '.join(f'[item={i}]' for i in sorted(on_bus))}: taken from it"]
-
-
-def _refit(s, params):
-    """a messy area of the base rebuilt as a compact grid mall in its place: params["refit"] = {"area": [x1, y1, x2,
-    y2], "add": more machines allowed} with params["snapshot"] (the area and round it). The area's entities leave
-    the snapshot (free ground for the mall) but for the main bus's belts and machines making what the mall won't.
-    -> (what to deconstruct: [{name, position}], the area's assembling machines rebuilt, notes)"""
-    from bpgen import extend, planner
-    snap = s.snapshot_view(params.get("snapshot"))
-    if not snap:
-        raise planner.PlanError("no snapshot of the area")
-    x1, y1, x2, y2 = params["refit"]["area"]
-    products = set(params.get("products") or [])
-    main = extend.find_bus(extend.Ground(snap))
-    bus_tiles = main["tiles"] if main else set()
-    keep, clear, machines, kept = [], [], 0, set()
-    for e in snap["entities"]:
-        x, y = e["position"]["x"], e["position"]["y"]
-        inside = x1 <= x <= x2 and y1 <= y <= y2
-        machine = e["type"] in ("assembling-machine", "furnace", "rocket-silo", "lab")
-        if not inside or (math.floor(x), math.floor(y)) in bus_tiles or (machine and not params["refit"].get("all")
-                                                                          and not (e["type"] == "assembling-machine"
-                                                                                   and e.get("recipe") in products)):
-            keep.append(e)
-            if inside and machine and not e.get("ghost"):
-                kept.add(e.get("recipe") or e["name"])
-            continue
-        if not e.get("ghost"):
-            clear.append({"name": e["name"], "position": e["position"]})
-            machines += e["type"] == "assembling-machine"
-    params["snapshot"] = dict(snap, entities=keep)
-    notes = [f"refit: {len(clear)} entities in the area removed, the mall built in their place"]
-    if kept:
-        notes.append("left standing (the mall doesn't make them): " + " ".join(
-            f"[recipe={k}]" if k in s.data.raw["recipe"] else f"[entity={k}]" for k in sorted(kept)))
-    if any(e["type"] == "electric-pole" for e in snap["entities"] if e not in keep and not e.get("ghost")):
-        notes.append("its poles are replaced by the mall's: check power still reaches past the area")
-    return clear, machines, notes
-
-
-def _refit_inputs(s, params):
-    """no machines added: what the area's recipes need and none of them makes comes in on the belts (from the bus
-    or by hand) instead of being made at the mall's top"""
-    from bpgen import base
-    recipes = s.data.raw["recipe"]
-    made = {x.get("name") for p in params.get("products") or [] for x in (recipes.get(p) or {}).get("results") or []}
-    need = {i["name"] for p in params.get("products") or [] for i in (recipes.get(p) or {}).get("ingredients") or []
-            if i.get("type") != "fluid"}
-    inputs = params.get("inputs")
-    if inputs is None:  # (as the grid mall's default: the plates, and what's smelted from them)
-        raw = base.raw_items(s.data) - base.MADE_HERE
-        plates = base.plate_items(s.data, raw)
-        inputs = raw | plates | base.plate_items(s.data, plates)
-    params["inputs"] = sorted(set(inputs) | (need - made))
 
 
 BELTISH = ("transport-belt", "underground-belt", "splitter")
@@ -469,15 +192,15 @@ def move(request: str) -> str:
     t = time.perf_counter()
     try:
         req = json.loads(request)
-        st = _state(req)
+        st = SESSION.player(req)
         params = req.get("params") or {}
-        _begin()
-        _note("reading the section", 0)
-        with _lock:
-            s = _svc()
-            s.progress = lambda text: _note(text, 2)
+        SESSION.progress.begin()
+        SESSION.progress.note("reading the section", 0)
+        with SESSION.lock:
+            s = SESSION.svc()
+            s.progress = lambda text: SESSION.progress.note(text, 2)
             ents, sources, sinks, clear, notes = _section(s, params)
-            _note(f"{len(ents)} entities, {len(sources)} belts in, {len(sinks)} out", 1)
+            SESSION.progress.note(f"{len(ents)} entities, {len(sources)} belts in, {len(sinks)} out", 1)
             x1, y1 = params["move"]["area"][:2]
             plan = [dict(e, position={"x": e["position"]["x"] - x1, "y": e["position"]["y"] - y1}) for e in ents]
             shift = lambda p: {"x": p["x"] - x1, "y": p["y"] - y1}  # noqa: E731
@@ -507,7 +230,7 @@ def _pick_section(st, name):
         st["last"] = {"entities": res.get("entities") or [], "sources": res.get("sources") or [],
                       "sinks": [dict(k, item=k.get("item") or sec.get("item")) for k in res.get("sinks") or []],
                       "belt": (res.get("summary") or {}).get("belt") or st["last"].get("belt"), "mode": "base",
-                      "label": f"bpgen: {sec['name']} next to the base", "needs": _section_needs(_svc().data, sec, {})}
+                      "label": f"bpgen: {sec['name']} next to the base", "needs": _section_needs(SESSION.svc().data, sec, {})}
 
 
 def place(request: str) -> str:
@@ -518,7 +241,7 @@ def place(request: str) -> str:
     from bpgen import extend
     try:
         req = json.loads(request or "{}")
-        st = _state(req)
+        st = SESSION.player(req)
         _pick_section(st, req.get("section"))
         if not st["last"] or not st["last"].get("entities"):
             return json.dumps({"error": "plan something first"})
@@ -527,12 +250,12 @@ def place(request: str) -> str:
         if req.get("shift") and st["where"] and st["where"]["of"] is st["last"]:  # (the arrows: that far from the last spot)
             seed = st["where"]["seed"]
             at = (st["where"]["offset"][0] + req["shift"][0], st["where"]["offset"][1] + req["shift"][1])
-        _begin()
-        _note("placing the last plan where you asked", 2)
-        with _lock:
-            _svc().progress = lambda text: _note(text, 2)
-            site = _site(_svc(), st, snap, st["last"].get("prune")) if snap else None
-            placed = _svc().extend(dict(st["last"], bus="here" if st["last"].get("mode") == "move" else req.get("bus") or "auto",
+        SESSION.progress.begin()
+        SESSION.progress.note("placing the last plan where you asked", 2)
+        with SESSION.lock:
+            SESSION.svc().progress = lambda text: SESSION.progress.note(text, 2)
+            site = SESSION.site(st, snap, st["last"].get("prune")) if snap else None
+            placed = SESSION.svc().extend(dict(st["last"], bus="here" if st["last"].get("mode") == "move" else req.get("bus") or "auto",
                                         seed=seed, site=site, snapshot=snap, turn=req.get("turn") or 0,
                                         avoid=req.get("avoid"), spot=bool(req.get("spot")), at=at))
         st["where"] = {"of": st["last"], "seed": seed, "offset": placed["offset"]}
@@ -558,16 +281,16 @@ def hand(request: str) -> str:
     t = time.perf_counter()
     try:
         req = json.loads(request or "{}")
-        st = _state(req)
+        st = SESSION.player(req)
         if req.get("section"):
             _pick_section(st, req["section"])
         last = st["last"]
         if not last or not last.get("entities"):
             return json.dumps({"error": "plan something first"})
         seed = req.get("seed")
-        with _lock:
-            s = _svc()
-            site = _site(s, st, req["snapshot"], last.get("prune")) if req.get("snapshot") else None
+        with SESSION.lock:
+            s = SESSION.svc()
+            site = SESSION.site(st, req["snapshot"], last.get("prune")) if req.get("snapshot") else None
             spot = posed = None
             if site:
                 ground, main = site.scratch()
@@ -614,7 +337,7 @@ def connect(request: str) -> str:
     t = time.perf_counter()
     try:
         req = json.loads(request or "{}")
-        st = _state(req)
+        st = SESSION.player(req)
         held = (st.get("hands") or {}).get(req.get("id"))
         if not held:
             return json.dumps({"error": "that blueprint is from an older plan: take it from the window again"})
@@ -625,11 +348,11 @@ def connect(request: str) -> str:
             return json.dumps({"error": "bpgen couldn't tell how the blueprint was put down (was it edited?)"})
         posed = extend.repose(held, how, {i: b.get("direction") for i, b in built.items()})
         last = held["plan"]
-        _begin()
-        _note("tying it into your base", 2)
-        with _lock:
-            s = _svc()
-            s.progress = lambda text: _note(text, 2)
+        SESSION.progress.begin()
+        SESSION.progress.note("tying it into your base", 2)
+        with SESSION.lock:
+            s = SESSION.svc()
+            s.progress = lambda text: SESSION.progress.note(text, 2)
             delta = req.get("delta")
             if delta:
                 site = st["site"]
@@ -638,7 +361,7 @@ def connect(request: str) -> str:
                 site = st["site"] = site.with_delta(delta.get("built") or [], delta.get("removed") or [],
                                                     delta.get("now"), s.decorate)
             else:
-                site = _site(s, st, req["snapshot"])
+                site = SESSION.site(st, req["snapshot"])
             placed = s.connect({"site": site, "posed": posed, "belt": last.get("belt"), "needs": last.get("needs"),
                                 "label": (last.get("label") or "bpgen") + ": connected"})
         absolute = _absolute(placed) if placed["box"] else None
@@ -658,9 +381,9 @@ def bus_report(request: str) -> str:
     from bpgen.service import SAVE_STATE
     try:
         req = json.loads(request or "{}")
-        with _lock:
-            s = _svc()
-            main = _site(s, _state(req), req["snapshot"]).bus if req.get("snapshot") else None
+        with SESSION.lock:
+            s = SESSION.svc()
+            main = SESSION.site(SESSION.player(req), req["snapshot"]).bus if req.get("snapshot") else None
             if not main:
                 return json.dumps({"result": {"bus": None}})
             try:
@@ -701,9 +424,9 @@ def add_lane(request: str) -> str:
     try:
         req = json.loads(request or "{}")
         item = req.get("item")
-        with _lock:
-            s = _svc()
-            ground, main = _site(s, _state(req), req["snapshot"]).scratch() if req.get("snapshot") else (None, None)
+        with SESSION.lock:
+            s = SESSION.svc()
+            ground, main = SESSION.site(SESSION.player(req), req["snapshot"]).scratch() if req.get("snapshot") else (None, None)
             if not main:
                 return json.dumps({"error": "no main bus around you (3+ long straight belts side by side)"})
             got = extend.new_bus_lane(s.data, ground, main, item)
@@ -720,234 +443,4 @@ def add_lane(request: str) -> str:
                       f"placed)"],
             "summary": {}, "seconds": round(time.perf_counter() - t, 3)})
     except Exception as e:  # noqa: BLE001 - shown in game
-        return _crash(e, request)
-
-
-def _lines(req, t):
-    """Line's More lines: the window's line and each of req["lines"] ({recipe, machine, modules...}) planned as its own
-    line, as if picked alone (no Make here / Also make: those are the first line's) -> as plan(), a blueprint book of
-    them, a print each ("sections": their labels, for the window's picker; place() puts the one picked by the base)"""
-    from bpgen import base
-    st = _state(req)
-    first = dict(req)
-    extra = first.pop("lines")
-    plain = {k: v for k, v in (first.get("params") or {}).items() if k not in ("make", "also")}
-    done, notes = [], []  # (label, its answer, its st["last"])
-    for i, sub in enumerate([first] + [dict(first, params=plain, **ln) for ln in extra]):
-        out = json.loads(plan(json.dumps(sub)))
-        if out.get("measure") or (i == 0 and not out.get("blueprint")):
-            return json.dumps(dict(out, seconds=round(time.perf_counter() - t, 3)))  # (measured, then all again)
-        if not out.get("blueprint"):
-            notes.append(f"{sub.get('recipe')}: not planned ({out.get('error')})")
-            continue
-        label, n = out["label"], 2
-        while any(d[0] == label for d in done):  # (a recipe twice: told apart)
-            label, n = f"{out['label']} ({n})", n + 1
-        done.append((label, out, st["last"]))
-    prints = []
-    for i, (label, out, _) in enumerate(done):
-        bp = entlib.decode(out["blueprint"])
-        bp["blueprint"]["label"] = label
-        prints.append({"index": i, **bp})
-    book = entlib.book_string(prints, f"bpgen: {len(done)} lines", "\n".join(d[0] for d in done))
-    st["sections"] = {label: {"name": label, "last": last} for label, _, last in done}
-    st["last"] = done[0][2]
-    head = done[0][1]
-    for label, out, _ in done:
-        notes += [f"{label}: {x}" for x in out.get("notes") or []]
-    return json.dumps(dict(head, blueprint=book, label=f"{len(done)} lines: " + ", ".join(
-        d[0] for d in done), sections=[d[0] for d in done], notes=notes, test=None, absolute=None,
-        seconds=round(time.perf_counter() - t, 3)))
-
-
-def plan(request: str) -> str:
-    """a request from the mod (recipe, machine, unlocked belts and inserters, bonuses...) -> {blueprint, label, text}
-    or {error}"""
-    from bpgen import calibrate, pack, planner
-    t = time.perf_counter()
-    _begin()
-    _note("request received", 0)
-    try:
-        req = json.loads(request)
-        st = _state(req)
-        if req.get("lines"):  # (Line's More lines: each its own line, one book)
-            return _lines(req, t)
-        st["sections"] = {}
-        with _lock:
-            s = _svc()
-            s.progress = lambda text: _note(text, 2)  # (placing next to the base: each input routed)
-            _note("bpgen's data loaded")
-            if req.get("recipe") and req.get("machine"):
-                params = s.params_from_request(req)
-            else:  # (a mall or a starter base: no one recipe)
-                belts = s.base_belts(req.get("belts") or [])
-                params = {"belts": belts, "inserters": req.get("inserters") or [],
-                          "bonuses": {k: (req.get("bonuses") or {}).get(k, 0) for k in calibrate.ZERO},
-                          # (the fastest of the save's belts, as params_from_request picks for a line)
-                          "belt": max(belts, key=lambda b: s.data.raw["transport-belt"][b]["speed"]) if belts
-                          else "transport-belt"}
-            params.setdefault("surface", req.get("surface"))  # (which save and surface: the bus design kept for it)
-            if req.get("seed") is not None:
-                params.setdefault("seed", req["seed"])
-            for k in ("rate_per_min", "per_row", "belt"):  # (optional, from the in-game bpgen window)
-                if req.get(k):
-                    params[k] = req[k]
-            # (the window's other options, as the web app sends them: near/far/out, beacon, make, feed, mode...)
-            params.update({k: v for k, v in (req.get("params") or {}).items() if v not in (None, "", {}, [])})
-            if params.get("mode") == "base" and params.get("import"):
-                # (a blueprint of the player's own base, held in game: rebuilt for the science it makes, as the web
-                # app's import does)
-                a = s.analyze_blueprint(params.pop("import"))
-                params.update({"targets": a.get("science") or {}, "mall_products": a.get("mall") or [],
-                               "mall": bool(a.get("mall")),
-                               "machines": sorted({m["machine"] for m in a.get("machines") or []}),
-                               "before": {"size": a.get("size"), "entities": a.get("entities")}})
-            bus, bus_notes = None, []
-            refit = params.get("refit") if params.get("mode") in ("mall", "base") else None
-            if refit:
-                params["origin"] = {"x": (refit["area"][0] + refit["area"][2]) / 2,
-                                    "y": (refit["area"][1] + refit["area"][3]) / 2}
-            if refit and params["mode"] == "base":  # (an area rebuilt as a base on a main bus, for the science it
-                refit["all"] = True  # made: everything in it goes but the main bus's own belts)
-                params.update(layout="bus", fit_bus=None, add_to=None, plates=True)  # (plates off the bus)
-                clear, had, refit_notes = _refit(s, params)
-            elif refit:  # (an area rebuilt as a mall, on a belt loop: any recipes, and its inputs an item each, which
-                # always tap - the grid's two-item input belts sit side by side, nowhere to merge their items)
-                params.update(layout="sushi", bus_feed=True, feed="belt")
-                if refit.get("layout") == "grid":  # (side by side: columns between mixed belts, the parts made at
-                    # the top, nothing wired - no chest limits, no loop to keep from jamming)
-                    params.update(layout="grid", stock=0)
-                clear, had, refit_notes = _refit(s, params)
-            # (the ground round the player, read once: the bus feed and the placing after the plan both use it; a
-            # refit's has the area's entities left out, made by _refit)
-            site = _site(s, st, params["snapshot"]) if params.get("snapshot") and not refit else None
-            if params.get("bus_feed") and params.get("recipe"):
-                bus, bus_notes = _bus_feed(s, params, site)
-            elif params.get("bus_feed") and params.get("mode") == "mall":
-                bus, bus_notes = _mall_bus_feed(s, params, site)
-            if refit and params["mode"] == "mall":
-                params["extra"] = bool(refit.get("add"))  # (off: no machine the area didn't have)
-                if not refit.get("add"):
-                    _refit_inputs(s, params)
-                bus_notes = refit_notes + [n for n in bus_notes if not n.startswith("no main bus")]
-            token = calibrate.NO_MEASURE.set(True)
-            try:
-                tries = [m for m in (params.pop("machines_try", None) or []) if m] if params.get("mode") == "mall" else []
-                for i, m in enumerate(tries[:4] or [params.get("machine")]):
-                    # (a mall: the window's candidate machines in turn, fastest first, until one lays out)
-                    if tries:
-                        params["machine"] = m
-                    try:
-                        _note(f"planning {params.get('mode') or 'a line'}"
-                              + (f" with {params.get('machine')}" if params.get("machine") else ""), 1)
-                        out = s.plan(params, progress=_note)
-                        break
-                    except planner.PlanError:
-                        if i == len(tries[:4]) - 1 or not tries:
-                            raise
-                if refit and params.get("mode") == "base":
-                    # (the base's connected print, where the area was - beside the bus if it doesn't fit there -
-                    # its inputs taken off the bus)
-                    whole = next((x for x in out.get("sections") or [] if x["kind"] == "routed"), None)
-                    if not whole:
-                        raise planner.PlanError(out.get("route_note") or "the base didn't come out as one connected build")
-                    res = whole["result"]
-                    st["last"] = {"entities": res["entities"], "sources": res.get("sources") or [],
-                             "sinks": res.get("sinks") or [], "belt": params.get("belt"), "mode": "base",
-                             "label": "bpgen: the area refit as a base", "clear": clear}
-                    o = params["origin"]
-                    placed = s.extend(dict(st["last"], bus="here", seed=o, snapshot=params.get("snapshot")))
-                    if placed.get("inputs"):
-                        placed = s.extend(dict(st["last"], bus="auto", seed=o, snapshot=params.get("snapshot")))
-                    n = sum(1 for e in placed["entities"] if e.get("recipe"))
-                    out = {"blueprint": placed["blueprint"], "absolute": dict(_absolute(placed), clear=clear),
-                           "summary": {"mode": "base", "packs": out.get("packs"), "spm": out.get("spm"),
-                                       "bring_in": out.get("bring_in"),
-                                       "notes": refit_notes + [f"{n} machines (the area had {had})"]
-                                       + list(out.get("notes") or []) + placed["notes"]}}
-                elif params.get("mode") == "extend":
-                    # (next to the base: plan_extension already placed the chain into the snapshot, taps on its
-                    # belts, power: an absolute blueprint that lands where it belongs)
-                    st["last"] = dict(out["plan"], belt=params.get("belt"), mode="extend",
-                                 label=f"bpgen: {params.get('item')} next to the base")
-                    out = {"blueprint": out["blueprint"], "summary": {"notes": out.get("notes") or []},
-                           "absolute": _absolute(out)}
-                elif params.get("mode") == "ship":  # (absolute too: it lands on the platform's hub, at 0,0)
-                    st["last"] = None
-                    out = {"blueprint": out["blueprint"], "summary": {"notes": out.get("notes") or []},
-                           "absolute": _absolute(out)}
-                elif params.get("mode") == "busdesign":  # (absolute, like extend: it lands on the patches)
-                    from bpgen import busdesign
-                    if not params.get("add_to_bus"):  # (more lanes on a bus: the bus design it fits stays)
-                        busdesign.save_last(out, params)
-                    st["last"] = None
-                    out = {"blueprint": out["blueprint"], "summary": {"notes": out.get("notes") or []},
-                           "absolute": _absolute(out)}
-                elif out.get("entities"):  # (for place(): this plan, put next to the base on request)
-                    sm = out.get("summary") or {}
-                    st["sections"] = {x["name"]: x for x in out.get("sections") or []}
-                    st["last"] = {"entities": out["entities"], "sources": out.get("sources") or [],
-                             "needs": _line_needs(s.data, sm) if not st["sections"] else _section_needs(
-                                 s.data, (out.get("sections") or [{}])[0], sm),
-                             "sinks": [dict(k, item=k.get("item") or sm.get("output")) for k in out.get("sinks") or []],
-                             "belt": sm.get("belt") or params.get("belt"), "mode": params.get("mode") or "line",
-                             "label": f"bpgen: {sm.get('recipe') or params.get('recipe') or params.get('mode')} next to the base"}
-                    if bus or refit:  # (fed from the bus: placed beside it straight away, its inputs tapped from
-                        o = params.get("origin") or {}  # the lanes; a refit: where the area was)
-                        try:
-                            placed = None
-                            if refit:  # (in the area's own place when it fits there, its belts tapped nearby)
-                                placed = s.extend(dict(st["last"], bus="here", seed=o, snapshot=params.get("snapshot")))
-                                bx, by, bw, bh = placed["box"][:4]
-                                ax1, ay1, ax2, ay2 = refit["area"]
-                                if not (ax1 <= bx + bw / 2 <= ax2 and ay1 <= by + bh / 2 <= ay2) or placed.get("inputs"):
-                                    placed = None  # (it doesn't fit, or not every input could be tapped there:
-                                    # beside the bus, as a mall from it goes)
-                            if placed is None:
-                                placed = s.extend(dict(st["last"], bus="on" if bus else "off", seed=o if o else None,
-                                                       site=site, snapshot=params.get("snapshot")))
-                            absolute = _absolute(placed)
-                            if refit:
-                                n = sum(1 for e in placed["entities"] if e.get("recipe"))
-                                bus_notes.append(f"{n} machines (the area had {had})")
-                                absolute["clear"] = clear
-                            out = {"blueprint": placed["blueprint"], "absolute": absolute,
-                                   "summary": dict(sm, notes=bus_notes + list(sm.get("notes") or []) + placed["notes"])}
-                        except (ValueError, planner.PlanError) as e:  # (no room beside the bus: the plain line)
-                            if refit:
-                                raise planner.PlanError(f"no room for the refit mall: {e}")
-                            bus, bus_notes = None, bus_notes + [f"not placed beside your bus ({e}): place it yourself"]
-                if bus_notes and not bus:
-                    out.setdefault("summary", {})["notes"] = bus_notes + list(out["summary"].get("notes") or [])
-            finally:
-                calibrate.NO_MEASURE.reset(token)
-        summary = out.get("summary") or {}
-        notes = list(summary.get("notes") or [])
-        if not pack.up_to_date():
-            notes.append("your mods changed since bpgen last read them: it reads them at the next game start")
-        return json.dumps({
-            "blueprint": out["blueprint"],
-            "label": (f"{params.get('item')} next to the base" if params.get("mode") == "extend" else f"{summary.get('recipe') or params.get('recipe') or params.get('mode')} x{summary.get('machines', '?')}"),
-            "mode": params.get("mode") or ("robots" if params.get("feed") == "robots" else "line"),
-            "absolute": out.get("absolute"),
-            "mall": {"products": summary.get("products"), "machines": summary.get("machines")} if summary.get("mode") == "mall" else None,
-            "base": {k: summary.get(k) for k in ("packs", "spm", "bring_in", "not_automated", "route_note")}
-            if summary.get("mode") == "base" else None,
-            # (a starter base's book: its prints by name, for the window's picker)
-            "sections": [x["name"] for x in out.get("sections") or []] or None,
-            "expected": summary.get("expected"), "output": summary.get("output"), "notes": notes,
-            "summary": {k: summary.get(k) for k in ("recipe", "machine", "machines", "per_row", "belt", "output",
-                                                    "expected", "productivity", "beacons_per_machine")}
-            | {"stages": [{k: st.get(k) for k in ("item", "recipe")} for st in summary.get("stages") or []]},
-            "seconds": round(time.perf_counter() - t, 3),
-            # (the window's test run: the harness case for this line, run live on its preview)
-            "test": _test_spec(out, params) if summary.get("expected") and out.get("sinks")
-            else _mall_test_spec(s.data, out, params) if summary.get("mode") == "mall" and out.get("sources") else None,
-        })
-    except calibrate.NotMeasured as e:
-        # (the game measures them itself on the preview surface, then plans again: measured() below)
-        return json.dumps({"error": str(e), "measure": e.spec, "seconds": round(time.perf_counter() - t, 3)})
-    except planner.PlanError as e:
-        return json.dumps({"error": str(e), "seconds": round(time.perf_counter() - t, 3)})
-    except Exception as e:  # noqa: BLE001 - shown in game, with the trace in the fse log via the error text
         return _crash(e, request)

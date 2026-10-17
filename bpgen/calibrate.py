@@ -5,7 +5,6 @@ table keyed "inserter|belt|direction|bonus-key"; only missing entries are measur
 """
 import contextvars
 import json
-import math
 from pathlib import Path
 
 from bpgen import harness

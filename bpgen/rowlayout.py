@@ -15,9 +15,8 @@ BEACON_MODULES = "beacon_modules"
 
 
 def _need(p):
-    """what the plan says each input item/fluid needs per second (a planner or fluid plan: input_need; a MultiPlan: inputs)"""
-    need = getattr(p, "input_need", None)
-    return need if need is not None else p.inputs
+    """what the plan says each input item needs per second, per row"""
+    return p.input_need
 
 
 def _pole_here(band, k, per_row, side):
@@ -135,19 +134,24 @@ def layout(spec: RowSpec, p):
                         put(planner.UNDERGROUND, x0 + fc + 0.5, Y[rname(riser_band, side)] + 0.5, outward)
                         if has_pole and spec.pole_in_tap and ins_band is not None and ins_band.kind == "ins":
                             put(planner.POLE, x0 + (s - 1 if fc != s - 1 else 0) + 0.5, Y[rname(riser_band, side)] + 0.5)
+                # a gap pipe: down the free column beside the machine from its port to the machine's edge, then up or
+                # down to its pipe row like a riser (a pipe in the first row, else a pipe-to-ground pair)
+                for pipe in pipes:
+                    if not pipe.gap:
+                        continue
+                    gx = x0 - 1 if pipe.gap == "w" else x0 + s
+                    ym = Y["mach_" + side]
+                    ys = range(0, pipe.gap_row + 1) if bands is spec.north else range(pipe.gap_row, hs)
+                    for j in ys:
+                        put(planner.PIPE, gx + 0.5, ym + j + 0.5)
+                    riser_band = bands[bands.index(pipe) - 1]
+                    if riser_band is entry:
+                        put(planner.PIPE, gx + 0.5, yi)
+                    else:
+                        put(planner.UNDERGROUND, gx + 0.5, yi, inward)
+                        put(planner.UNDERGROUND, gx + 0.5, Y[rname(riser_band, side)] + 0.5, outward)
                 pole_here = ins_band is not None and _pole_here(ins_band, k, p.per_row, side)
-                if ins_band is not None and ins_band.inserters:  # the band names its inserters (and its pole rule)
-                    if pole_here and ins_band.pole in ("col", "first-free"):
-                        pc = col(ins_band.pole_col) if ins_band.pole == "col" else slots[0]
-                        slots.remove(pc)
-                        put(planner.POLE, x0 + pc + 0.5, yi)
-                    for ins in ins_band.inserters:
-                        for i in range(ins.count):
-                            c = col(ins.cols[i]) if ins.cols is not None else slots.pop(-1 if ins.end else 0)
-                            put(ins.name, x0 + c + 0.5, yi, inward if ins.reach == "in" else outward)
-                    if pole_here and ins_band.pole == "slot-last":
-                        put(planner.POLE, x0 + slots.pop() + 0.5, yi)
-                elif ins_band is not None and ins_band.kind == "ins":
+                if ins_band is not None and ins_band.kind == "ins":
                     if has_pole and not pipes and not spec.poles_out:
                         put(planner.POLE, x0 + slots.pop() + 0.5, yi)
                     choices = (p.ins_near, p.ins_far) if not spec.pattern else (p.ins_far,) if main else (p.ins_near,)
@@ -165,7 +169,8 @@ def layout(spec: RowSpec, p):
                     if getattr(p, "ins_south", None):  # (one row: long-handed ones reaching the belt past the output)
                         for _ in range(p.ins_south.count):
                             put(p.ins_south.name, x0 + slots.pop(0) + 0.5, yi, outward)
-                if bands is spec.south and spec.pattern and k + 1 < p.per_row                         and {kind, spec.pattern[k + 1]} == {"C", "E"}:
+                if (bands is spec.south and spec.pattern and k + 1 < p.per_row
+                        and {kind, spec.pattern[k + 1]} == {"C", "E"}):
                     # the gap east of this machine: C into E (an inserter faces where it picks up from)
                     pick = WEST if kind == "C" else EAST
                     for j in sorted(range(hs), key=lambda j: abs(j - (hs - 1) / 2))[:p.ins_side.count]:
@@ -174,11 +179,8 @@ def layout(spec: RowSpec, p):
                 for band in bands:
                     if band.kind in ("ins", "out") or not _pole_here(band, k, p.per_row, side):
                         continue
-                    if band.pole == "col":
-                        c = col(band.pole_col)
-                    else:  # first-free: the first column without a riser
-                        taken = {b.riser for b in pipes if b.riser is not None}
-                        c = col(next(c for c in range(s) if c not in taken))
+                    taken = {b.riser for b in pipes if b.riser is not None}  # (first-free: no riser there)
+                    c = col(next(c for c in range(s) if c not in taken))
                     put(planner.POLE, x0 + c + 0.5, Y[rname(band, side)] + 0.5)
 
     # ---- sources and sinks --------------------------------------------------------------------------------------
@@ -211,15 +213,13 @@ def layout(spec: RowSpec, p):
                         "item": band.fluid}
                 if band.sink == "":
                     sink["rate"] = band.rate
-                elif band.sink == "rates":
-                    sink["rates"] = {band.fluid: band.rate}
                 fluid_sinks.append(sink)
     sinks += sorted(fluid_sinks, key=lambda k: k["position"]["y"])  # (top to bottom: the order routers take them in)
     byproducts = getattr(p, "byproducts", None)
     if byproducts:
         bottom = row.y - 1 if spec.sort_tail_bottom == "last" else Y[rname(
             next(b for b in spec.south if b.name == spec.sort_tail_bottom), "a")]
-        rates = byproducts if spec.byproducts_total else {k: v * p.machines for k, v in byproducts.items()}
+        rates = {k: v * p.machines for k, v in byproducts.items()}
         sinks[0:1] = planner.sort_tail(ents, p.belt, p.splitter, rates, p.output, width + 1, Y[rname(out_band, "a")],
                                        bottom)
     if spec.power_up:

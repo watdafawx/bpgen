@@ -129,6 +129,36 @@ class Service:
         self._early_inserters(p)
         return p
 
+    def params(self, req, defaults=None):
+        """a request as the mod sends it (recipe, machine, unlocked belts and inserters, bonuses..., the window's own
+        options in req["params"]) -> plan params: the one place the default belt, the inserters and the bonuses are
+        worked out. defaults: the console's flags (--belt, --beacon-modules...), over everything"""
+        if req.get("recipe") and req.get("machine"):
+            params = self.params_from_request(req)
+        else:  # (a mall or a starter base: no one recipe)
+            belts = self.base_belts(req.get("belts") or [])
+            params = {"belts": belts, "inserters": req.get("inserters") or [],
+                      "bonuses": {k: (req.get("bonuses") or {}).get(k, 0) for k in calibrate.ZERO},
+                      # (the fastest of the save's belts, as params_from_request picks for a line)
+                      "belt": max(belts, key=lambda b: self.data.raw["transport-belt"][b]["speed"]) if belts
+                      else "transport-belt"}
+        params.setdefault("surface", req.get("surface"))  # (which save and surface: the bus design kept for it)
+        if req.get("seed") is not None:
+            params.setdefault("seed", req["seed"])
+        for k in ("rate_per_min", "per_row", "belt"):  # (optional, from the in-game bpgen window)
+            if req.get(k):
+                params[k] = req[k]
+        # (the window's other options, as the web app sends them: near/far/out, beacon, make, feed, mode...)
+        params.update({k: v for k, v in (req.get("params") or {}).items() if v not in (None, "", {}, [])})
+        params.update({k: v for k, v in (defaults or {}).items() if v})
+        return params
+
+    def request(self, params, progress=None, cancel=None, measure=True, keep=None, site=None, stage=None):
+        """plan params (see params()) -> the answer, as every entry point gets it: the window's fields plus "result",
+        this Service's plan() output. See request.run"""
+        from bpgen import request
+        return request.run(self, params, progress, cancel, measure, keep, site, stage)
+
     def _early_inserters(self, p):
         """bpgen's lines use electric inserters; early on there may be none researched (the pack: assemblers come
         with automation, the inserter with electronics; the burner inserter can't feed a line). Then plan with the

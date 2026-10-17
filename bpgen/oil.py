@@ -17,7 +17,6 @@ from bpgen import base, compose_base, extend, geom, planner
 PUMPJACK = "pumpjack"
 PUMPJACK_OUT = (1, -2)  # (facing north: the tile its crude comes out on, from its middle)
 FLUID_CATEGORY = "basic-fluid"
-PIPE, PIPE_UG = planner.PIPE, planner.UNDERGROUND
 CHEST, CHEST_INSERTER = "wooden-chest", "burner-inserter"
 
 
@@ -113,7 +112,7 @@ def foreign_fluids(block, crude_inlet, fluid="crude-oil"):
     pipe and fluid machine "other" (a pipe bringing that fluid mustn't touch them: it would join them)"""
     pipes = {}
     for e in block:
-        if e["name"] in (PIPE, PIPE_UG):
+        if e["name"] in (planner.PIPE, planner.UNDERGROUND):
             pipes[(math.floor(e["position"]["x"]), math.floor(e["position"]["y"]))] = e
     crude, todo = set(), [crude_inlet]
     while todo:  # (the block's crude pipes: joined to the tile beside the inlet)
@@ -125,7 +124,7 @@ def foreign_fluids(block, crude_inlet, fluid="crude-oil"):
                 todo.append(q)
     out = {}
     for e in block:
-        if e.get("fluid") or e["name"] in (PIPE, PIPE_UG):
+        if e.get("fluid") or e["name"] in (planner.PIPE, planner.UNDERGROUND):
             for t in extend.footprint(e):
                 out[t] = fluid if t in crude else "other"
     return out
@@ -175,9 +174,9 @@ def pipe_to(goal, start, fluid, blocked, foreign, bounds, into, existing=()):
         path = compose_base._route_pipe({start}, goal, fluid, blocked, foreign, bounds, ptg_cells(existing), into=into)
     except compose_base.ComposeError:
         return None
-    ents = [{"name": PIPE, "position": {"x": start[0] + 0.5, "y": start[1] + 0.5}}]
+    ents = [{"name": planner.PIPE, "position": {"x": start[0] + 0.5, "y": start[1] + 0.5}}]
     for tile, kind, d in path:
-        e = {"name": PIPE if kind == "pipe" else PIPE_UG, "position": {"x": tile[0] + 0.5, "y": tile[1] + 0.5}}
+        e = {"name": planner.PIPE if kind == "pipe" else planner.UNDERGROUND, "position": {"x": tile[0] + 0.5, "y": tile[1] + 0.5}}
         if kind != "pipe":
             e["direction"] = d
         ents.append(e)
@@ -190,7 +189,7 @@ def ptg_cells(entities):
     on its line (it would pair with it instead)"""
     out = set()
     for e in entities:
-        if e["name"] == PIPE_UG:
+        if e["name"] == planner.UNDERGROUND:
             x, y, d = math.floor(e["position"]["x"]), math.floor(e["position"]["y"]), e.get("direction", 0)
             out.add((d % 8, x if d % 8 == 0 else y, y if d % 8 == 0 else x))
     return out
@@ -200,7 +199,7 @@ def pipe_crude(goal, outs, blocked, foreign, bounds, existing=()):
     """pipes from the oil block's crude inlet (`goal`, an empty tile beside its pipe) to every pumpjack's output tile,
     each joining the pipes so far; another fluid's pipes never touched. -> entities, or None (one not reached)"""
     network, ents, pspans = {goal}, [], ptg_cells(existing)
-    ents.append({"name": PIPE, "position": {"x": goal[0] + 0.5, "y": goal[1] + 0.5}})
+    ents.append({"name": planner.PIPE, "position": {"x": goal[0] + 0.5, "y": goal[1] + 0.5}})
     for o in sorted(outs, key=lambda t: abs(t[0] - goal[0]) + abs(t[1] - goal[1])):
         if o in network:
             continue
@@ -214,7 +213,7 @@ def pipe_crude(goal, outs, blocked, foreign, bounds, existing=()):
             foreign[tile] = "crude-oil"
             if tile in network and kind == "pipe":
                 continue
-            e = {"name": PIPE if kind == "pipe" else PIPE_UG, "position": {"x": tile[0] + 0.5, "y": tile[1] + 0.5}}
+            e = {"name": planner.PIPE if kind == "pipe" else planner.UNDERGROUND, "position": {"x": tile[0] + 0.5, "y": tile[1] + 0.5}}
             if kind != "pipe":
                 e["direction"] = d
             else:

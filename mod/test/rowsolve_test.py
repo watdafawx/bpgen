@@ -66,3 +66,21 @@ print("ok:" if not problems else "FAIL:", ", ".join(f"{k} {v}" for k, v in sorte
       f"({len(problems)} problems)" if problems else "")
 assert not problems, f"{len(problems)} problems"
 assert counts["laid out"] > 1800, counts
+
+# a 1x1 machine (the pack's ME molecular assembler has one): its one inserter column on each side can't spare one
+# for a pole, so the power pass stands the poles; every powered entity must be in a pole's supply area
+tiny = dict(data.raw["assembling-machine"]["assembling-machine-2"], name="test-1x1-assembler",
+            collision_box=[[-0.4, -0.4], [0.4, 0.4]], fluid_boxes=[])
+data.raw["assembling-machine"]["test-1x1-assembler"] = tiny
+pole = data.raw["electric-pole"][planner.POLE]
+reach = pole["supply_area_distance"]
+for recipe in ("iron-gear-wheel", "copper-cable", "electronic-circuit"):
+    p = planner.plan(data, calib, recipe, "test-1x1-assembler", BELT)
+    ents, sources, sinks = planner.layout(p)
+    poles = [(e["position"]["x"], e["position"]["y"]) for e in ents if e["name"] == planner.POLE]
+    powered = [e for e in ents if e["name"] == "test-1x1-assembler" or "inserter" in e["name"]]
+    cold = [e["name"] for e in powered if not any(abs(e["position"]["x"] - x) <= reach + 0.5
+                                                   and abs(e["position"]["y"] - y) <= reach + 0.5 for x, y in poles)]
+    assert not cold, (recipe, "unpowered", cold[:4])
+    assert sum(e["name"] == "test-1x1-assembler" for e in ents) == p.machines, recipe
+print("ok: 1x1 machines plan and are powered")

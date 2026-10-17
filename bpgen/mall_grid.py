@@ -22,7 +22,7 @@ import math
 
 from bpgen import base, planner
 from bpgen.ents import adder
-from bpgen.planner import EAST, NORTH, SOUTH, WEST, POLE, PlanError
+from bpgen.planner import EAST, NORTH, SOUTH, WEST, PlanError
 
 PX, PY = 7, 6  # column pitch (2 belts, inserters, a 3x3 machine, inserters), cell pitch (machine, out, chest, hand)
 MAX_ROWS = 7  # products a column, below the makers
@@ -319,7 +319,6 @@ def plan_grid(data, products, machine, belt, inputs=None, allowed=None, chest="w
     def cell(c, row, recipe, out_lane=None, chest_out=True, hand_down=False):
         x0, y0 = PX * c + 3, 1 + PY * row
         put(machine, x0 + 1.5, y0 + 1.5, recipe=recipe)
-        near_items = st.items_near(c)
         want = set(_ings(data, recipe))
         slots = {"L": [0, 1, 2], "R": [0, 1, 2]}
         if out_lane:  # (a maker: its part onto its lane, first slot of that side)
@@ -377,9 +376,9 @@ def plan_grid(data, products, machine, belt, inputs=None, allowed=None, chest="w
                 # machine instead, beside its output, which keeps a share for the chest)
                 put(long_, x0 + 2.5, y0 + 4.5, NORTH)
         for px in (x0 - 1, x0 + 3):
-            put(POLE, px + 0.5, y0 + 4.5)
+            put(planner.POLE, px + 0.5, y0 + 4.5)
             if row == 0:  # (the top row's first inserters: out of reach of the pole below them)
-                put(POLE, px + 0.5, 0.5)
+                put(planner.POLE, px + 0.5, 0.5)
 
     makers = {}
     for c, col in enumerate(st.cols):
@@ -388,9 +387,9 @@ def plan_grid(data, products, machine, belt, inputs=None, allowed=None, chest="w
             if i in used:
                 continue
             for px in (PX * c + 2, PX * c + 6):
-                put(POLE, px + 0.5, 1 + PY * i + 4.5)
+                put(planner.POLE, px + 0.5, 1 + PY * i + 4.5)
                 if i == 0:
-                    put(POLE, px + 0.5, 0.5)
+                    put(planner.POLE, px + 0.5, 0.5)
         for mk in col["makers"]:
             cell(c, mk["row"], mk["recipe"], out_lane=mk["lane"], chest_out=False)
             makers[mk["recipe"]] = makers.get(mk["recipe"], 0) + 1

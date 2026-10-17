@@ -8,7 +8,6 @@ import io
 import json
 import zipfile
 from functools import lru_cache
-from pathlib import Path
 
 from PIL import Image, ImageChops
 

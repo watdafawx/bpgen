@@ -276,6 +276,12 @@ python -m bpgen.pack        # re-read your mods now
    fed through a lead-in at real belt speed, the output is drained and items per second are measured after
    warm-up. In game, Test run does the same live.
 
+The in-game window (`ingame.py`, through its one `Session` in `session.py`), the web app (`web.py`) and the console
+watcher (`__main__.py`) only carry requests: each turns what it's sent into plan params with `Service.params` (the
+default belt, the inserters, the bonuses) and plans with `Service.request` (`request.py`: the plan, the bus feed,
+refits and placing, notes, the test run's spec). The pole and pipes the layouts use come from whatever game data was
+loaded last (`Data.load` hands it to the planner), so no caller has to configure the planner.
+
 ## Starter base: the main bus layout
 
 `bpgen/bus.py` and the `bus` mode of `compose_base.compose`. Blocks stand in one column, every producer above its

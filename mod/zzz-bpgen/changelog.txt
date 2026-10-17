@@ -1,4 +1,13 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.28.1
+Date: 2026-10-17
+  Changes:
+    - The window, the web app and the console watcher plan a request the same way (one request path); the console
+      watcher now plans as the window does (chains, early inserters, labels).
+  Bugfixes:
+    - Packs that replace the medium pole, the pipe or the pipe-to-ground: grid and belt-loop malls, bus designs and
+      oil fields used the vanilla names for them.
+---------------------------------------------------------------------------------------------------
 Version: 0.28.0
 Date: 2026-10-17
   Features:

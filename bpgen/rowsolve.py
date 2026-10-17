@@ -17,7 +17,7 @@ facing. rowsolve_test lays out every recipe in every machine and checks the resu
 from dataclasses import dataclass, field
 
 from bpgen import geom
-from bpgen.ports import EAST, FACINGS, INPUTS, NORTH, OUTPUTS, SOUTH, WEST, Ports
+from bpgen.ports import EAST, FACINGS, INPUTS, NORTH, OUTPUT, OUTPUTS, SOUTH, WEST, Ports
 from bpgen.rowspec import Band, RowSpec
 
 
@@ -106,8 +106,10 @@ class Fluid:
     """one of the recipe's fluids as the pose puts it: on a side of row A, through a riser column"""
     name: str
     role: str  # in | out
-    col: int  # riser column (row A, as placed)
+    col: int  # riser column (row A, as placed); a gap fluid: -1 (the gap west of the machine) or its width (east)
     box: int  # the machine's fluid box
+    gap: str = ""  # "w" / "e": the box opens only on that edge - a pipe down the gap beside the machine reaches it
+    gap_row: int = 0  # the port's row on that edge (0 = the machine's north row)
 
 
 @dataclass
@@ -120,6 +122,7 @@ class Pose(Geometry):
     shared: str = "belt"  # what two rows share: the output belt, or "pipe", the one fluid out
     pole_every: int = 2
     through_fluids: list = field(default_factory=list)  # [Fluid]: chained through touching machines, row `col`
+    slot_poles: bool = True  # poles in the inserter columns (False: a 1x1 machine - the power pass places them)
 
     def spec(self, belts, south=(), fluid=None, fluid_need=0.0, byproducts=False, needs=None):
         """-> RowSpec; belts: [[near lanes], [far lanes]?]; needs: {fluid: rate per row} (fluid / fluid_need: the
@@ -145,8 +148,8 @@ class Pose(Geometry):
                     bands.append(Band("riser", "tap" + tag))
                 bands.append(Band("pipe", "pipe" + tag, f.role, fluid=f.name,
                                   rate=needs.get((f.role, f.name), needs.get(f.name, 0.0)),
-                                  riser=None if shared else f.col,  # (lying against the machines: no riser)
-                                  extra=f.role == "out", shared=shared))
+                                  riser=None if shared or f.gap else f.col,  # (against the machines / in the gap)
+                                  extra=f.role == "out", shared=shared, gap=f.gap, gap_row=f.gap_row))
             return bands
         north = []
         if self.ins_band:
@@ -165,7 +168,7 @@ class Pose(Geometry):
                 south_bands.append(Band("belt", "south", "south", list(south) if any(south) else [None, None]))
         south_bands += pipes(self.south_fluids, "s")
         # poles: in the inserter slots as the planner has them; else in the output row; else in a riser row north
-        if not self.ins_band:
+        if not self.ins_band and self.slot_poles:
             target = south_bands[0] if self.out_band else next((b for b in north if b.kind == "riser"), None)
             if target is not None:
                 target.pole = "slot-last" if target.kind == "out" else "first-free"
@@ -175,14 +178,18 @@ class Pose(Geometry):
                 target.pole_b = not (target.kind == "out" and self.rows == 2 and self.shared == "belt")
         plain = self.rows == 2 and self.ins_band and not self.south_fluids  # (the planner's two-row belt line)
         through = [(f.name, needs.get(("in", f.name), needs.get(f.name, 0.0)), f.col) for f in self.through_fluids]
+        gap = next((f.gap for f in self.north_fluids + self.south_fluids if f.gap), "")
+        pitch = s + 1 if gap else s + bs if self.rows == 2 else 0  # (a gap pipe: a free column after each machine)
+        shift = 1 if gap == "w" else self.beacon_pad * (s + bs) + bs
+        tail = -1 if gap == "w" else self.beacon_pad * (s + bs)
         return RowSpec(self.rows, self.facing, s, hs, north, south_bands, machine_sources=through,
-                       pitch=s + bs if self.rows == 2 else 0,
-                       shift=self.beacon_pad * (s + bs) + bs, tail=self.beacon_pad * (s + bs), beacon=self.beacon,
+                       pitch=pitch, shift=shift, tail=tail, beacon=self.beacon,
                        beacon_size=bs, beacon_pad=self.beacon_pad,
-                       pole_every=0 if self.beacon or not self.ins_band else 2,
+                       pole_every=0 if self.beacon or not self.ins_band or not self.slot_poles else 2,
                        pole_in_tap=bool(self.north_fluids) and self.ins_band and not self.beacon,
                        poles_out=self.poles_out,
-                       power_up=not plain or max(s, hs) >= 5 or bool(self.turn) or self.fluid_out or byproducts,
+                       power_up=(not plain or max(s, hs) >= 5 or bool(self.turn) or self.fluid_out or byproducts
+                                 or not self.slot_poles),
                        sort_tail_bottom="south" if two_sided else "last")
 
 
@@ -216,19 +223,30 @@ def solve_general(data, shape: Shape, beacon=None, beacon_proto=None, one_row=Fa
         placed = _place_fluids(shape, P, why, facing)
         if placed is None:
             continue
-        if wet and P.joins(used_outputs={f.box for side, f in placed if f.role == "out"}):
+        used_out = {f.box for side, f in placed if f.role == "out"}
+        gaps = [(side, f) for side, f in placed if f.gap]
+        if len(gaps) > 1:
+            why.append(f"facing {facing}: {len(gaps)} fluids open only on the machine's sides: one gap holds one")
+            continue
+        if gaps and not _gap_ok(P, gaps[0][1], gaps[0][0], used_out):
+            why.append(f"facing {facing}: the pipe beside the machine would touch another fluid's box")
+            continue
+        if wet and not gaps and P.joins(used_outputs=used_out):
             why.append(f"facing {facing}: machines side by side would join fluid boxes")
             continue
         north_f = [f for side, f in placed if side == "n"]
         south_f = [f for side, f in placed if side == "s"]
         through_f = [f for side, f in placed if side == "t"]
+        if gaps and through_f:
+            why.append(f"facing {facing}: a fluid through touching machines and one beside them, spaced apart")
+            continue
         ins_band = shape.belt_items > 0
         out_band = bool(shape.item_outs)
         # a pipe lying against the machines' south edges reaches every port there: only when all of them are
         # outputs the recipe doesn't feed (an unused output box takes nothing; an input box would drink from it)
         in_boxes = {f.box for side, f in placed if f.role == "in"}
         edge_free = all(p.is_output and p.box not in in_boxes for p in P.on(SOUTH))
-        if two_sided or through_f or one_row:  # (a chain through the machines runs along one row; one_row: asked)
+        if two_sided or through_f or gaps or one_row:  # (a chain or a gap pipe: one row; one_row: asked)
             rows, shared = 1, "belt"
         elif out_band and not south_f:
             rows, shared = 2, "belt"  # (two rows share the output belt)
@@ -237,7 +255,7 @@ def solve_general(data, shape: Shape, beacon=None, beacon_proto=None, one_row=Fa
         else:
             rows, shared = 1, "belt"
         if beacon and not (rows == 2 and shared == "belt" and ins_band and out_band and not south_f
-                           and len(north_f) <= 1):
+                           and len(north_f) <= 1 and not gaps):
             # (beacons stand between the machines with poles above them: laid out for two rows about the output
             # belt, belts and at most one pipe north)
             why.append(f"facing {facing}: beacons are laid out for two rows about an output belt with one pipe at most")
@@ -245,13 +263,22 @@ def solve_general(data, shape: Shape, beacon=None, beacon_proto=None, one_row=Fa
         rotated = facing in (EAST, WEST) and shape.w != shape.h
         # a riser takes a column; so does a pole, unless it stands in the riser row or above a beacon
         poles_out = not beacon and not wet and height <= 2 and size <= 2 and shape.belt_items > 2
-        slots = size - len(north_f) - (1 if not beacon and not north_f and not poles_out else 0)
+        risers_n = sum(1 for f in north_f if not f.gap)
+        risers_s = sum(1 for f in south_f if not f.gap)
+        # a pole takes an inserter column on alternate machines; where it would take a side's only one (a 1x1
+        # machine), the line has no poles in its columns and the power pass stands them round it instead
+        slot_poles = not beacon
+        slots = size - risers_n - (1 if slot_poles and not risers_n and not poles_out else 0)
+        out_slots = size - risers_s - (1 if slot_poles else 0)
+        if slot_poles and ((ins_band and slots < 1 and size - risers_n >= 1)
+                           or (out_band and out_slots < 1 and size - risers_s >= 1)):
+            slot_poles = False
+            slots, out_slots = size - risers_n, size - risers_s
         if ins_band and slots < 1:
-            why.append(f"facing {facing}: no column left for an inserter beside {len(north_f)} pipe risers")
+            why.append(f"facing {facing}: no column left for an inserter beside {risers_n} pipe risers")
             continue
-        out_slots = size - len(south_f) - (0 if beacon else 1)
         if out_band and out_slots < 1:
-            why.append(f"facing {facing}: no column left for an output inserter beside {len(south_f)} pipe risers")
+            why.append(f"facing {facing}: no column left for an output inserter beside {risers_s} pipe risers")
             continue
         turn = facing if facing in (EAST, WEST) and not rotated else 0
         flipped = facing == SOUTH
@@ -259,7 +286,7 @@ def solve_general(data, shape: Shape, beacon=None, beacon_proto=None, one_row=Fa
         found.append(Pose(shape, facing, rows, size, height, first.col if first else None, bool(shape.fluid_outs),
                           slots, out_slots, poles_out, beacon, 0, 0, 0, rotated, flipped, turn,
                           north_f, south_f, ins_band, out_band, shared, 2 if 2 * size <= POLE_SUPPLY else 1,
-                          through_f))
+                          through_f, slot_poles))
     if not found:
         raise SolveError("; ".join(why) if why else f"{machine}: no facing lays {shape.recipe} out")
     # (one_row: a starter base's block - its fluids in on the south side, out on the north, the way its router
@@ -315,8 +342,28 @@ def _place_fluids(shape, P, why, facing):
                 rows_ew = {p.at for p in P.of_box(box, EAST)} & {p.at for p in P.of_box(box, WEST)}
                 if rows_ew:
                     pick = ("t", min(rows_ew))
+            gap, gap_row = "", 0
+            if pick is None:  # (only on the west or east edge: reached by a pipe down a gap beside the machine)
+                for edge, g in ((WEST, "w"), (EAST, "e")):
+                    ps = P.of_box(box, edge)
+                    if ps:
+                        band_side = "n" if role == "in" or shape.item_outs else "s"
+                        pick, gap, gap_row = (band_side, -1 if g == "w" else P.w), g, ps[0].at
+                        break
             if pick is None:
-                why.append(f"facing {facing}: {fl['name']}'s fluid box opens on no north or south edge")
+                why.append(f"facing {facing}: {fl['name']}'s fluid box opens on no edge this layout reaches")
                 return None
-            placed.append((pick[0], Fluid(fl["name"], role, pick[1], box)))
+            placed.append((pick[0], Fluid(fl["name"], role, pick[1], box, gap, gap_row)))
     return placed
+
+
+def _gap_ok(P, f, side, used_outputs):
+    """a gap fluid's pipe runs down the gap from its port to the machines' north (side "n") or south edge, touching
+    this machine's ports on that edge and the next machine's on the facing edge, row by row: each must be the same
+    box (the same fluid) or an output the recipe leaves empty (it pushes nothing)"""
+    rows = range(0, f.gap_row + 1) if side == "n" else range(f.gap_row, P.h)
+    own, other = (WEST, EAST) if f.gap == "w" else (EAST, WEST)
+    for p in P.on(own) + P.on(other):
+        if p.at in rows and p.box != f.box and not (p.kind == OUTPUT and p.box not in used_outputs):
+            return False
+    return True
