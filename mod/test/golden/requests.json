@@ -1,0 +1,876 @@
+{
+ "plain-gear": {
+  "recipe": "iron-gear-wheel",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 60
+ },
+ "plain-circuit": {
+  "recipe": "electronic-circuit",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 120
+ },
+ "plain-gear-defaultrate": {
+  "recipe": "iron-gear-wheel",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ]
+ },
+ "items1-pipe": {
+  "recipe": "pipe",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 120
+ },
+ "items2-science": {
+  "recipe": "automation-science-pack",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 60
+ },
+ "items3-drill": {
+  "recipe": "electric-mining-drill",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 20
+ },
+ "items4-asm2": {
+  "recipe": "assembling-machine-2",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 20
+ },
+ "items5-refinery": {
+  "recipe": "oil-refinery",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 6
+ },
+ "items6-fusion-equip": {
+  "recipe": "fusion-reactor-equipment",
+  "machine": "assembling-machine-3",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 2
+ },
+ "fluid-in-plastic": {
+  "recipe": "plastic-bar",
+  "machine": "chemical-plant",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 120
+ },
+ "fluid-in-sulfur": {
+  "recipe": "sulfur",
+  "machine": "chemical-plant",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 120
+ },
+ "fluid-out-lubricant": {
+  "recipe": "lubricant",
+  "machine": "chemical-plant",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 120
+ },
+ "fluids-only-cracking": {
+  "recipe": "heavy-oil-cracking",
+  "machine": "chemical-plant",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 300
+ },
+ "fluids-only-advanced-oil": {
+  "recipe": "advanced-oil-processing",
+  "machine": "oil-refinery",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 300
+ },
+ "furnace-stone": {
+  "recipe": "iron-plate",
+  "machine": "stone-furnace",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 120
+ },
+ "furnace-electric": {
+  "recipe": "iron-plate",
+  "machine": "electric-furnace",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 300
+ },
+ "furnace-steel-copper": {
+  "recipe": "copper-plate",
+  "machine": "steel-furnace",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 200
+ },
+ "furnace-steel-recipe": {
+  "recipe": "steel-plate",
+  "machine": "stone-furnace",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 30
+ },
+ "furnace-stone-brick": {
+  "recipe": "stone-brick",
+  "machine": "stone-furnace",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 60
+ },
+ "byproduct-uranium": {
+  "recipe": "uranium-processing",
+  "machine": "centrifuge",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 60
+ },
+ "byproduct-coal-liquefaction": {
+  "recipe": "coal-liquefaction",
+  "machine": "oil-refinery",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 60
+ },
+ "modules-prod": {
+  "recipe": "electronic-circuit",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [
+   {
+    "name": "productivity-module-2",
+    "count": 2,
+    "quality": "normal"
+   }
+  ],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 120
+ },
+ "modules-speed": {
+  "recipe": "iron-gear-wheel",
+  "machine": "assembling-machine-3",
+  "machine_quality": "normal",
+  "modules": [
+   {
+    "name": "speed-module-2",
+    "count": 4,
+    "quality": "normal"
+   }
+  ],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 300
+ },
+ "beacons-speed": {
+  "recipe": "iron-gear-wheel",
+  "machine": "assembling-machine-3",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 600,
+  "params": {
+   "beacon_modules": "speed-module-2:2"
+  }
+ },
+ "beacons-prod-modules": {
+  "recipe": "electronic-circuit",
+  "machine": "assembling-machine-3",
+  "machine_quality": "normal",
+  "modules": [
+   {
+    "name": "productivity-module-3",
+    "count": 4,
+    "quality": "normal"
+   }
+  ],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 300,
+  "params": {
+   "beacon_modules": "speed-module-3:2"
+  }
+ },
+ "quality-machine": {
+  "recipe": "iron-gear-wheel",
+  "machine": "assembling-machine-2",
+  "machine_quality": "legendary",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 120
+ },
+ "quality-modules": {
+  "recipe": "electronic-circuit",
+  "machine": "assembling-machine-3",
+  "machine_quality": "rare",
+  "modules": [
+   {
+    "name": "quality-module-2",
+    "count": 4,
+    "quality": "uncommon"
+   }
+  ],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 120
+ },
+ "rate-below-belt": {
+  "recipe": "iron-gear-wheel",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 15
+ },
+ "rate-one-belt": {
+  "recipe": "iron-gear-wheel",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 900
+ },
+ "rate-above-belt": {
+  "recipe": "iron-gear-wheel",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 1800
+ },
+ "rate-above-belt-circuit": {
+  "recipe": "electronic-circuit",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 1500
+ },
+ "belt-transport-belt": {
+  "recipe": "iron-gear-wheel",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 240,
+  "belt": "transport-belt"
+ },
+ "belt-fast-transport-belt": {
+  "recipe": "iron-gear-wheel",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt",
+   "fast-transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 480,
+  "belt": "fast-transport-belt"
+ },
+ "belt-express-transport-belt": {
+  "recipe": "iron-gear-wheel",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt",
+   "fast-transport-belt",
+   "express-transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 720,
+  "belt": "express-transport-belt"
+ },
+ "belt-turbo-transport-belt": {
+  "recipe": "iron-gear-wheel",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt",
+   "fast-transport-belt",
+   "express-transport-belt",
+   "turbo-transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 960,
+  "belt": "turbo-transport-belt"
+ },
+ "belt-tiers-fast-circuit": {
+  "recipe": "electronic-circuit",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt",
+   "fast-transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 900,
+  "belt": "fast-transport-belt"
+ },
+ "per-row-1": {
+  "recipe": "iron-gear-wheel",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 240,
+  "per_row": 1
+ },
+ "direct-circuit-cable": {
+  "recipe": "electronic-circuit",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 120,
+  "params": {
+   "make": {
+    "copper-cable": {
+     "recipe": "copper-cable",
+     "machine": "assembling-machine-2"
+    }
+   }
+  }
+ },
+ "direct-circuit-cable-belt": {
+  "recipe": "electronic-circuit",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "params": {
+   "make": {
+    "copper-cable": {
+     "recipe": "copper-cable",
+     "machine": "assembling-machine-2"
+    }
+   }
+  }
+ },
+ "direct-circuit-cable-fast": {
+  "recipe": "electronic-circuit",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt",
+   "fast-transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "belt": "fast-transport-belt",
+  "rate_per_min": 600,
+  "params": {
+   "make": {
+    "copper-cable": {
+     "recipe": "copper-cable",
+     "machine": "assembling-machine-2"
+    }
+   }
+  }
+ },
+ "chain-inserter": {
+  "recipe": "inserter",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 30,
+  "params": {
+   "make": {
+    "iron-gear-wheel": {
+     "recipe": "iron-gear-wheel",
+     "machine": "assembling-machine-2"
+    },
+    "electronic-circuit": {
+     "recipe": "electronic-circuit",
+     "machine": "assembling-machine-2"
+    }
+   }
+  }
+ },
+ "chain-science": {
+  "recipe": "logistic-science-pack",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 30,
+  "params": {
+   "make": {
+    "inserter": {
+     "recipe": "inserter",
+     "machine": "assembling-machine-2"
+    },
+    "transport-belt": {
+     "recipe": "transport-belt",
+     "machine": "assembling-machine-2"
+    }
+   }
+  }
+ },
+ "lines-three": {
+  "recipe": "iron-gear-wheel",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 60,
+  "lines": [
+   {
+    "recipe": "copper-cable",
+    "machine": "assembling-machine-2",
+    "machine_quality": "normal",
+    "modules": [],
+    "recipe_productivity": 0,
+    "belts": [
+     "transport-belt"
+    ],
+    "inserters": [
+     "inserter",
+     "long-handed-inserter",
+     "fast-inserter"
+    ]
+   },
+   {
+    "recipe": "pipe",
+    "machine": "assembling-machine-2",
+    "machine_quality": "normal",
+    "modules": [],
+    "recipe_productivity": 0,
+    "belts": [
+     "transport-belt"
+    ],
+    "inserters": [
+     "inserter",
+     "long-handed-inserter",
+     "fast-inserter"
+    ]
+   },
+   {
+    "recipe": "copper-cable",
+    "machine": "assembling-machine-2",
+    "machine_quality": "normal",
+    "modules": [],
+    "recipe_productivity": 0,
+    "belts": [
+     "transport-belt"
+    ],
+    "inserters": [
+     "inserter",
+     "long-handed-inserter",
+     "fast-inserter"
+    ]
+   }
+  ]
+ },
+ "lines-mixed": {
+  "recipe": "electronic-circuit",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 60,
+  "lines": [
+   {
+    "recipe": "plastic-bar",
+    "machine": "chemical-plant",
+    "machine_quality": "normal",
+    "modules": [],
+    "recipe_productivity": 0,
+    "belts": [
+     "transport-belt"
+    ],
+    "inserters": [
+     "inserter",
+     "long-handed-inserter",
+     "fast-inserter"
+    ]
+   },
+   {
+    "recipe": "iron-plate",
+    "machine": "stone-furnace",
+    "machine_quality": "normal",
+    "modules": [],
+    "recipe_productivity": 0,
+    "belts": [
+     "transport-belt"
+    ],
+    "inserters": [
+     "inserter",
+     "long-handed-inserter",
+     "fast-inserter"
+    ]
+   }
+  ]
+ }
+}

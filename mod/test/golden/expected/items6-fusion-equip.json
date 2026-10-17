@@ -1,0 +1,41 @@
+{
+ "label": "fusion-reactor-equipment x1",
+ "mode": "line",
+ "output": "fusion-reactor-equipment",
+ "expected": 0.004,
+ "summary": {"beacons_per_machine": 0, "belt": "transport-belt", "expected": 0.004, "machine": "assembling-machine-3", "machines": 1, "output": "fusion-reactor-equipment", "per_row": 1, "productivity": 0.0, "recipe": "fusion-reactor-equipment", "stages": []},
+ "notes": ["its inserters can't keep one assembling-machine-3 busy: each runs at 10% speed", "6 belt items: one row of machines, two input belts north, the output belt south and a third input belt past it (fusion-power-cell, fission-reactor-equipment) that long-handed inserters reach over the output belt"],
+ "sections": null,
+ "absolute": null,
+ "sources": [{"kind": "belt", "lanes": ["tungsten-plate", "quantum-processor"], "position": {"x": 1.5, "y": 2.5}, "rates": {"quantum-processor": 1.0417, "tungsten-plate": 1.0417}}, {"kind": "belt", "lanes": ["carbon-fiber", "supercapacitor"], "position": {"x": 1.5, "y": 1.5}, "rates": {"carbon-fiber": 0.4167, "supercapacitor": 0.1042}}, {"kind": "belt", "lanes": ["fusion-power-cell", "fission-reactor-equipment"], "position": {"x": 1.5, "y": 9.5}, "rates": {"fission-reactor-equipment": 0.0042, "fusion-power-cell": 0.0417}}],
+ "sinks": [{"kind": "belt", "position": {"x": 4.5, "y": 8.5}}],
+ "entities": [
+  {"name": "assembling-machine-3", "position": {"x": 2.5, "y": 5.5}, "recipe": "fusion-reactor-equipment"},
+  {"control_behavior": {"sections": {"sections": [{"filters": [{"comparator": "=", "count": 25, "index": 1, "name": "carbon-fiber", "quality": "normal", "type": "item"}, {"comparator": "=", "count": 6, "index": 2, "name": "supercapacitor", "quality": "normal", "type": "item"}], "index": 1}]}}, "name": "constant-combinator", "player_description": "bpgen input: carbon-fiber, supercapacitor (left lane carbon-fiber / right lane supercapacitor), carbon-fiber 0.42/s, supercapacitor 0.10/s", "position": {"x": 0.5, "y": 0.5}},
+  {"control_behavior": {"sections": {"sections": [{"filters": [{"comparator": "=", "count": 63, "index": 1, "name": "tungsten-plate", "quality": "normal", "type": "item"}, {"comparator": "=", "count": 63, "index": 2, "name": "quantum-processor", "quality": "normal", "type": "item"}], "index": 1}]}}, "name": "constant-combinator", "player_description": "bpgen input: tungsten-plate, quantum-processor (left lane tungsten-plate / right lane quantum-processor), tungsten-plate 1.04/s, quantum-processor 1.04/s", "position": {"x": 0.5, "y": 3.5}},
+  {"control_behavior": {"sections": {"sections": [{"filters": [{"comparator": "=", "count": 2, "index": 1, "name": "fusion-power-cell", "quality": "normal", "type": "item"}, {"comparator": "=", "count": 1, "index": 2, "name": "fission-reactor-equipment", "quality": "normal", "type": "item"}], "index": 1}]}}, "name": "constant-combinator", "player_description": "bpgen input: fusion-power-cell, fission-reactor-equipment (left lane fusion-power-cell / right lane fission-reactor-equipment), fusion-power-cell 0.04/s, fission-reactor-equipment 0.00/s", "position": {"x": 0.5, "y": 10.5}},
+  {"control_behavior": {"sections": {"sections": [{"filters": [{"comparator": "=", "count": 1, "index": 1, "name": "fusion-reactor-equipment", "quality": "normal", "type": "item"}], "index": 1}]}}, "name": "constant-combinator", "player_description": "bpgen output: fusion-reactor-equipment 0.00/s", "position": {"x": 4.5, "y": 7.5}},
+  {"name": "fast-inserter", "position": {"x": 1.5, "y": 3.5}},
+  {"name": "inserter", "position": {"x": 1.5, "y": 7.5}},
+  {"name": "long-handed-inserter", "position": {"x": 2.5, "y": 3.5}},
+  {"direction": 8, "name": "long-handed-inserter", "position": {"x": 2.5, "y": 7.5}},
+  {"name": "medium-electric-pole", "position": {"x": 3.5, "y": 3.5}},
+  {"name": "medium-electric-pole", "position": {"x": 3.5, "y": 7.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 1.5, "y": 1.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 1.5, "y": 2.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 1.5, "y": 8.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 1.5, "y": 9.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 2.5, "y": 1.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 2.5, "y": 2.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 2.5, "y": 8.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 2.5, "y": 9.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 3.5, "y": 1.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 3.5, "y": 2.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 3.5, "y": 8.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 3.5, "y": 9.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 4.5, "y": 8.5}}
+ ],
+ "wires": [
+  ["medium-electric-pole@3.5,3.5", 5, "medium-electric-pole@3.5,7.5", 5]
+ ]
+}

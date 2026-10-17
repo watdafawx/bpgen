@@ -1,0 +1,31 @@
+{
+ "label": "heavy-oil-cracking x1",
+ "mode": "line",
+ "output": "light-oil",
+ "expected": 5.0,
+ "summary": {"beacons_per_machine": null, "belt": null, "expected": 5.0, "machine": "chemical-plant", "machines": 1, "output": "light-oil", "per_row": null, "productivity": null, "recipe": "heavy-oil-cracking", "stages": []},
+ "notes": ["each machine runs at 33% of full speed"],
+ "sections": null,
+ "absolute": null,
+ "sources": [{"fluid": "heavy-oil", "kind": "fluid", "position": {"x": -0.5, "y": 6.5}, "rates": {"heavy-oil": 6.6667}}, {"fluid": "water", "kind": "fluid", "position": {"x": -0.5, "y": 8.5}, "rates": {"water": 5.0}}],
+ "sinks": [{"item": "light-oil", "kind": "fluid", "position": {"x": 3.5, "y": 0.5}, "rates": {"light-oil": 5.0}}],
+ "entities": [
+  {"direction": 8, "name": "chemical-plant", "position": {"x": 1.5, "y": 3.5}, "recipe": "heavy-oil-cracking"},
+  {"name": "medium-electric-pole", "position": {"x": 0.5, "y": 1.5}},
+  {"name": "pipe", "position": {"x": 0.5, "y": 0.5}},
+  {"name": "pipe", "position": {"x": 0.5, "y": 5.5}},
+  {"name": "pipe", "position": {"x": 0.5, "y": 6.5}},
+  {"name": "pipe", "position": {"x": 0.5, "y": 8.5}},
+  {"name": "pipe", "position": {"x": 1.5, "y": 0.5}},
+  {"name": "pipe", "position": {"x": 1.5, "y": 6.5}},
+  {"name": "pipe", "position": {"x": 1.5, "y": 8.5}},
+  {"name": "pipe", "position": {"x": 2.5, "y": 0.5}},
+  {"name": "pipe", "position": {"x": 2.5, "y": 1.5}},
+  {"name": "pipe", "position": {"x": 2.5, "y": 6.5}},
+  {"name": "pipe", "position": {"x": 2.5, "y": 8.5}},
+  {"name": "pipe", "position": {"x": 3.5, "y": 0.5}},
+  {"name": "pipe-to-ground", "position": {"x": 2.5, "y": 5.5}},
+  {"direction": 8, "name": "pipe-to-ground", "position": {"x": 2.5, "y": 7.5}}
+ ],
+ "wires": []
+}

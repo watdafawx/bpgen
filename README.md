@@ -295,9 +295,38 @@ one machine per product.
 
 ## Tests
 
+`python mod\test\run.py` is the regression runner: every test script below is a case in its table (`--list` shows it).
+Run it from `bpgen\`.
+
+- `run.py CASE [CASE ...]`: those cases, 4 at a time (`-j` can only lower it). A case that needs another runs it first
+  (`fit-bus-run` and `fit-place` need `fit-bus`, `tiers-paste` needs `tiers`).
+- `run.py --changed [CASE ...]`: the cases whose script (or, for `golden`, whose `golden\` files) differ from git HEAD,
+  new ones too, plus any named. Run this before a commit, with the cases that exercise the code you touched.
+- `run.py --nogame`: the 20 cases that need no game (`Service("vanilla")` and the planners): about 15 s.
+- `run.py --all`: every case, including the headless games (they share `run\`, so they take turns; `base` and
+  `stutter` have their own write-data and run beside them) and the real-client ones (`compat-gui`, `theme-gui`, `mp`),
+  which are skipped while factorio.exe runs (name them to run anyway).
+
+Each case prints PASS/FAIL and its seconds; a failing case shows the last 20 lines of its output, and the exit code is 1
+if any failed. Cases are the scripts below, each with the arguments the table gives it (shorter game minutes than the
+scripts' defaults, `--quick` for blue); run a script directly for its other options. A case marked `known_fail` in
+the table (today `mall-tier-run` and `oil-run`, which miss their thresholds at HEAD) prints XFAIL and doesn't count; fix
+it and delete the mark.
+
+**Golden snapshots** (`mod\test\golden_test.py`, case `golden`, about 2 s): `golden\requests.json` holds 44 plan
+requests as the window sends them (plain lines, 1 to 6 input items, fluids in and out, fluids only, furnaces, a burner,
+by-products, modules and beacons, quality, rates below and above a belt, each belt tier, direct insertion, chains, More
+lines), planned on vanilla + Space Age; `golden\expected\<name>.json` is each plan's summary, notes, sources, sinks,
+entities (sorted by name and position) and wires, one entity a line. The test plans each and prints the first 30
+differing lines of any that changed. After a change that is meant to alter plans, run
+`python mod\test\golden_test.py --update`, read the git diff of `golden\expected`, and commit it with the change.
+`golden_test.py NAME ...` checks just those. To add a case, put a request in `requests.json` and run `--update`.
+
+The scripts:
+
 `mod\test\stutter_test.py` (planning doesn't stutter the game: the game thread's longest wait while Rust routes run
 on the worker stays under 20 ms; needs fse 0.17.2+), `mod\test\run_mp.py` (multiplayer: a headless server and a client; a line planned in the client's Python placed
-the same on both peers, no desync), `mod\test\run.py`, `extend_test.py` (headless game with the mod; `bus` as its fourth argument: a main bus),
+the same on both peers, no desync), `mod\test\comp_test.py` (the mod's exports, headless), `extend_test.py` (headless game with the mod; `bus` as its fourth argument: a main bus),
 `bus_extend_test.py` (placement beside a bus, no game), `harness\botmall_test.py` (a robot-fed mall built and
 run), `mod\test\bus_feed_test.py` (a line fed from the bus, no game), `mod\test\mall_bus_test.py` (a grid mall fed
 from the bus, no game), `mod\test\refit_test.py` (a messy area refit as a mall and as a base, no game), `mod\test\move_test.py` (a section moved, its belts reconnected, no game), `mod\test\ship_test.py` (the ship generator, no game) and `harness\ship_run.py [minutes] [thrusters] [--pack]` (a ship on a real platform: fuel, ammo, flight; `--pack` with your own mods), `mod\test\mall_loop_test.py` (the belt-loop mall, no game), `harness\grid_mall_run.py [minutes] [--sushi | --pack]` (the starter grid mall built and run: every product
