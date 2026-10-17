@@ -14,7 +14,8 @@ import threading
 import time
 from pathlib import Path
 
-from bpgen import calibrate, chain, direct, harness, labels, mall, pack, planner
+from bpgen import calibrate, chain, direct, geom, harness, labels, mall, pack, planner
+from bpgen import ents as entlib
 from bpgen.data import Data
 from bpgen.effects import MACHINE_MODULES, Modules, quality_level
 
@@ -25,22 +26,14 @@ SAVE_STATE = PATHS["script_output"] / "bpgen" / "state.json"  # the mod: researc
 SNAPSHOT = PATHS["script_output"] / "bpgen" / "snapshot.json"  # the mod: an area of the base
 VANILLA_MODS = ("base", "core", "space-age", "quality", "elevated-rails")
 ENTITY_TYPES = ["assembling-machine", "furnace", "beacon", "constant-combinator", "decider-combinator", "pump", "arithmetic-combinator", "underground-belt", "splitter", "container", "inserter", "transport-belt", "electric-pole", "pipe", "pipe-to-ground", "logistic-container", "roboport", "lab", "mining-drill", "asteroid-collector", "thruster", "ammo-turret", "electric-turret", "solar-panel", "accumulator", "cargo-bay"]
-# (sizes of what the bus design places when bpgen's copy of the mods' data has no mining drills yet)
-KNOWN_SIZES = {"electric-mining-drill": ("mining-drill", 3), "pumpjack": ("mining-drill", 3),
-               "burner-mining-drill": ("mining-drill", 2)}
-
-
-def _size_of(entities):
-    xs = [e["position"]["x"] for e in entities]
-    ys = [e["position"]["y"] for e in entities]
-    return [int(max(xs) - min(xs)) + 1, int(max(ys) - min(ys)) + 1] if entities else None
+KNOWN_SIZES = geom.KNOWN_SIZES
+_size_of = geom.extent
 
 
 def _cell_for(entities):
     """harness cell big enough for this design (the default cell is ~48 tiles tall below its origin)"""
-    xs = [e["position"]["x"] for e in entities]
-    ys = [e["position"]["y"] for e in entities]
-    return {"w": int(max(xs) - min(xs)) + 60, "h": int(max(ys) - min(ys)) + 60, "cols": 1}
+    w, h = geom.span(entities)
+    return {"w": w + 60, "h": h + 60, "cols": 1}
 
 
 def short_notes(needs, spare):
@@ -314,10 +307,8 @@ class Service:
                 p_label = f"mall {i + 1}: {', '.join(m.products)}"[:60]
                 prints.append({"entities": [self.decorate(e) for e in p_ents], "sources": p_sources, "sinks": [],
                                "blueprint": planner.blueprint_string(p_ents, p_label, description=p_desc)})
-            book = [dict(base._decode(pr["blueprint"]), index=i) for i, pr in enumerate(prints)]
-            blueprint = base._encode({"blueprint_book": {
-                "item": "blueprint-book", "label": label, "description": text, "blueprints": book, "active_index": 0,
-                "version": book[0]["blueprint"]["version"]}})
+            book = [dict(entlib.decode(pr["blueprint"]), index=i) for i, pr in enumerate(prints)]
+            blueprint = entlib.book_string(book, label, text)
         return {
             "params": params, "mode": "mall", "description": description,
             "summary": {"mode": "mall", "products": products, "machines": sum(len(m.machines) for m in malls),
@@ -731,16 +722,10 @@ class Service:
                                                        planner.belt_capacity(self.data, belt) / 2)
         res["entities"] = res["entities"] + [self.decorate(e) for e in added]
         res["sinks"] = sinks
-        label = base._decode(res["blueprint"])["blueprint"].get("label", "bundle")
+        label = entlib.decode(res["blueprint"])["blueprint"].get("label", "bundle")
         res["blueprint"] = planner.blueprint_string(res["entities"], label)
-        book = base._decode(out["blueprint"])
-        prints = book["blueprint_book"]["blueprints"]
-        i = out["sections"].index(routed)
-        if i < len(prints):
-            new = base._decode(res["blueprint"])
-            new["blueprint"]["label"] = prints[i]["blueprint"].get("label", label)
-            prints[i] = dict(new, index=prints[i].get("index", i))
-            out["blueprint"] = base._encode(book)
+        out["blueprint"] = entlib.replace_print(out["blueprint"], out["sections"].index(routed), res["blueprint"],
+                                                label)
         if i == 0:
             out["entities"], out["sinks"] = res["entities"], sinks
         note = "; ".join(notes)
@@ -750,13 +735,7 @@ class Service:
     def decorate(self, e):
         """add type and footprint so the preview can draw it"""
         t, proto = self.proto(e["name"])
-        w = h = 1
-        if proto is None and e["name"] in KNOWN_SIZES:
-            t, w = KNOWN_SIZES[e["name"]]
-            h = w
-        if proto and proto.get("collision_box"):
-            (x1, y1), (x2, y2) = proto["collision_box"]
-            w, h = max(1, math.ceil(x2 - x1)), max(1, math.ceil(y2 - y1))
+        t, w, h = geom.type_and_size(e["name"], t, proto)
         out = dict(e, type=t or "unknown", w=w, h=h)
         if proto and (proto.get("fluid_boxes") or proto.get("fluid_box") or proto.get("output_fluid_box")):
             out["fluid"] = True  # pipes next to it draw connected

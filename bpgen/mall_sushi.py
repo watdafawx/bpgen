@@ -21,6 +21,7 @@ while its chest has fewer than `stock`, so the first ones down the loop don't ta
 import math
 
 from bpgen import base, chain, mall_grid
+from bpgen.ents import adder
 from bpgen.mall_grid import _ings, _result
 from bpgen.planner import EAST, NORTH, SOUTH, WEST, PIPE, POLE, UNDERGROUND, PlanError
 
@@ -137,13 +138,7 @@ def plan_sushi(data, products, machine, belt, inputs=None, allowed=None, chest="
     ug, _ = chain.related_belts(data, belt)
     ents = []
 
-    def put(name, x, y, d=None, **kw):
-        e = {"name": name, "position": {"x": x + 0.5, "y": y + 0.5}}
-        if d is not None:
-            e["direction"] = d
-        e.update(kw)
-        ents.append(e)
-        return e
+    put = adder(ents, tile=True)
 
     # the loop: down the even pairs' left belts, up the odd ones', round the bottom and top, back along the top
     loop = []

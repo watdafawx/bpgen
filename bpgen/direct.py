@@ -18,7 +18,8 @@ A unit (CE, CECEC, CEC) is picked from k = what one E takes of the made item / w
 """
 from dataclasses import dataclass, field
 
-from bpgen import planner
+from bpgen import geom, planner
+from bpgen.ents import adder
 from bpgen.calibrate import ZERO, level_key, template_inserters
 from bpgen.effects import Modules, quality_level
 from bpgen.planner import EAST, NORTH, SOUTH, WEST, PlanError
@@ -216,13 +217,8 @@ def layout(p: DirectPlan):
     pitch = s + 1  # a machine and the gap after it
     width = len(kinds) * pitch
     has_far = len(p.belts) > 1
-    y = 0
-    Y = {}
-
-    def row(name, height=1):
-        nonlocal y
-        Y[name] = y
-        y += height
+    row = geom.Rows()
+    Y = row.Y
     if has_far:
         row("far_a")
     row("near_a"), row("ins_a"), row("mach_a", s), row("out_a"), row("belt")
@@ -231,12 +227,7 @@ def layout(p: DirectPlan):
         row("far_b")
     ents = []
 
-    def put(name, x, yy, direction=None, **kw):
-        e = {"name": name, "position": {"x": x, "y": yy}}
-        if direction is not None:
-            e["direction"] = direction
-        e.update(kw)
-        ents.append(e)
+    put = adder(ents)
     for x in range(width):
         for name in ("near_a", "near_b") + (("far_a", "far_b") if has_far else ()):
             put(p.belt, x + 0.5, Y[name] + 0.5, EAST)

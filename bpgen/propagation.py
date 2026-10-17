@@ -6,7 +6,7 @@ only enough real poles to tie each group of buildings into the grid.
 The game tells bpgen whether the mod is on and its startup settings (ingame.warm): configure() keeps them;
 prune() drops the poles the mod makes redundant from a blueprint's entities.
 """
-import math
+from bpgen import geom
 
 RANGE = None  # the mod's "power-propagation-range" while it is on (and spreads through powered buildings), else None
 
@@ -34,9 +34,7 @@ def _index(data):
     return idx
 
 
-def _size(p):
-    (x1, y1), (x2, y2) = p.get("collision_box") or ((0, 0), (0, 0))
-    return max(math.ceil(x2 - x1), math.ceil(y2 - y1))
+_size = geom.side
 
 
 def _electric(p):

@@ -10,7 +10,7 @@ belts' first tiles.
 import math
 from dataclasses import dataclass, field
 
-from bpgen import planner, router
+from bpgen import geom, planner, power, router
 from bpgen.planner import EAST, NORTH, SOUTH
 
 
@@ -46,11 +46,7 @@ class Chain:
     notes: list = field(default_factory=list)
 
 
-def _tiles(ent, size_of):
-    w, h = size_of(ent["name"], ent.get("direction", 0))
-    x, y = ent["position"]["x"], ent["position"]["y"]
-    x1, y1 = math.floor(x - w / 2 + 0.01), math.floor(y - h / 2 + 0.01)
-    return {(x1 + i, y1 + j) for i in range(w) for j in range(h)}
+_tiles = geom.tiles
 
 
 def related_belts(data, belt):
@@ -262,31 +258,8 @@ def compose(data, chain, belt, back=3):
     chain.sinks = [dict(s, position=move(s["position"])) for s in chain.sinks]
 
 
-def _d2(p, q):
-    return (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2
-
-
-def _pole_line(a, b, blocked, reach=None):
-    """poles on free tiles, each within wire reach of the previous, from pole a to pole b"""
-    reach = reach or planner.POLE_REACH - 0.5
-    out, cur = [], a
-    while _d2(cur, b) > reach ** 2:
-        # any free tile within wire reach: the one nearest the target (fewest poles), ties to the straightest
-        r = math.ceil(reach)
-        cands = []
-        for dx in range(-r, r + 1):
-            for dy in range(-r, r + 1):
-                t = (math.floor(cur[0]) + dx, math.floor(cur[1]) + dy)
-                c = (t[0] + 0.5, t[1] + 0.5)
-                if t not in blocked and _d2(c, cur) <= reach ** 2 and _d2(c, b) < _d2(cur, b):
-                    cands.append((round(_d2(c, b), 3), abs(c[1] - cur[1]), c, t))
-        if not cands:
-            raise planner.PlanError("couldn't run power poles between the blocks")
-        _, _, c, t = min(cands)
-        blocked.add(t)
-        out.append(c)
-        cur = c
-    return out
+_d2 = power.d2
+_pole_line = power.pole_line
 
 
 def _made(stages):
@@ -299,19 +272,7 @@ def _row_of(block, src):
     return "a" if src["position"]["y"] < out_y else "b"
 
 
-def _sizer(data):
-    types = ["assembling-machine", "furnace", "beacon", "inserter", "transport-belt", "underground-belt", "splitter",
-             "electric-pole", "pipe", "pipe-to-ground"]
-
-    def size_of(name, direction):
-        for t in types:
-            p = data.raw.get(t, {}).get(name)
-            if p and p.get("collision_box"):
-                (x1, y1), (x2, y2) = p["collision_box"]
-                w, h = max(1, math.ceil(x2 - x1)), max(1, math.ceil(y2 - y1))
-                return (h, w) if direction in (4, 12) else (w, h)
-        return 1, 1
-    return size_of
+_sizer = geom.sizer
 
 
 def warmup_ticks(data, chain):

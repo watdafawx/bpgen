@@ -15,6 +15,8 @@ import time
 import traceback
 from pathlib import Path
 
+from bpgen import ents as entlib, geom
+
 _service = None
 _lock = threading.Lock()  # (plans share one Service: one at a time)
 _taking = None  # the thread re-reading the mods' data with a headless game (planning waits for it)
@@ -401,7 +403,7 @@ def _refit_inputs(s, params):
 
 
 BELTISH = ("transport-belt", "underground-belt", "splitter")
-DIRS = {0: (0, -1), 4: (1, 0), 8: (0, 1), 12: (-1, 0)}
+DIRS = geom.DIRS
 
 
 def _section(s, params):
@@ -744,18 +746,16 @@ def _lines(req, t):
         done.append((label, out, st["last"]))
     prints = []
     for i, (label, out, _) in enumerate(done):
-        bp = base._decode(out["blueprint"])
+        bp = entlib.decode(out["blueprint"])
         bp["blueprint"]["label"] = label
         prints.append({"index": i, **bp})
-    book = {"blueprint_book": {"item": "blueprint-book", "label": f"bpgen: {len(done)} lines",
-                               "description": "\n".join(d[0] for d in done), "blueprints": prints, "active_index": 0,
-                               "version": prints[0]["blueprint"]["version"]}}
+    book = entlib.book_string(prints, f"bpgen: {len(done)} lines", "\n".join(d[0] for d in done))
     st["sections"] = {label: {"name": label, "last": last} for label, _, last in done}
     st["last"] = done[0][2]
     head = done[0][1]
     for label, out, _ in done:
         notes += [f"{label}: {x}" for x in out.get("notes") or []]
-    return json.dumps(dict(head, blueprint=base._encode(book), label=f"{len(done)} lines: " + ", ".join(
+    return json.dumps(dict(head, blueprint=book, label=f"{len(done)} lines: " + ", ".join(
         d[0] for d in done), sections=[d[0] for d in done], notes=notes, test=None, absolute=None,
         seconds=round(time.perf_counter() - t, 3)))
 

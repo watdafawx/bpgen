@@ -20,7 +20,7 @@ The bus head is laid out flowing north, then turned to the chosen direction and 
 """
 import math
 
-from bpgen import chain, extend, oil, planner, router
+from bpgen import chain, extend, geom, oil, planner, router
 from bpgen.planner import EAST, NORTH, POLE, SOUTH, WEST, PlanError
 
 DIR_VEC = {NORTH: (0, -1), EAST: (1, 0), SOUTH: (0, 1), WEST: (-1, 0)}
@@ -418,22 +418,8 @@ def load_last(params=None):
         return None
 
 
-def _turn(e, k):
-    """an entity of the local frame turned k quarter turns clockwise about the origin"""
-    x, y = e["position"]["x"], e["position"]["y"]
-    for _ in range(k):
-        x, y = -y, x
-    out = dict(e, position={"x": x, "y": y})
-    if "direction" in e:
-        out["direction"] = (e["direction"] + 4 * k) % 16
-    return out
-
-
-def _turn_tile(t, k):
-    x, y = t[0] + 0.5, t[1] + 0.5
-    for _ in range(k):
-        x, y = -y, x
-    return math.floor(x), math.floor(y)
+_turn = geom.turn_entity
+_turn_tile = geom.turn_tile
 
 
 def plan(svc, params):

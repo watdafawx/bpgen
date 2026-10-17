@@ -21,6 +21,7 @@ import copy
 import math
 
 from bpgen import base, planner
+from bpgen.ents import adder
 from bpgen.planner import EAST, NORTH, SOUTH, WEST, POLE, PlanError
 
 PX, PY = 7, 6  # column pitch (2 belts, inserters, a 3x3 machine, inserters), cell pitch (machine, out, chest, hand)
@@ -275,12 +276,7 @@ def plan_grid(data, products, machine, belt, inputs=None, allowed=None, chest="w
     long_ = "long-handed-inserter"
     ents = []
 
-    def put(name, x, y, d=None, **kw):
-        e = {"name": name, "position": {"x": x, "y": y}}
-        if d is not None:
-            e["direction"] = d
-        e.update(kw)
-        ents.append(e)
+    put = adder(ents)
 
     # the makers' rows, all columns together: each below every maker of a part it takes (a lane only carries a part
     # downstream of where it's dropped on), one machine a row in a column

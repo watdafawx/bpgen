@@ -4,15 +4,14 @@ From what's placed only (blueprints don't store belt contents or furnace recipes
 full speed, minus what other machines in the base eat, is what the base puts out. Science packs it puts out are
 science targets, buildings are mall products; other surplus is reported as extra output.
 """
-import base64
-import json
 import math
-import zlib
 from collections import Counter
+
+from bpgen import ents as entlib
 
 
 def decode(bp_string):
-    obj = json.loads(zlib.decompress(base64.b64decode(bp_string.strip()[1:])))
+    obj = entlib.decode(bp_string)
     if "blueprint_book" in obj:  # a book: every print in it
         ents = []
         for b in obj["blueprint_book"].get("blueprints") or []:

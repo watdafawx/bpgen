@@ -6,7 +6,9 @@ A route is a chain of belts from a start tile to a goal: the goal is "enter tile
 import heapq
 import itertools
 
-DIRS = {0: (0, -1), 4: (1, 0), 8: (0, 1), 12: (-1, 0)}
+from bpgen import geom
+
+DIRS = geom.DIRS
 
 
 class RouteError(Exception):

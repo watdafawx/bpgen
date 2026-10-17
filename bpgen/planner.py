@@ -18,15 +18,13 @@ input belt past it reached by long-handed inserters. Machines 5 wide or more get
 Several item outputs share the output belt; past its east end a filter splitter per by-product sorts it onto its
 own belt (sort_tail). An item recipe with a fluid output and no fluid input uses the pipe rows to carry it away.
 """
-import base64
 import contextvars
 import itertools
-import json
 import math
-import zlib
 from dataclasses import dataclass, field
 
-from bpgen import propagation
+from bpgen import ents as entlib, geom, propagation
+from bpgen.ents import adder
 from bpgen.calibrate import ZERO, level_key, template_inserters
 from bpgen.effects import BEACON_MODULES, MACHINE_MODULES, EffectError, Modules, machine_effects, quality_level
 
@@ -225,12 +223,7 @@ def fuel_for(data, energy_source, fuel=None):
     raise PlanError("no fuel item found for this burner")
 
 
-def _dims(proto):
-    """(width, height) in tiles, placed facing north"""
-    if "tile_width" in proto:
-        return proto["tile_width"], proto.get("tile_height", proto["tile_width"])
-    (x1, y1), (x2, y2) = proto["collision_box"]
-    return math.ceil(x2 - x1), math.ceil(y2 - y1)
+_dims = geom.dims  # (width, height) in tiles, placed facing north
 
 
 def _size(proto):
@@ -269,20 +262,8 @@ def fluid_input_column(machine, size, height=None):
     raise PlanError(f"{machine['name']} has no north- or south-facing fluid input this template can feed")
 
 
-def conn_xy(pc):
-    """a pipe connection's position, on the half-tile grid (some mods put them at -2.2 or -2.15 on a 5x5's edge:
-    the game opens them onto the same tile as -2)"""
-    x, y = pc["position"] if isinstance(pc["position"], list) else (pc["position"]["x"], pc["position"]["y"])
-    return round(x * 2) / 2, round(y * 2) / 2
-
-
-def turned(pc, facing):
-    """(x, y, direction) of a pipe connection with the machine placed facing `facing`"""
-    x, y = conn_xy(pc)
-    d = pc.get("direction", NORTH)
-    for _ in range(facing // 4):  # a quarter turn clockwise
-        x, y, d = -y, x, (d + 4) % 16
-    return x, y, d
+conn_xy = geom.conn_xy
+turned = geom.turn_conn  # (x, y, direction) of a pipe connection with the machine placed facing `facing`
 
 
 def side_column(machine, size, kinds, index=1, touching=True):
@@ -784,13 +765,7 @@ def _layout_two_sided(p: Plan):
         Y[name] = y
         y += h
     ents = []
-
-    def put(name, x, yy, direction=None, **kw):
-        e = {"name": name, "position": {"x": x, "y": yy}}
-        if direction is not None:
-            e["direction"] = direction
-        e.update(kw)
-        ents.append(e)
+    put = adder(ents)
     for x in range(width):
         for name in ("far", "near") + (("south",) if any(p.south) else ()):
             put(p.belt, x + 0.5, Y[name] + 0.5, EAST)
@@ -861,13 +836,8 @@ def layout(p: Plan):
     fluid = p.fluid is not None
 
     # rows, top to bottom
-    y = 0
-    Y = {}
-
-    def row(name, height=1):
-        nonlocal y
-        Y[name] = y
-        y += height
+    row = geom.Rows()
+    Y = row.Y
 
     if fluid:
         row("pipe_a"), row("tap_a")
@@ -881,13 +851,7 @@ def layout(p: Plan):
         row("tap_b"), row("pipe_b")
 
     ents = []
-
-    def put(name, x, yy, direction=None, **kw):
-        e = {"name": name, "position": {"x": x, "y": yy}}
-        if direction is not None:
-            e["direction"] = direction
-        e.update(kw)
-        ents.append(e)
+    put = adder(ents)
 
     belt_rows = ["near_a", "near_b"] + (["far_a", "far_b"] if nb == 2 else [])
     for x in range(width):
@@ -966,7 +930,7 @@ def layout(p: Plan):
                    "rate": p.fluid_need} for side in "ab"]
     if p.byproducts:
         sinks[0:1] = sort_tail(ents, p.belt, p.splitter, {k: v * p.machines for k, v in p.byproducts.items()},
-                               p.output, width + 1, Y["belt"], y - 1)
+                               p.output, width + 1, Y["belt"], row.y - 1)
     if max(s, hs) >= 5 or p.turn or p.fluid_out or p.byproducts:  # (wide machines outgrow a pole on every other one)
         power_up(ents, sources, sinks)
     return ents, sources, sinks
@@ -976,8 +940,7 @@ def sort_tail(ents, belt, splitter, rates, output, x, yb, bottom):
     """sorts by-products off an output belt on row yb that ends at x - 1: past its end a filter splitter per
     by-product, 3 tiles apart; the by-product leaves by its south half, one tile east, then turns south down to row
     `bottom`; the rest goes on east. -> sinks, the main output's first"""
-    def put(name, xx, yy, direction, **kw):
-        ents.append(dict({"name": name, "position": {"x": xx, "y": yy}, "direction": direction}, **kw))
+    put = adder(ents)
     sinks = []
     for item, rate in rates.items():
         put(splitter, x + 0.5, yb + 1.0, EAST, filter={"name": item, "quality": "normal", "comparator": "="},
@@ -1004,8 +967,7 @@ def warmup_ticks(data, p: Plan):
     return int((60 + 2 * p.per_row * p.size / tiles_per_s + 12 / p.craft_rate) * 60)
 
 
-POLE_COPPER = 5  # defines.wire_connector_id.pole_copper
-CIRCUIT_RED = 1  # defines.wire_connector_id.circuit_red
+CIRCUIT_RED = entlib.CIRCUIT_RED
 POLE_REACH = 9
 WIRE_REACH = {POLE: POLE_REACH, "small-electric-pole": 7.5, "substation": 18, "big-electric-pole": 32}  # (vanilla)
 PIPE_UG_MAX = 10  # tiles a pipe-to-ground pair may span
@@ -1037,211 +999,11 @@ def configure(data):
         PIPE_UG_MAX = max((c.get("max_underground_distance") or 0 for c in conns), default=0) or PIPE_UG_MAX
 
 
-def power_up(ents, sources=(), sinks=()):
-    """adds poles (POLE) on free tiles, within the layout's box grown by one, until every electric machine, beacon and
-    inserter overlaps a pole's supply area and the poles' wires join them all: most uncovered entities first, then a
-    pole at a time from the nearest unwired group towards the rest. Tiles where a belt or pipe comes in or goes out
-    stay free. -> poles added (raises PlanError when there is no room)"""
-    from bpgen.chain import _sizer, _tiles
-    data = _DATA
-    if data is None or POLE not in data.raw.get("electric-pole", {}) or POLE not in WIRE_REACH:
-        return 0  # (pole_wires couldn't wire it anyway)
-    size_of = _sizer(data)
-    taken = set()
-    for e in ents:
-        taken |= _tiles(e, size_of)
-    xs, ys = [t[0] for t in taken], [t[1] for t in taken]
-    box = (min(xs) - 1, min(ys) - 1, max(xs) + 1, max(ys) + 1)
-    for src in sources:  # (the tile a belt or pipe comes in from, and the one an output leaves onto)
-        x, y = math.floor(src["position"]["x"]), math.floor(src["position"]["y"])
-        taken |= {(x - 1, y), (x, y)}
-    for k in sinks:
-        x, y = math.floor(k["position"]["x"]), math.floor(k["position"]["y"])
-        taken |= {(x + 1, y), (x, y + 1)}
-
-    def proto(name):
-        for t in ("assembling-machine", "furnace", "inserter", "beacon", "electric-pole"):
-            if name in data.raw.get(t, {}):
-                return t, data.raw[t][name]
-        return None, None
-    poles = []  # (x, y, supply, wire reach) of pole centers
-    needs = []  # tile boxes (x1, y1, x2, y2) of what needs power
-    for e in ents:
-        t, pr = proto(e["name"])
-        if t == "electric-pole":
-            poles.append((e["position"]["x"], e["position"]["y"], pr.get("supply_area_distance", 3.5),
-                          WIRE_REACH.get(e["name"], 0)))
-        elif t and (pr.get("energy_source") or {}).get("type") == "electric":
-            ts = _tiles(e, size_of)
-            needs.append((min(a for a, _ in ts), min(b for _, b in ts), max(a for a, _ in ts) + 1,
-                          max(b for _, b in ts) + 1))
-    supply = data.raw["electric-pole"][POLE].get("supply_area_distance", 3.5)
-    wire = WIRE_REACH.get(POLE, POLE_REACH)  # (as far as pole_wires will wire it)
-
-    def covers(px, py, sup, b):
-        return abs(px - (b[0] + b[2]) / 2) < sup + (b[2] - b[0]) / 2 and abs(py - (b[1] + b[3]) / 2) < sup + (b[3] - b[1]) / 2
-
-    def free(t):
-        return t not in taken and box[0] <= t[0] <= box[2] and box[1] <= t[1] <= box[3]
-    added = []
-
-    def add(t):
-        taken.add(t)
-        poles.append((t[0] + 0.5, t[1] + 0.5, supply, wire))
-        added.append(t)
-        ents.append({"name": POLE, "position": {"x": t[0] + 0.5, "y": t[1] + 0.5}})
-    left = [b for b in needs if not any(covers(px, py, sp, b) for px, py, sp, _ in poles)]
-    while left:
-        count = {}
-        r = math.ceil(supply)
-        for b in left:
-            for x in range(b[0] - r, b[2] + r):
-                for y in range(b[1] - r, b[3] + r):
-                    if free((x, y)) and covers(x + 0.5, y + 0.5, supply, b):
-                        count[(x, y)] = count.get((x, y), 0) + 1
-        if not count:
-            raise PlanError("no room for a power pole within reach of some of its inserters (a row packed with them)")
-        b0 = left[0]  # (ties: inside the layout's own box, then nearest the first thing left unpowered)
-        best = max(count, key=lambda t: (count[t], box[0] < t[0] < box[2] and box[1] < t[1] < box[3],
-                                         -abs(t[0] + 0.5 - (b0[0] + b0[2]) / 2) - abs(t[1] + 0.5 - (b0[1] + b0[3]) / 2),
-                                         -t[1], -t[0]))
-        add(best)
-        left = [b for b in left if not covers(best[0] + 0.5, best[1] + 0.5, supply, b)]
-    while True:  # wires: grow the first pole's group until it holds them all
-        group, edge = {0}, [0]
-        while edge:
-            i = edge.pop()
-            for j, q in enumerate(poles):
-                if j not in group and (poles[i][0] - q[0]) ** 2 + (poles[i][1] - q[1]) ** 2 <= min(poles[i][3], q[3]) ** 2:
-                    group.add(j)
-                    edge.append(j)
-        if len(group) == len(poles):
-            return len(added)
-        # a pole within reach of the group, nearer the closest pole outside it; when that is boxed in (a row of
-        # big machines between), the fewest poles on free tiles around, each hop within wire reach
-        _, i, j = min(((poles[i][0] - q[0]) ** 2 + (poles[i][1] - q[1]) ** 2, i, j) for i in group
-                      for j, q in enumerate(poles) if j not in group)
-        (ax, ay), (bx, by) = poles[i][:2], poles[j][:2]
-        r = min(poles[i][3], wire)
-        before = (ax - bx) ** 2 + (ay - by) ** 2
-        spots = [t for t in near_tiles(ax, ay, r)
-                 if free(t) and (t[0] + 0.5 - bx) ** 2 + (t[1] + 0.5 - by) ** 2 < before]
-        if spots:
-            add(min(spots, key=lambda t: ((t[0] + 0.5 - bx) ** 2 + (t[1] + 0.5 - by) ** 2, t[1], t[0])))
-            continue
-        prev = {}
-        for k in group:
-            for t in near_tiles(poles[k][0], poles[k][1], min(poles[k][3], wire)):
-                if free(t):
-                    prev.setdefault(t, None)
-        goals = {t for k, q in enumerate(poles) if k not in group for t in near_tiles(q[0], q[1], min(q[3], wire))}
-        frontier, goal = list(prev), None
-        while frontier and goal is None:
-            nxt = []
-            for c in frontier:
-                if c in goals:
-                    goal = c
-                    break
-                for t in near_tiles(c[0] + 0.5, c[1] + 0.5, wire):
-                    if t not in prev and free(t):
-                        prev[t] = c
-                        nxt.append(t)
-            frontier = nxt
-        if goal is None:
-            raise PlanError("no free tiles to wire its power poles together")
-        while goal is not None:
-            add(goal)
-            goal = prev[goal]
-
-
-def near_tiles(x, y, r):
-    """tiles whose centers are within r of (x, y)"""
-    return [(tx, ty) for tx in range(math.floor(x - r), math.ceil(x + r) + 1)
-            for ty in range(math.floor(y - r), math.ceil(y + r) + 1)
-            if (tx + 0.5 - x) ** 2 + (ty + 0.5 - y) ** 2 <= r * r]
-
-
-def pole_wires(entities):
-    """Copper wires: a minimum spanning tree over all poles within wire reach (fewest, shortest wires that
-    connect everything reachable).
-
-    Poles built from a blueprint only get the wires the blueprint lists (unlike hand/script placement,
-    which auto-connects), so without these most of the line has no power.
-    """
-    poles = [(i, e["position"]["x"], e["position"]["y"], WIRE_REACH[e["name"]]) for i, e in enumerate(entities, 1)
-             if e["name"] in WIRE_REACH]
-    edges = sorted(((x1 - x2) ** 2 + (y1 - y2) ** 2, i, j) for n, (i, x1, y1, r1) in enumerate(poles)
-                   for (j, x2, y2, r2) in poles[n + 1:] if (x1 - x2) ** 2 + (y1 - y2) ** 2 <= min(r1, r2) ** 2)
-    parent = {i: i for i, _, _, _ in poles}
-
-    def find(i):
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
-    wires = []
-    for _, i, j in edges:
-        ri, rj = find(i), find(j)
-        if ri != rj:
-            parent[ri] = rj
-            wires.append([i, POLE_COPPER, j, POLE_COPPER])
-    return wires
-
-
-def insert_plans(modules, inventory):
-    """blueprint item requests putting modules into consecutive slots of one inventory"""
-    plans, slot = [], 0
-    for name, quality, count in modules:
-        stacks = [{"inventory": inventory, "stack": slot + i} for i in range(count)]
-        slot += count
-        plans.append({"id": {"name": name, "quality": quality}, "items": {"in_inventory": stacks}})
-    return plans
+insert_plans = entlib.insert_plans
 
 
 def blueprint_string(entities, label, game_version=(2, 0, 77), description=None, tiles=None):
-    # (Power Propagation on in the game: the poles its powered buildings make redundant left out; not on a
-    # platform, whose power reaches everywhere)
-    if propagation.RANGE is not None and _DATA is not None and not tiles:
-        entities = propagation.prune(_DATA, entities)
-    bp_entities = []
-    for i, e in enumerate(entities, 1):
-        be = {"entity_number": i, "name": e["name"], "position": e["position"]}
-        if e.get("direction"):
-            be["direction"] = e["direction"]
-        if e.get("recipe"):
-            be["recipe"] = e["recipe"]
-        if e.get("override_stack_size"):
-            be["override_stack_size"] = e["override_stack_size"]
-        if e.get("modules"):
-            be["items"] = insert_plans(e["modules"], e["inventory"])
-        if e.get("ug_type"):
-            be["type"] = e["ug_type"]  # underground belt entrance/exit
-        # label combinators, chest limits, splitter filters
-        for key in ("control_behavior", "player_description", "bar", "filter", "output_priority", "input_priority",
-                    "request_filters",  # requester chests
-                    "use_filters", "filters", "tags"):  # (inserter filters; tags a mod reads when it's built)
-            if e.get(key):
-                be[key] = e[key]
-        be.update(e.get("bp_extra") or {})  # (an entity moved as it was: its own blueprint fields, as the game wrote them)
-        bp_entities.append(be)
-    # circuit wires (red): an entity's "circuit_to" names others by their "wire_id" (a mall's chest and the inserters
-    # that only run while it's short)
-    number = {e["wire_id"]: i for i, e in enumerate(entities, 1) if e.get("wire_id") is not None}
-    circuit = [[i, CIRCUIT_RED, number[w], CIRCUIT_RED] for i, e in enumerate(entities, 1)
-               for w in e.get("circuit_to") or [] if w in number]
-    # (any wire, between connectors: [other's wire_id, this one's connector, the other's] - a moved section's own)
-    circuit += [[i, a, number[w], b] for i, e in enumerate(entities, 1) for w, a, b in e.get("wires_to") or []
-                if w in number]
-    major, minor, patch = game_version
-    bp = {"blueprint": {"item": "blueprint", "label": label, "entities": bp_entities,
-                        "wires": pole_wires(entities) + circuit,
-                        "version": (major << 48) | (minor << 32) | (patch << 16)}}
-    if description:
-        bp["blueprint"]["description"] = description
-    if tiles:  # ({"name", "position": {x, y}}: a space platform's foundation)
-        bp["blueprint"]["tiles"] = tiles
-    raw = json.dumps(bp, separators=(",", ":")).encode()
-    return "0" + base64.b64encode(zlib.compress(raw, 9)).decode()
+    return entlib.blueprint_string(entities, label, game_version, description, tiles, data=_DATA)
 
 
 def describe(p: Plan):
@@ -1271,3 +1033,6 @@ def describe(p: Plan):
         lines.insert(1, f"  modules {p.modules}{beacons} -> speed x{p.speed:.2f}, productivity +{p.productivity:.0%}")
     lines += ["  note: " + n for n in p.notes]
     return "\n".join(lines)
+
+
+from bpgen.power import POLE_COPPER, near_tiles, pole_wires, power_up  # noqa: E402,F401  (power reads planner's globals)

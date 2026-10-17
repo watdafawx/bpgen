@@ -5,13 +5,11 @@ each step into a section (a smelting or production line, the labs, the mall) usi
 exist, so every section is one that verifies on its own. Sections take and give labelled belts; the book's
 description lists them in bus order.
 """
-import base64
 import json
 import math
-import zlib
 from dataclasses import dataclass, field
 
-from bpgen import planner
+from bpgen import ents as entlib, planner
 
 CORE_PACKS = 2  # the first packs of the tech tree make the core book; later ones are add-ons
 ADDON_PACKS = 6  # add-ons offered after the core
@@ -450,12 +448,8 @@ def lab_count(data, lab, rate, packs=None):
     return max(1, math.ceil(rate * t / speed - 1e-9))
 
 
-def _decode(bp_string):
-    return json.loads(zlib.decompress(base64.b64decode(bp_string[1:])))
-
-
-def _encode(obj):
-    return "0" + base64.b64encode(zlib.compress(json.dumps(obj, separators=(",", ":")).encode(), 9)).decode()
+_decode = entlib.decode
+_encode = entlib.encode
 
 
 def plan_base(service, params, progress=None, cancel=None):
@@ -692,10 +686,8 @@ def plan_base(service, params, progress=None, cancel=None):
         lines += ["", "Not automated here (bring in): " + ", ".join(n["item"] for n in not_automated)]
     if route_note:
         lines += ["", route_note]
-    book = {"blueprint_book": {"item": "blueprint-book", "label": f"starter base {spm:g} spm",
-                               "description": "\n".join(lines), "blueprints": prints, "active_index": 0,
-                               "version": prints[0]["blueprint"]["version"] if prints else 0}}
-    return {"sections": sections, "book": _encode(book), "bus": bus, "packs": packs, "spm": spm, "steps": steps,
+    return {"sections": sections, "book": entlib.book_string(prints, f"starter base {spm:g} spm",
+                                                  "\n".join(lines)), "bus": bus, "packs": packs, "spm": spm, "steps": steps,
             "outputs": outputs,
             "bring_in": {k: round(v, 1) for k, v in sorted(bring_in.items())}, "not_automated": not_automated,
             "route_note": route_note, "text": "\n".join(lines), "absolute": absolute, "notes": fit_notes}

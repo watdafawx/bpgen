@@ -12,7 +12,7 @@ and its coal comes from a chest at its coal belt, filled by hand (plastic takes 
 """
 import math
 
-from bpgen import base, compose_base, extend, planner
+from bpgen import base, compose_base, extend, geom, planner
 
 PUMPJACK = "pumpjack"
 PUMPJACK_OUT = (1, -2)  # (facing north: the tile its crude comes out on, from its middle)
@@ -135,10 +135,7 @@ _WATER_AT = [(dx, dy) for dx in (-1, 0, 1) for dy in (-2, -1)]  # (facing north:
 
 
 def _turned(v, k):
-    x, y = v
-    for _ in range(k):
-        x, y = -y, x
-    return x, y
+    return geom.turn_xy(*v, k)
 
 
 def offshore(ground, inlet, blocked, max_d=80):

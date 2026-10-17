@@ -24,6 +24,8 @@ enough for the machines at the orbit's sunlight; foundation under all of it.
 """
 import math
 
+from bpgen import geom
+from bpgen.ents import adder
 from bpgen.planner import EAST, NORTH, SOUTH, WEST, PIPE, POLE, UNDERGROUND, PlanError, can_craft
 
 HUB_CAPS = {"chunk": 4, "ore": 400, "carbon": 200, "ice": 200, "plate": 200, "ammo": 200}
@@ -107,13 +109,7 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
         raise PlanError("no recipe for the ship's " + ("ice melting" if not melt else "oxide crushing"))
     ents = []
 
-    def put(name, x, y, d=None, **kw):
-        e = {"name": name, "position": {"x": x, "y": y}}
-        if d is not None:
-            e["direction"] = d
-        e.update(kw)
-        ents.append(e)
-        return e
+    put = adder(ents)
 
     def gate(item, cap):  # (runs while the hub holds fewer than cap: wired to the hub when built)
         return {"tags": {"bpgen_hub": True}, "control_behavior": {"circuit_enabled": True, "circuit_condition": {
@@ -314,8 +310,7 @@ def plan_ship(data, thrusters=2, turrets=6, location="nauvis", inserter="fast-in
         w, h = sizes.get(e["name"], (1, 1))
         if e.get("direction") in (EAST, WEST) and e["name"] == "crusher":
             w, h = h, w
-        x0, y0 = math.floor(e["position"]["x"] - w / 2 + 0.01), math.floor(e["position"]["y"] - h / 2 + 0.01)
-        e["_tiles"] = [(x0 + i, y0 + j) for i in range(w) for j in range(h)]
+        e["_tiles"] = geom.tiles_at(e["position"]["x"], e["position"]["y"], w, h)
         taken |= set(e["_tiles"])
     taken |= {(x, y) for x in range(-4, 4) for y in range(-4, 4)}  # (the hub)
     powered = [e for e in ents if e["name"] not in (PIPE, UNDERGROUND, belt, "gun-turret", "thruster")]

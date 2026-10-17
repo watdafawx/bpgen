@@ -9,6 +9,9 @@ import json
 import sys
 from pathlib import Path
 
+# a note about the test machine, not the plan (pack.up_to_date() reads the user's mod list)
+ENV_NOTE = "your mods changed since bpgen last read them"
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 from bpgen import base, ingame, planner  # noqa: E402
@@ -51,7 +54,8 @@ def snapshot(out):
     """a plan answer -> what the snapshot keeps"""
     case = (out.get("test") or {}).get("case") or {}
     snap = {"label": out.get("label"), "mode": out.get("mode"), "output": out.get("output"),
-            "expected": out.get("expected"), "summary": out.get("summary"), "notes": out.get("notes") or [],
+            "expected": out.get("expected"), "summary": out.get("summary"),
+            "notes": [n for n in out.get("notes") or [] if ENV_NOTE not in n],
             "sections": out.get("sections"), "absolute": out.get("absolute"),
             "sources": case.get("sources"), "sinks": case.get("sinks")}
     bp = base._decode(out["blueprint"])

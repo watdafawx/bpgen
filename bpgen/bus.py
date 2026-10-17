@@ -14,6 +14,7 @@ and runs east along its own row R, crossing every column on the way: those dive 
 Taps are at least GAP rows apart (so no two corridors or splitters meet) and clear of the head of every column
 east of theirs (a column that starts inside a corridor couldn't dive).
 """
+from bpgen.ents import adder
 from bpgen.planner import EAST, SOUTH
 
 GAP = 3  # rows between two taps
@@ -60,8 +61,7 @@ def build(cols, belt, ug, splitter, x_end):
     to x_end - 1 (the router carries on from x_end)"""
     ents, spans = [], set()
 
-    def put(name, x, y, d, **kw):
-        ents.append(dict({"name": name, "position": {"x": x + 0.5, "y": y + 0.5}, "direction": d}, **kw))
+    put = adder(ents, tile=True)
 
     for c in cols:
         taps = sorted(c.taps)

@@ -28,7 +28,8 @@ import itertools
 import math
 from dataclasses import dataclass, field
 
-from bpgen import planner
+from bpgen import planner, power
+from bpgen.ents import adder
 from bpgen.calibrate import ZERO, level_key, template_inserters
 from bpgen.planner import NORTH, EAST, SOUTH, PlanError, pick_inserter
 
@@ -308,12 +309,7 @@ def _layout(mall, s, chest, chest_limit):
         y += h
     ents = []
 
-    def put(name, x, yy, direction=None, **kw):
-        e = {"name": name, "position": {"x": x, "y": yy}}
-        if direction is not None:
-            e["direction"] = direction
-        e.update(kw)
-        ents.append(e)
+    put = adder(ents)
 
     for x in range(width + 1):
         put(mall.belt, x + 0.5, Y["bus0"] + 0.5, EAST)
@@ -637,36 +633,7 @@ def _chain(data, belt, malls, offsets, ents, sources, notes):
     return ents + new, sources
 
 
-def _link_power(data, ents):
-    """poles joining separate pole networks (stacked sections): each network to its nearest neighbour network"""
-    from bpgen.chain import _pole_line, _sizer, _tiles
-    size_of = _sizer(data)
-    blocked = set()
-    for e in ents:
-        blocked |= _tiles(e, size_of)
-    poles = [(e["position"]["x"], e["position"]["y"]) for e in ents if e["name"] == planner.POLE]
-    reach2 = planner.POLE_REACH ** 2
-    # networks = connected components of poles within wire reach
-    groups = {i: {p} for i, p in enumerate(poles)}
-    owner = {p: i for i, p in enumerate(poles)}
-    for a in poles:
-        for b in poles:
-            if a < b and (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 <= reach2 and owner[a] != owner[b]:
-                ga, gb = owner[a], owner[b]
-                for q in groups[gb]:
-                    owner[q] = ga
-                groups[ga] |= groups.pop(gb)
-    added = []
-    nets = list(groups.values())
-    while len(nets) > 1:
-        a_net = nets.pop(0)
-        best = min(((pa, pb, j) for j, net in enumerate(nets) for pa in a_net for pb in net),
-                   key=lambda t: (t[0][0] - t[1][0]) ** 2 + (t[0][1] - t[1][1]) ** 2)
-        pa, pb, j = best
-        for x, y in _pole_line(pa, pb, blocked):
-            added.append({"name": planner.POLE, "position": {"x": x, "y": y}})
-        nets[j] = nets[j] | a_net
-    return added
+_link_power = power.link_networks
 
 
 def describe_all(malls, notes):
@@ -734,12 +701,7 @@ def plan_bot_mall(data, products, machine, inserter="inserter", chest_limit=4, b
         raise PlanError("none of these products can be made here")
     ents = []
 
-    def put(name, x, y, direction=None, **kw):
-        e = {"name": name, "position": {"x": x, "y": y}}
-        if direction is not None:
-            e["direction"] = direction
-        e.update(kw)
-        ents.append(e)
+    put = adder(ents)
 
     top_ins, mach_a, mach_b = 1, 2, 2 + s
     bot_ins, bot_chest = 2 + 2 * s, 3 + 2 * s
@@ -833,12 +795,7 @@ def plan_bot_line(data, recipe, machine, rate, inserters, bonuses=None, unlocked
     ins, per, k_in, k_out = pick
     ents = []
 
-    def put(name, x, y, direction=None, **kw):
-        e = {"name": name, "position": {"x": x, "y": y}}
-        if direction is not None:
-            e["direction"] = direction
-        e.update(kw)
-        ents.append(e)
+    put = adder(ents)
 
     filters = [{"index": i + 1, "name": ing["name"], "quality": "normal", "comparator": "=",
                 "count": max(1, math.ceil(_amount(ing) * craft * buffer_s / k_in))}

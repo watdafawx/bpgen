@@ -7,34 +7,15 @@ grid (absolute snapping), so it pastes exactly where it was placed.
 """
 import math
 
-from bpgen import chain, planner, router
+from bpgen import chain, geom, planner, power, router
+from bpgen import ents as entlib
 
-DIR = {0: (0, -1), 4: (1, 0), 8: (0, 1), 12: (-1, 0)}
+DIR = geom.DIRS
 BELT_TYPES = ("transport-belt", "underground-belt", "splitter")
 
 
-def runs_tiles(runs):
-    """{y: [[x1, x2], ...]} -> set of (x, y)"""
-    out = set()
-    for y, rs in (runs or {}).items():
-        for x1, x2 in rs:
-            out.update((x, int(y)) for x in range(int(x1), int(x2) + 1))
-    return out
-
-
-def footprint(e):
-    """tiles an entity covers: its box from the game when the snapshot has one, else position, w, h from
-    Service.decorate"""
-    if e.get("box"):
-        x1, y1, x2, y2 = e["box"]
-        return [(x, y) for x in range(math.floor(x1 + 0.01), math.ceil(x2 - 0.01))
-                for y in range(math.floor(y1 + 0.01), math.ceil(y2 - 0.01))]
-    w, h = e.get("w", 1), e.get("h", 1)
-    if w != h and e.get("direction", 0) in (4, 12):
-        w, h = h, w
-    x0 = math.floor(e["position"]["x"] - w / 2 + 0.01)
-    y0 = math.floor(e["position"]["y"] - h / 2 + 0.01)
-    return [(x0 + i, y0 + j) for i in range(w) for j in range(h)]
+runs_tiles = geom.runs_tiles
+footprint = geom.footprint
 
 
 class Ground:
@@ -111,11 +92,7 @@ def into_belt(ground, t, new=()):
                for x in new)
 
 
-def plan_tiles(entities):
-    out = set()
-    for e in entities:
-        out.update(footprint(e))
-    return out
+plan_tiles = geom.plan_tiles
 
 
 def find_spot(ground, entities, seed, avoid_ore=True, margin=2, keep_clear=()):
@@ -161,14 +138,7 @@ def find_spot(ground, entities, seed, avoid_ore=True, margin=2, keep_clear=()):
     return best[1], best[2]
 
 
-def pole_chain(a, b, blocked, reach=8):
-    """medium poles from the pole on tile a to within wire reach of tile b, round what's in the way (chain's
-    _pole_line). Their tiles join `blocked`. -> entities, or None (stuck)"""
-    try:
-        line = chain._pole_line((a[0] + 0.5, a[1] + 0.5), (b[0] + 0.5, b[1] + 0.5), blocked, reach)
-    except planner.PlanError:
-        return None
-    return [{"name": planner.POLE, "position": {"x": x, "y": y}} for x, y in line]
+pole_chain = power.pole_chain
 
 
 def pole_tiles(entities):
@@ -426,34 +396,7 @@ def feed(ground, blocked, spans, lanes, goal, goal_dir, names, prefer=None, rate
     return [], [], problem
 
 
-def link_power(ground, blocked, new_ents, pole, reach):
-    """poles from the nearest existing pole to the nearest new one, when they are out of wire reach (None: no way
-    round what's in between); only poles
-    whose network has power when the snapshot says (a mall begun beside the bus may have poles of its own, wired
-    to nothing)"""
-    poles_old = [e for e in ground.snap["entities"] if e["type"] == "electric-pole" and not e.get("ghost")]
-    if any(e.get("powered") for e in poles_old):
-        poles_old = [e for e in poles_old if e.get("powered")]
-    elif any(e.get("network") is not None for e in poles_old):  # (no power source in sight: the biggest network)
-        sizes = {}
-        for e in poles_old:
-            sizes[e.get("network")] = sizes.get(e.get("network"), 0) + 1
-        big = max(sizes, key=sizes.get)
-        poles_old = [e for e in poles_old if e.get("network") == big]
-    poles_new = [e for e in new_ents if e["name"] == pole or e.get("type") == "electric-pole"]
-    if not poles_old or not poles_new:
-        return []
-    pos = lambda e: (e["position"]["x"], e["position"]["y"])  # noqa: E731
-    a, b = min(((o, n) for o in poles_old for n in poles_new),
-               key=lambda p: math.dist(pos(p[0]), pos(p[1])))
-    if math.dist(pos(a), pos(b)) <= reach:
-        return []
-    # (each pole within wire reach of the last, round what's in the way: the shared line chain.py's blocks use)
-    try:
-        line = chain._pole_line(pos(a), pos(b), blocked, reach - 0.5)
-    except planner.PlanError:
-        return None
-    return [{"name": pole, "position": {"x": x, "y": y}} for x, y in line]
+link_power = power.link_to_grid
 
 
 def absolute_blueprint(entities, label, description=None, floor=None):
@@ -468,12 +411,11 @@ def absolute_blueprint(entities, label, description=None, floor=None):
                                  tiles=[{"name": t["name"], "position": {"x": t["position"]["x"] - x0,
                                                                          "y": t["position"]["y"] - y0}}
                                         for t in floor or []])
-    from bpgen import base
-    bp = base._decode(s)
+    bp = entlib.decode(s)
     bp["blueprint"]["snap-to-grid"] = {"x": w, "y": h}
     bp["blueprint"]["absolute-snapping"] = True
     bp["blueprint"]["position-relative-to-grid"] = {"x": x0 % w, "y": y0 % h}
-    return base._encode(bp), (x0, y0, w, h)
+    return entlib.encode(bp), (x0, y0, w, h)
 
 
 def deliver(ground, blocked, spans, item, start, start_dir, names, prefer=None):
@@ -742,16 +684,8 @@ def facing(plan_entities, sources):
     return (1 if dx > 0 else -1, 0) if abs(dx) >= abs(dy) else (0, 1 if dy > 0 else -1)
 
 
-def turned(x, y, k):
-    """(x, y) turned k quarter turns clockwise about the origin (y grows downward)"""
-    for _ in range(k % 4):
-        x, y = -y, x
-    return x, y
-
-
-def mirrored_dir(d):
-    """a direction mirrored left to right (a blueprint flipped horizontally): east and west swap"""
-    return (16 - d) % 16
+turned = geom.turn_xy
+mirrored_dir = geom.mirror_dir
 
 
 def solve_pose(pairs):

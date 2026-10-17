@@ -53,6 +53,7 @@ from dataclasses import dataclass, field
 
 from bpgen.calibrate import ZERO, level_key, template_inserters
 from bpgen import planner
+from bpgen.ents import adder
 from bpgen.planner import (EAST, NORTH, SOUTH, WEST, PlanError, _amount, _size, belt_capacity,
                            pick_inserter)
 
@@ -499,12 +500,7 @@ def _layout(p: FluidPlan):
         sinks.append({"kind": "fluid", "position": {"x": width + 0.5, "y": 0.5}, "item": p.output})
         return ents, sources, sinks
 
-    def put(name, x, y, direction=None, **kw):
-        e = {"name": name, "position": {"x": x, "y": y}}
-        if direction is not None:
-            e["direction"] = direction
-        e.update(kw)
-        ents.append(e)
+    put = adder(ents)
 
     def row_of(name, y, n=width, direction=None):
         for x in range(n):
@@ -809,12 +805,7 @@ def _layout_multi(p: MultiPlan):
     y_bot = y_top + s  # the first row under them
     ents, sources, sinks = [], [], []
 
-    def put(name, x, y, direction=None, **kw):
-        e = {"name": name, "position": {"x": x + 0.5, "y": y + 0.5}}
-        if direction is not None:
-            e["direction"] = direction
-        e.update(kw)
-        ents.append(e)
+    put = adder(ents, tile=True)
     out_row = {f: 2 * j for j, f in enumerate(outs)}
     # with items: inserters, a row for poles, the item belt, then the fluid rows (reached under the belt)
     first_in = y_bot + (4 if p.items else 1)
