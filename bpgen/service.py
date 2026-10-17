@@ -643,6 +643,30 @@ class Service:
             "blueprint": planner.blueprint_string(ents, label, description=description),
         }
 
+    def _fit_made(self, params, make, rate, progress=None, cancel=None):
+        """no rate set: the line's own rate (per minute), lowered so each item made here takes one block of its own
+        (a full line of 10-panel advanced solar wanted 67 solar panel blocks, too many to route)"""
+        d = self.data
+        recipe = d.raw["recipe"][params["recipe"]]
+        made = sum(float(o.get("amount") or 1) for o in planner.results_of(recipe)[:1]) or 1
+        kw = self._line_kwargs(params)
+        for item, spec in make.items():
+            r = d.raw["recipe"].get(spec["recipe"]) or {}
+            per = sum(float(i.get("amount") or 0) for i in recipe.get("ingredients") or [] if i.get("name") == item)
+            if not per or len(r.get("results") or []) != 1:
+                continue  # (fluids and by-product recipes: their own sizing)
+            try:
+                block = planner.plan(d, self.ensure_calibrated(dict(params, recipe=spec["recipe"],
+                                     machine=spec["machine"]), progress, cancel), spec["recipe"], spec["machine"],
+                                     params["belt"], **kw).expected_output * 60
+            except planner.PlanError:
+                continue
+            if block > 0 and rate * per / made > block:
+                rate = block * made / per
+                if progress:
+                    progress(f"no rate set: {round(rate, 1)}/min, what one block of {item} feeds")
+        return rate
+
     def plan_fluid_chain(self, params, make, progress=None, cancel=None, also=None):
         """a line with ingredients made in the blueprint, fluids among them, and/or other products bundled in (`also`:
         {item: {recipe, rate_per_min}}, sharing its inputs): planned like a starter base (blocks, belts and pipes
@@ -659,6 +683,7 @@ class Service:
                                     params["machine"], params["belt"], **kw).expected_output * 60
             except planner.PlanError:
                 rate = self.plan_fluid(params)["summary"]["expected"] * 60
+            rate = self._fit_made(params, make, rate, progress, cancel)
         overrides = {product: params["recipe"]}
         targets = {product: rate}
         for item, spec in also.items():  # bundled products: each its own block on the shared inputs
