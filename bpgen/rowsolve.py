@@ -13,6 +13,9 @@ n-th box of its kind (or the one it names), through a port on the north or south
 and west on one row - through the touching machines. Touching machines may not join a used output to an input.
 The best pose: two rows over one, then fluids in on the belt side, then more free columns, then the earlier
 facing. rowsolve_test lays out every recipe in every machine and checks the result.
+7+ belt items (many_lanes): one item a lane, the near belt and the output belt's near lane first, then a belt each
+side per tile the calibrated inserters reach (4 * reach - 1 lanes: 7 with vanilla's long-handed); no poles among the
+inserters, a free column between machines when a side has none left (power_up stands them).
 """
 from dataclasses import dataclass, field
 
@@ -123,10 +126,13 @@ class Pose(Geometry):
     pole_every: int = 2
     through_fluids: list = field(default_factory=list)  # [Fluid]: chained through touching machines, row `col`
     slot_poles: bool = True  # poles in the inserter columns (False: a 1x1 machine - the power pass places them)
+    pole_gap: bool = False  # a free column after each machine for the power pass's poles (7+ items, a side full)
 
-    def spec(self, belts, south=(), fluid=None, fluid_need=0.0, byproducts=False, needs=None):
-        """-> RowSpec; belts: [[near lanes], [far lanes]?]; needs: {fluid: rate per row} (fluid / fluid_need: the
-        planner's one)"""
+    def spec(self, belts, south=(), fluid=None, fluid_need=0.0, byproducts=False, needs=None, out_lane=None,
+             south_more=()):
+        """-> RowSpec; belts: [[near lanes], [far lanes]?, [lanes 3 tiles out]...]; south: the belt past the output
+        belt; out_lane: the ingredient riding the output belt's near lane (7+ belt items); south_more: belts past
+        that one; needs: {fluid: rate per row} (fluid / fluid_need: the planner's one)"""
         needs = dict(needs or {})
         if fluid is not None:
             needs.setdefault(fluid, fluid_need)
@@ -156,16 +162,20 @@ class Pose(Geometry):
             north.append(Band("ins", "ins", "in"))
             north.append(Band("belt", "near", "near", list(belts[0])))
             if len(belts) == 2 or two_sided:
-                north.append(Band("belt", "far", "far", list(belts[1]) if len(belts) == 2 else [None, None]))
+                north.append(Band("belt", "far", "far", list(belts[1]) if len(belts) >= 2 else [None, None]))
+            for d, lanes in enumerate(belts[2:], 3):  # (inserters reaching d tiles)
+                north.append(Band("belt", f"far{d}", "far", list(lanes)))
         north += pipes(self.north_fluids, "")
         south_bands = []
         if self.out_band:
             south_bands.append(Band("out", "io" if two_sided else "out", "out"))
-            south_bands.append(Band("belt", "out" if two_sided else "belt", "out", extra=True,
-                                    shared=self.rows == 2 and self.shared == "belt",
+            south_bands.append(Band("belt", "out" if two_sided else "belt", "out", [out_lane, None] if out_lane else [],
+                                    extra=True, shared=self.rows == 2 and self.shared == "belt",
                                     sink="" if self.ins_band else "item"))  # (pipe-fed lines name their output)
             if two_sided:
                 south_bands.append(Band("belt", "south", "south", list(south) if any(south) else [None, None]))
+                for d, lanes in enumerate(south_more, 3):
+                    south_bands.append(Band("belt", f"south{d}", "south", list(lanes)))
         south_bands += pipes(self.south_fluids, "s")
         # poles: in the inserter slots as the planner has them; else in the output row; else in a riser row north
         if not self.ins_band and self.slot_poles:
@@ -179,7 +189,8 @@ class Pose(Geometry):
         plain = self.rows == 2 and self.ins_band and not self.south_fluids  # (the planner's two-row belt line)
         through = [(f.name, needs.get(("in", f.name), needs.get(f.name, 0.0)), f.col) for f in self.through_fluids]
         gap = next((f.gap for f in self.north_fluids + self.south_fluids if f.gap), "")
-        pitch = s + 1 if gap else s + bs if self.rows == 2 else 0  # (a gap pipe: a free column after each machine)
+        # (a gap pipe, or room for poles: a free column after each machine)
+        pitch = s + 1 if gap or self.pole_gap else s + bs if self.rows == 2 else 0
         shift = 1 if gap == "w" else self.beacon_pad * (s + bs) + bs
         tail = -1 if gap == "w" else self.beacon_pad * (s + bs)
         return RowSpec(self.rows, self.facing, s, hs, north, south_bands, machine_sources=through,
@@ -193,18 +204,48 @@ class Pose(Geometry):
                        sort_tail_bottom="south" if two_sided else "last")
 
 
-def solve_general(data, shape: Shape, beacon=None, beacon_proto=None, one_row=False):
+def many_lanes(items, reach):
+    """7+ belt items, one a lane, `items` hungriest first and nearest first: one tile out the near belt (2 lanes)
+    and the output belt's near lane, then for each tile out to `reach` a belt north and one south (2 lanes each).
+    -> (north belts' lanes nearest first, the output belt's item, south belts' lanes from 2 tiles out), or None when
+    they don't fit"""
+    slots = [("n", 2), ("o", 1)] + [(side, 2) for _ in range(2, reach + 1) for side in ("n", "s")]
+    items = list(items)
+    north, south, out = [], [], None
+    for side, n in slots:
+        if not items:
+            break
+        lanes, items = items[:n], items[n:]
+        if side == "o":
+            out = lanes[0]
+        else:
+            (north if side == "n" else south).append(lanes + [None] * (n - len(lanes)))
+    if items:
+        return None
+    return north, out, south
+
+
+def lane_room(reach):
+    """how many belt items many_lanes lays out with inserters reaching `reach` tiles"""
+    return 3 + 4 * (reach - 1)
+
+
+def solve_general(data, shape: Shape, beacon=None, beacon_proto=None, one_row=False, reach=2):
     """-> Pose: how this recipe's machines stand in a row, trying each facing (as is, turned round, a quarter either
     way) and keeping the best: two mirrored rows over one, the fluids in on the belt side (north), more free
-    columns, the earlier facing. SolveError says why every facing failed."""
+    columns, the earlier facing. reach: the farthest calibrated inserter's (7+ belt items: belts out to it).
+    SolveError says why every facing failed."""
     from bpgen import planner
     m, machine = shape.proto, shape.machine
     if not shape.item_outs and not shape.fluid_outs:
         raise SolveError(planner.no_output(data.raw["recipe"][shape.recipe]))
     if shape.burner and not shape.fuel:
         raise SolveError("no fuel item found for this burner")
-    if len(shape.items) > 6:
-        raise SolveError(f"{len(shape.items)} item ingredients: this template handles 1-6 (5-6: one row, belts on both sides)")
+    many = shape.belt_items > 6
+    lanes = many_lanes(range(shape.belt_items), reach) if many else None
+    if many and lanes is None:
+        raise SolveError(f"{shape.belt_items} belt items: a line has lanes for {lane_room(reach)} with inserters "
+                         f"reaching {reach} tiles (a belt each side per tile of reach, one item on the output belt)")
     wet = bool(shape.fluids or shape.fluid_outs)
     two_sided = shape.belt_items > 4
     if two_sided and beacon:
@@ -280,13 +321,27 @@ def solve_general(data, shape: Shape, beacon=None, beacon_proto=None, one_row=Fa
         if out_band and out_slots < 1:
             why.append(f"facing {facing}: no column left for an output inserter beside {risers_s} pipe risers")
             continue
+        if many:  # (an inserter per belt each side, no pole among them; a d-tile inserter drops d tiles in)
+            north_b, _, south_b = lanes
+            slots, out_slots = size - risers_n, size - sum(1 for f in south_f if not f.gap)
+            need_n, need_s = len(north_b), 2 + len(south_b)
+            if slots < need_n or out_slots < need_s:
+                why.append(f"facing {facing}: {shape.belt_items} belt items need {need_n} inserter columns north and "
+                           f"{need_s} south; {machine} has {slots} and {out_slots} free")
+                continue
+            depth = max(len(north_b), 1 + len(south_b))
+            if height < depth:
+                why.append(f"facing {facing}: inserters reaching {depth} tiles drop past a machine {height} deep")
+                continue
+            poles_out, slot_poles = False, False
+            pole_gap = slots == need_n or out_slots == need_s  # (no column a side for a pole: one between machines)
         turn = facing if facing in (EAST, WEST) and not rotated else 0
         flipped = facing == SOUTH
         first = (north_f + south_f)[0] if north_f or south_f else None
         found.append(Pose(shape, facing, rows, size, height, first.col if first else None, bool(shape.fluid_outs),
                           slots, out_slots, poles_out, beacon, 0, 0, 0, rotated, flipped, turn,
                           north_f, south_f, ins_band, out_band, shared, 2 if 2 * size <= POLE_SUPPLY else 1,
-                          through_f, slot_poles))
+                          through_f, slot_poles, pole_gap if many else False))
     if not found:
         raise SolveError("; ".join(why) if why else f"{machine}: no facing lays {shape.recipe} out")
     # (one_row: a starter base's block - its fluids in on the south side, out on the north, the way its router

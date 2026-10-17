@@ -15,6 +15,8 @@ Layout (y grows downward, everything flows east), mirrored around the output bel
 An inserter only fills the far lane of a belt, so one machine row per output lane.
 5-6 belt items: one machine row instead (_plan_two_sided): two input belts north, the output belt south, a third
 input belt past it reached by long-handed inserters. Machines 5 wide or more get extra poles (power_up).
+7+ belt items: the same row, one more item on the output belt's near lane (lane_stop: a filter splitter past the
+east end stops it) and, with inserters reaching 3+ tiles, a belt more each side per tile (rowsolve.many_lanes).
 Several item outputs share the output belt; past its east end a filter splitter per by-product sorts it onto its
 own belt (sort_tail). An item recipe with a fluid output and no fluid input uses the pipe rows to carry it away.
 """
@@ -35,6 +37,7 @@ from bpgen.rates import (_pick_inputs, byproducts_at, craft_rate_of, crafting, f
 
 NORTH, EAST, SOUTH, WEST = 0, 4, 8, 12
 POLE_EVERY = 2  # machines
+MAX_REACH = 4  # 7+ belt items: belts out to the farthest calibrated straight inserter, up to this many tiles
 
 
 def categories(r):
@@ -98,6 +101,13 @@ class Plan:
     rows: int = 2  # machine rows: 1 for the two-sided layout (5-6 belt items)
     south: list = field(default_factory=list)  # two-sided: the far belt's lanes south of the output belt
     ins_south: InserterChoice | None = None  # two-sided: the long-handed inserters reaching it
+    # 7+ belt items: an ingredient on the output belt's near lane (stopped by a filter splitter past the line's east
+    # end), the near inserter picking it, belts 3+ tiles out (north: p.belts[2:]; south: south_more) and theirs
+    out_lane: str | None = None
+    ins_lane: InserterChoice | None = None
+    south_more: list = field(default_factory=list)
+    ins_far_more: list = field(default_factory=list)
+    ins_south_more: list = field(default_factory=list)
     byproducts: dict = field(default_factory=dict)  # other item outputs -> per machine; they share the output belt
     out_share: float = 1.0  # the main output's share of what the output inserters move
     splitter: str | None = None  # sorts each by-product off the output belt
@@ -180,17 +190,7 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
     How the machines stand (facing, rows, pipes, free columns) comes from the row solver (rowsolve.py); the
     numbers (machines, inserters, lanes) from rates.py; the entities from rowlayout.py through the Plan's spec."""
     from bpgen import rowsolve
-    try:
-        shape = rowsolve.Shape.of(data, recipe, machine)
-        pose = rowsolve.solve_general(data, shape, beacon, data.raw.get("beacon", {}).get(beacon) if beacon else None,
-                                      one_row=one_row)
-    except rowsolve.SolveError as e:
-        raise PlanError(str(e))
-    r, m = data.raw["recipe"][recipe], shape.proto
-    furnace = shape.furnace
-    size, height = pose.size, pose.height
-    rotated, flipped, turn, fluid_col = pose.rotated, pose.flipped, pose.turn, pose.fluid_col
-    fluids, items, fluid_out = shape.fluids, shape.items, shape.fluid_outs
+    per_row_asked = per_row
     bonuses = bonuses or ZERO
 
     def bonus(n):
@@ -203,6 +203,22 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
         names = [n for n in template_inserters(data, allowed, tiles)
                  if calib.get(f"{n}|{belt}|belt_to_machine|{zero(n)}") and calib.get(f"{n}|{belt}|belt_to_machine|{bonus(n)}")]
         return sorted(names, key=lambda n: calib[f"{n}|{belt}|belt_to_machine|{zero(n)}"])  # slowest ~ cheapest first
+
+    try:
+        shape = rowsolve.Shape.of(data, recipe, machine)
+        reach_ins = {}
+        if shape.belt_items > 6:  # (7+ belt items: a belt each side per tile the calibrated inserters reach)
+            reach_ins = {t: usable(t) for t in range(1, MAX_REACH + 1)}
+        reach = next((t - 1 for t in range(1, MAX_REACH + 2) if not reach_ins.get(t)), 2) if reach_ins else 2
+        pose = rowsolve.solve_general(data, shape, beacon, data.raw.get("beacon", {}).get(beacon) if beacon else None,
+                                      one_row=one_row, reach=reach)
+    except rowsolve.SolveError as e:
+        raise PlanError(str(e))
+    r, m = data.raw["recipe"][recipe], shape.proto
+    furnace = shape.furnace
+    size, height = pose.size, pose.height
+    rotated, flipped, turn, fluid_col = pose.rotated, pose.flipped, pose.turn, pose.fluid_col
+    fluids, items, fluid_out = shape.fluids, shape.items, shape.fluid_outs
 
     near_ins, far_ins = usable(1), usable(2)
     if not near_ins:
@@ -236,24 +252,30 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
     target, exact, cap, lane_cap = row_target(data, belt, c, target_rate, per_row, max_per_row, two_sided,
                                               main_fluid_out, notes, rows=pose.rows, pipe_output=pipe_output)
     notes += c.notes
-    if c.fuel and len(c.rates) > 6:
-        raise PlanError(f"{len(c.rates) - 1} ingredients plus fuel: this template handles 6 belt items")
     if two_sided:  # (one machine row with belts on both sides)
+        many = None
+        if shape.belt_items > 6:  # (7+: lanes by distance, splitter stopping the output belt's ingredient lane)
+            splitter = splitter or splitter_for(data, belt)
+            if not splitter:
+                raise PlanError(f"{shape.belt_items} belt items: stopping the output belt's ingredient lane needs a "
+                                f"splitter for {belt}")
+            many = (pose, {**reach_ins, 1: near_ins, 2: far_ins}, {x["name"] for x in results})
         p = _plan_two_sided(
             data, calib, belt, recipe, machine, m, size, height, c, near_ins, far_ins, out_ins, bonus, zero,
             out, fluids, fluid_out, fluid_col, flipped, turn, target_rate, per_row, max_per_row, notes, modules,
-            splitter, furnace, rotated, slots_n=pose.slots, slots_s=pose.out_slots)
+            splitter, furnace, rotated, many, slots_n=pose.slots, slots_s=pose.out_slots)
         by_role = _fluid_needs(shape, p.craft_rate, c.productivity, p.per_row)
         p.fluid_needs = _by_name(by_role)
         p.fluid_inputs, p.fluid_outputs = _of_role(by_role, "in"), _of_role(by_role, "out")
         p.notes += _loop_notes(by_role, p.rows)
-        p.spec = pose.spec(p.belts, p.south, needs=by_role, byproducts=bool(p.byproducts))
+        p.spec = pose.spec(p.belts, p.south, needs=by_role, byproducts=bool(p.byproducts), out_lane=p.out_lane,
+                           south_more=p.south_more)
         return p
     slots, out_slots, poles_out = pose.slots, pose.out_slots, pose.poles_out
     if pose.ins_band:
         f = pick_feed(calib, belt, bonus, zero, near_ins, far_ins, out_ins, slots, out_slots, c, lane_cap, target, exact,
                       per_row, whole_belt_items, machine, len(items), out_needed=pose.out_band,
-                      shared_fluid=shared_fluid)
+                      shared_fluid=shared_fluid, max_per_row=max_per_row)
         belts = [list(f.combo[:2])] + ([list(f.combo[2:])] if f.nb == 2 else [])
     else:  # nothing comes in on a belt: as many machines as the target says, output inserters only
         f = pick_out_only(calib, belt, bonus, zero, out_ins, out_slots, c, target, machine) if pose.out_band \
@@ -261,6 +283,8 @@ def plan(data, calib, recipe, machine, belt, bonuses=None, allowed=None, product
         belts = []
     notes += f.notes
     per_row = f.per_row
+    if per_row > max(max_per_row, per_row_asked or 0) * 4:  # (a guard: a row this long would take gigabytes to lay out)
+        raise PlanError(f"{recipe} in {machine}: {per_row} machines a row - more than a line holds")
     need = {it: f.rates[it] * per_row for it in f.rates}
     by_role = _fluid_needs(shape, f.craft_rate, c.productivity, per_row)
     fluid_needs = _by_name(by_role)
@@ -315,29 +339,54 @@ def _loop_notes(by_role, rows):
 
 def _plan_two_sided(data, calib, belt, recipe, machine, m, size, height, c, near_ins, far_ins, out_ins, bonus,
                     zero, out, fluids, fluid_out, fluid_col, flipped, turn, target_rate, per_row, max_per_row, notes,
-                    modules, splitter, furnace, rotated, slots_n=None, slots_s=None):
+                    modules, splitter, furnace, rotated, many=None, slots_n=None, slots_s=None):
     """5-6 belt items: one machine row, two input belts north (near and long-handed inserters, as the template),
     the output belt south, and a third input belt past it that long-handed inserters reach over the output belt.
-    One item per lane, the hungriest nearest. c: the machine's rates (rates.crafting)"""
+    One item per lane, the hungriest nearest. c: the machine's rates (rates.crafting)
+    many: 7+ belt items, (pose, {reach: inserters}, the recipe's item results): lanes by distance
+    (rowsolve.many_lanes), one ingredient on the output belt's near lane, belts 3+ tiles out when inserters reach"""
+    from bpgen import rowsolve
     rates = c.rates
     if not far_ins:
         raise PlanError(f"{len(rates)} belt items need long-handed inserters calibrated for {belt}")
     order = sorted(rates, key=lambda it: -rates[it])
-    lanes = order + [None] * (6 - len(order))
-    near, far, south = lanes[0:2], lanes[2:4], lanes[4:6]
+    out_lane, far_more, south_more, reach_ins = None, [], [], None
+    if many:
+        pose, reach_ins, made = many
+        # (the output belt's lane: the 3rd hungriest that the recipe doesn't also make - its inserter would take
+        # the output)
+        k = next((i for i in range(2, len(order)) if order[i] not in made), None)
+        if k is None:
+            raise PlanError(f"{len(order)} belt items: every one past the near belt is also made here; none can ride "
+                            f"the output belt")
+        order.insert(2, order.pop(k))
+        north_b, out_lane, south_b = rowsolve.many_lanes(order, max(reach_ins))
+        near, far, far_more = north_b[0], north_b[1], north_b[2:]
+        south, south_more = south_b[0], south_b[1:]
+    else:
+        lanes = order + [None] * (6 - len(order))
+        near, far, south = lanes[0:2], lanes[2:4], lanes[4:6]
     # (the pose's free columns: north, the fluid's tap or a pole takes one; south, a pole on alternate machines and
-    # any riser of a pipe south - size - 1 each when the caller doesn't say)
+    # any riser of a pipe south - size - 1 each when the caller doesn't say; 7+ items: no pole among them)
     slots_n = size - 1 if slots_n is None else slots_n
     slots_s = size - 1 if slots_s is None else slots_s
     target, cap, lane_cap = lane_target(data, belt, c, target_rate, per_row, max_per_row, notes)
     f = pick_feed_row(calib, belt, bonus, zero, near_ins, far_ins, out_ins, slots_n, slots_s, c, near, far, south,
-                      lane_cap, target, per_row, machine)
+                      lane_cap, target, per_row, machine, out_lane, far_more, south_more, reach_ins)
     per, craft_rate, out_per_machine, rates = f.per, f.craft_rate, f.out_per_machine, f.rates
     notes += f.notes
     byproducts = byproducts_at(c, out_per_machine)
-    notes.append(f"{len(rates)} belt items: one row of machines, two input belts north, the output belt south and "
-                 f"a third input belt past it ({', '.join(i for i in south if i)}) that long-handed inserters reach "
-                 f"over the output belt")
+    if many:
+        def names(belts):
+            return ", ".join(i for lanes in belts for i in lanes if i)
+        notes.append(f"{len(rates)} belt items: one row of machines, {2 + len(far_more)} input belts north, the "
+                     f"output belt south carrying {out_lane} on its near lane (a filter splitter past the east end "
+                     f"stops that lane), {1 + len(south_more)} input belt{'s' if south_more else ''} past it "
+                     f"({names([south] + south_more)}) that long-handed inserters reach over the output belt")
+    else:
+        notes.append(f"{len(rates)} belt items: one row of machines, two input belts north, the output belt south and "
+                     f"a third input belt past it ({', '.join(i for i in south if i)}) that long-handed inserters reach "
+                     f"over the output belt")
     if byproducts:
         notes.append(f"its by-products ({', '.join(byproducts)}) share the output belt; a filter splitter per "
                      f"by-product sorts it onto its own belt at the east end")
@@ -347,12 +396,14 @@ def _plan_two_sided(data, calib, belt, recipe, machine, m, size, height, c, near
         fluid, fluid_need = fluid_out[0]["name"], fluid_flow(fluid_out[0], craft_rate, c.productivity) * per
     need = {it: v * per for it, v in rates.items()}
     return Plan(recipe, machine, belt, size, per, craft_rate, out["name"], out_per_machine, cap, lane_cap,
-                [list(near), list(far)], need, f.ins_near, f.ins_far, f.ins_out, fluid, fluid_need, fluid_col, modules,
+                [list(near), list(far)] + [list(x) for x in far_more], need, f.ins_near, f.ins_far, f.ins_out, fluid,
+                fluid_need, fluid_col, modules,
                 None, Modules(), 0, 0, 0, c.speed, c.productivity, 1.0, notes=notes, furnace=furnace, fuel=c.fuel,
                 fuel_rate=c.fuel_rate, height=height if height != size else 0, rotated=rotated, flipped=flipped,
                 byproducts=byproducts, out_share=out_per_machine / (out_per_machine + sum(byproducts.values())),
                 splitter=splitter, turn=turn, fluid_out=bool(fluid_out), rows=1, south=list(south),
-                ins_south=f.ins_south)
+                ins_south=f.ins_south, out_lane=out_lane, ins_lane=f.ins_lane,
+                south_more=[list(x) for x in south_more], ins_far_more=f.ins_far_more, ins_south_more=f.ins_south_more)
 
 
 def layout(p: Plan):
@@ -360,6 +411,17 @@ def layout(p: Plan):
     RowSpec)"""
     from bpgen import rowlayout
     return rowlayout.layout(p.spec, p)
+
+
+def lane_stop(ents, belt, splitter, item, x, yb):
+    """stops the item riding the north lane of an output belt on row yb that ends at x - 1: a filter splitter for it
+    with nothing past its south half (a filter splitter never sends its item the other way, so the lane backs up
+    as at a belt's end), a belt past its north half for the rest. -> the x past that belt"""
+    put = adder(ents)
+    put(splitter, x + 0.5, yb + 1.0, EAST, filter={"name": item, "quality": "normal", "comparator": "="},
+        output_priority="right")
+    put(belt, x + 1.5, yb + 0.5, EAST)
+    return x + 2
 
 
 def sort_tail(ents, belt, splitter, rates, output, x, yb, bottom):
@@ -469,7 +531,8 @@ def describe(p: Plan):
     def ins(c):
         return f"{c.count} x {c.name} ({c.capacity}/s for {c.need}/s)"
 
-    belts = "; ".join(f"{('near', 'far')[i]} belt lanes {[x or '-' for x in lanes]}" for i, lanes in enumerate(p.belts))
+    belts = "; ".join(f"{('near', 'far')[i] if i < 2 else f'far {i + 1}'} belt lanes {[x or '-' for x in lanes]}"
+                      for i, lanes in enumerate(p.belts))
     lines = [
         f"{p.recipe}: {p.machines} x {p.machine} ({p.per_row} per row), {p.belt}",
         f"  output  {p.output}: {p.expected_output:.2f}/s of {p.belt_capacity:.2f}/s belt "
@@ -484,8 +547,14 @@ def describe(p: Plan):
     ]
     if p.rows == 1:
         lines[0] = lines[0].replace(f"({p.per_row} per row)", "(one row, belts on both sides)")
+        if p.ins_far_more:
+            lines.insert(-1, "          " + "; ".join(f"far {d} {ins(c)}" for d, c in enumerate(p.ins_far_more, 3)))
+        if p.out_lane:
+            lines.insert(-1, f"          output belt near lane {p.out_lane}, {ins(p.ins_lane)}")
         lines.insert(-1, f"          south belt lanes {[x or '-' for x in p.south]}"
                      + (f", long-handed {ins(p.ins_south)}" if p.ins_south else ""))
+        for d, (lanes, c) in enumerate(zip(p.south_more, p.ins_south_more), 3):
+            lines.insert(-1, f"          south {d} belt lanes {[x or '-' for x in lanes]}, {ins(c)}")
     if p.modules.count or p.beacon:
         n = 2 * (p.per_row + 1 + 2 * p.beacon_pad)
         beacons = f"; {n} x {p.beacon} with {p.beacon_modules} ({p.beacons_per_machine} per machine)" if p.beacon else ""

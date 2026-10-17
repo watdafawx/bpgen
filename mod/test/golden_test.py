@@ -3,7 +3,10 @@ furnaces, by-products, modules and beacons, quality, rates, belt tiers, direct i
 as the window sends it (ingame.plan on Service("vanilla")), and its summary, notes, sources, sinks, entities (sorted by
 name and position) and wires are compared with golden/expected/<name>.json. Any change to what a planner produces
 shows up as a diff; if it is meant, rewrite the snapshots and read the git diff.
+A request with "test_recipes": true plans with many_items.py's 7-11 item recipes in the data (no vanilla recipe has
+more than 6 items); one with "refused": true snapshots the error it gets instead of a plan.
 python mod/test/golden_test.py [NAME ...] [--update]"""
+import contextlib
 import difflib
 import json
 import sys
@@ -16,6 +19,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 from bpgen import base, ingame, planner  # noqa: E402
 from bpgen.service import Service  # noqa: E402
+sys.path.insert(0, str(HERE))
+import many_items  # noqa: E402
 
 REQUESTS = HERE / "golden" / "requests.json"
 EXPECTED = HERE / "golden" / "expected"
@@ -114,17 +119,26 @@ def main():
     EXPECTED.mkdir(parents=True, exist_ok=True)
     failed = []
     for name in names or list(requests):
-        out = json.loads(ingame.plan(json.dumps(requests[name])))
+        req = dict(requests[name])
+        tests, refused = req.pop("test_recipes", False), req.pop("refused", False)
+        with many_items.added(s.data) if tests else contextlib.nullcontext():
+            out = json.loads(ingame.plan(json.dumps(req)))
+        if refused:  # (what it says instead of planning)
+            if not out.get("error"):
+                failed.append(name)
+                print(f"FAIL {name}: planned, expected a refusal")
+                continue
+            out = {"error": out["error"]}
         dup = _duplicates(out)
         if dup:  # (two entities of a name on one spot: a layout bug whatever the snapshot says)
             print(f"FAIL {name}: entities on top of each other: {dup[:4]}")
             failed.append(name)
             continue
-        if out.get("error") or out.get("measure") or not out.get("blueprint"):
+        if not refused and (out.get("error") or out.get("measure") or not out.get("blueprint")):
             failed.append(name)
             print(f"FAIL {name}: no plan ({'needs a measurement' if out.get('measure') else out.get('error')})")
             continue
-        text = render(snapshot(out))
+        text = render(clean(out) if refused else snapshot(out))
         path = EXPECTED / f"{name}.json"
         if update:
             path.write_text(text, encoding="utf-8", newline="\n")

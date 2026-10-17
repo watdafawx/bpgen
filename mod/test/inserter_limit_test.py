@@ -41,3 +41,17 @@ steps = rates.INSERTER_THROTTLE
 assert list(steps) == sorted(steps, reverse=True) and steps[0] == 1.0 and 0 < steps[-1] < 1e-4, steps
 assert rates.pct(0.5) == "50%" and rates.pct(0.0034) == "0.34%", (rates.pct(0.5), rates.pct(0.0034))
 print(f"ok: {fast['name']} plans {p.machines} machine(s) at craft_rate {p.craft_rate:.3g}/s - {slowed[0]}")
+
+# a need so small it rounds to nothing still takes one inserter, and none fits in no columns (a machine slowed to a
+# millionth "fitted" its far inserter in 0 free columns, then a row of 8 million machines was asked for)
+name = next(k.split("|")[0] for k in calib if k.endswith("|belt_to_machine|" + k.split("|")[-1]) and "|transport-belt|" in k)
+choice = rates.pick_inserter(calib, [name], "transport-belt", "belt_to_machine", lambda n: next(
+    k.split("|")[-1] for k in calib if k.startswith(n + "|transport-belt|belt_to_machine|")), 1e-12, 1)
+assert choice.count == 1, choice
+try:
+    rates.pick_inserter(calib, [name], "transport-belt", "belt_to_machine", lambda n: next(
+        k.split("|")[-1] for k in calib if k.startswith(n + "|transport-belt|belt_to_machine|")), 1e-12, 0)
+    raise AssertionError("an inserter fitted in 0 columns")
+except planner.PlanError:
+    pass
+print("ok: a vanishing need still takes one inserter")

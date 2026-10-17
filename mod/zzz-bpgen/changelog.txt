@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.28.3
+Date: 2026-10-17
+  Features:
+    - Recipes with 7 or more item ingredients plan: one row of machines with belts on both sides, one more
+      ingredient riding the output belt's near lane (a filter splitter past the line's east end stops that lane),
+      and with an inserter reaching 3 tiles (modded) a belt more on each side, up to 11 items. Vanilla inserters
+      reach 7.
+---------------------------------------------------------------------------------------------------
 Version: 0.28.2
 Date: 2026-10-17
   Changes:

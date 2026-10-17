@@ -198,7 +198,12 @@ class Service:
 
     def _inserters(self, params):
         allowed = params.get("inserters") or None
-        return calibrate.template_inserters(self.data, allowed) + calibrate.template_inserters(self.data, allowed, 2)
+        names = calibrate.template_inserters(self.data, allowed) + calibrate.template_inserters(self.data, allowed, 2)
+        r = self.data.raw["recipe"].get(params.get("recipe") or "")
+        if r and sum(1 for i in r.get("ingredients") or [] if i.get("type", "item") == "item") > 7:
+            # (8+ items: belts 3+ tiles out, if an inserter reaches them - planner.MAX_REACH)
+            names += [n for t in range(3, planner.MAX_REACH + 1) for n in calibrate.template_inserters(self.data, allowed, t)]
+        return names
 
     def ensure_calibrated(self, params, progress=None, cancel=None):
         bonuses = dict(params.get("bonuses") or calibrate.ZERO, belt_stack_size_bonus=0)
@@ -213,7 +218,7 @@ class Service:
         """(inserters, belts, bonus sets) covering every template inserter on every normal belt at every research
         level, and how many setups of that are not measured yet"""
         d = self.data
-        inserters = calibrate.template_inserters(d) + calibrate.template_inserters(d, tiles=2)
+        inserters = [n for t in range(1, planner.MAX_REACH + 1) for n in calibrate.template_inserters(d, tiles=t)]
         belts = self.base_belts([n for n, b in d.raw["transport-belt"].items() if not b.get("hidden")])
         levels = calibrate.all_levels(d)
         table = json.loads(self.calib_path.read_text()) if self.calib_path.exists() else {}

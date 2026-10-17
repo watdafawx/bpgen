@@ -154,7 +154,8 @@ def layout(spec: RowSpec, p):
                 if ins_band is not None and ins_band.kind == "ins":
                     if has_pole and not pipes and not spec.poles_out:
                         put(planner.POLE, x0 + slots.pop() + 0.5, yi)
-                    choices = (p.ins_near, p.ins_far) if not spec.pattern else (p.ins_far,) if main else (p.ins_near,)
+                    choices = ((p.ins_near, p.ins_far, *getattr(p, "ins_far_more", ())) if not spec.pattern
+                               else (p.ins_far,) if main else (p.ins_near,))
                     for choice in choices:  # (they face where they pick up)
                         if choice:
                             for _ in range(choice.count):
@@ -166,9 +167,12 @@ def layout(spec: RowSpec, p):
                         extra = {"override_stack_size": p.ins_out.hand} if p.ins_out.hand else {}
                         for _ in range(p.ins_out.count):
                             put(p.ins_out.name, x0 + slots.pop(0) + 0.5, yi, inward, **extra)
-                    if getattr(p, "ins_south", None):  # (one row: long-handed ones reaching the belt past the output)
-                        for _ in range(p.ins_south.count):
-                            put(p.ins_south.name, x0 + slots.pop(0) + 0.5, yi, outward)
+                    # (one row: long-handed ones reaching the belt past the output; 7+ belt items: first a near one
+                    # picking the output belt's near lane, after them those reaching belts farther out)
+                    for choice in (getattr(p, "ins_lane", None), getattr(p, "ins_south", None),
+                                   *getattr(p, "ins_south_more", ())):
+                        for _ in range(choice.count if choice else 0):
+                            put(choice.name, x0 + slots.pop(0) + 0.5, yi, outward)
                 if (bands is spec.south and spec.pattern and k + 1 < p.per_row
                         and {kind, spec.pattern[k + 1]} == {"C", "E"}):
                     # the gap east of this machine: C into E (an inserter faces where it picks up from)
@@ -189,7 +193,7 @@ def layout(spec: RowSpec, p):
     for side in sides:  # (per side: the belts, north then south, then the fluids)
         bands = [b for b in spec.north + spec.south if not (b.shared and side == "b")]
         for band in bands:
-            if band.kind == "belt" and band.role != "out" and any(band.lanes):
+            if band.kind == "belt" and any(band.lanes):  # (an output belt's lanes: an ingredient on it, 7+ items)
                 sources.append({"kind": "belt", "position": {"x": 0.5, "y": Y[rname(band, side)] + 0.5},
                                 "lanes": list(band.lanes), "rates": {it: need[it] for it in set(band.lanes) if it}})
         for band in bands:
@@ -200,8 +204,12 @@ def layout(spec: RowSpec, p):
             sources.append({"kind": "fluid", "position": {"x": -0.5, "y": Y["mach_" + side] + mrow + 0.5},
                             "fluid": fluid, "rates": {fluid: rate}})
     out_band = next((b for b in spec.north + spec.south if b.kind == "belt" and b.role == "out"), None)
+    tail_x = width + 1  # (past the output belt's end: what stops its ingredient lane, then the by-product sorters)
+    if out_band is not None and any(out_band.lanes):
+        tail_x = planner.lane_stop(ents, p.belt, p.splitter, next(i for i in out_band.lanes if i), tail_x,
+                                   Y[rname(out_band, "a")])
     if out_band is not None:
-        sink = {"kind": "belt", "position": {"x": width + 0.5, "y": Y[rname(out_band, "a")] + 0.5}}
+        sink = {"kind": "belt", "position": {"x": tail_x - 0.5, "y": Y[rname(out_band, "a")] + 0.5}}
         if out_band.sink == "item":
             sink["item"] = p.output
         sinks.append(sink)
@@ -220,7 +228,7 @@ def layout(spec: RowSpec, p):
         bottom = row.y - 1 if spec.sort_tail_bottom == "last" else Y[rname(
             next(b for b in spec.south if b.name == spec.sort_tail_bottom), "a")]
         rates = {k: v * p.machines for k, v in byproducts.items()}
-        sinks[0:1] = planner.sort_tail(ents, p.belt, p.splitter, rates, p.output, width + 1, Y[rname(out_band, "a")],
+        sinks[0:1] = planner.sort_tail(ents, p.belt, p.splitter, rates, p.output, tail_x, Y[rname(out_band, "a")],
                                        bottom)
     if spec.power_up:
         power_up(ents, sources, sinks)

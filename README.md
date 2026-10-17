@@ -269,7 +269,11 @@ python -m bpgen.pack        # re-read your mods now
    research level, built and timed in the game. The fewest per machine, the cheapest on ties.
 4. **Layout**: one row solver for every line (`rowsolve.py`). It reads the machine's fluid connections (`ports.py`),
    tries each way the machine can face, and picks where each fluid comes in or goes out and which rows of belts,
-   pipes and inserters go on each side, preferring two rows mirrored about the output belt. One layout
+   pipes and inserters go on each side, preferring two rows mirrored about the output belt. 5+ belt items take one
+   row with belts on both sides, one item a lane: two belts north (near, long-handed), the output belt south and a
+   belt past it; 7+ also put one item on the output belt's near lane (a filter splitter past the east end stops
+   that lane), and 8+ need an inserter reaching 3 tiles (a belt more each side; vanilla's reach 2, so 7 at most).
+   One layout
    (`rowlayout.py`) turns that into entities; poles with explicit wires; belts between parts routed by an A* search
    with undergrounds.
 5. **Verification** (`harness\bpgen-test`): the blueprint string is imported and built on a lab surface, inputs are

@@ -63,6 +63,7 @@ CASES = {
     "blue-run": {"script": H + "blue_check.py", "args": ["--run", "--quick"], "game": True},
     "mall-tier-run": {"script": H + "mall_tier_check.py", "args": ["--run"], "game": True},
     "oil-run": {"script": H + "oil_check.py", "args": ["--run"], "game": True},
+    "many-items-run": {"script": H + "many_items_check.py", "game": True},  # (7+ item test recipes, a mod of their own)
     "botmall": {"script": H + "botmall_test.py", "args": ["vanilla", "3"], "game": True},
     "busdesign-run": {"script": H + "busdesign_test.py", "args": ["vanilla", "3"], "game": True},
     "fit-bus-run": {"script": H + "fit_bus_run.py", "game": True, "needs": ["fit-bus"]},
@@ -75,7 +76,7 @@ CASES = {
     "theme-gui": {"script": T + "run_theme_gui.py", "gui": True},
     "mp": {"script": T + "run_mp.py", "gui": True},
 }
-HELPERS = {H + "stutter_probe.py"}  # (imported by stutter_test, not a case)
+HELPERS = {H + "stutter_probe.py", T + "many_items.py"}  # (imported by stutter_test; by golden, rowsolve, many-items-run)
 
 XFAILED = []  # (known_fail cases that failed)
 GAME_LOCK = threading.Lock()  # (the games that share run/'s write-data take turns)

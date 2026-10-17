@@ -142,6 +142,56 @@
   ],
   "rate_per_min": 2
  },
+ "items7-test-asm3": {
+  "recipe": "bpgen-test-seven",
+  "machine": "assembling-machine-3",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "test_recipes": true
+ },
+ "items7-test-asm2-rate": {
+  "recipe": "bpgen-test-seven",
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 60,
+  "test_recipes": true
+ },
+ "items8-test-refused": {
+  "recipe": "bpgen-test-eight",
+  "machine": "assembling-machine-3",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "test_recipes": true,
+  "refused": true
+ },
  "fluid-in-plastic": {
   "recipe": "plastic-bar",
   "machine": "chemical-plant",

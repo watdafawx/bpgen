@@ -7,7 +7,7 @@ in as plain numbers; the functions here answer in rates:
     row_target(...)      machines a row needs for a full output lane (OUTPUT_SLACK) or a target_rate, capped
     pick_feed(...)       input lanes and inserters, the INSERTER_THROTTLE loop, belt-limited scaling, the output
                          inserter and packing: the plan's per-machine numbers as they end up
-    lane_target, pick_feed_row   the same for the one-row layout of 5-6 belt items (planner._plan_two_sided)
+    lane_target, pick_feed_row   the same for the one-row layout of 5+ belt items (planner._plan_two_sided)
 
 Every note string and error message is what the planner always said: the golden snapshots compare them.
 """
@@ -289,7 +289,7 @@ def pick_inserter(calib, allowed, belt, direction, keyf, need, slots):
         rate = calib.get(f"{name}|{belt}|{direction}|{keyf(name)}")
         if not rate:
             continue
-        n = _ceil(need / (rate * MARGIN)) if need > 0 else 1
+        n = max(1, _ceil(need / (rate * MARGIN)))  # (a need that rounds to 0 still takes an inserter)
         if n <= slots:
             options.append((n, rate, rank, name))
     if not options:
@@ -392,7 +392,8 @@ class Feed:
 
 
 def pick_feed(calib, belt, bonus, zero, near_ins, far_ins, out_ins, slots, out_slots, c, lane_cap, target, exact,
-              per_row, whole_belt_items, machine, n_items, out_needed=True, shared_fluid=False):
+              per_row, whole_belt_items, machine, n_items, out_needed=True, shared_fluid=False,
+              max_per_row=MAX_PER_ROW):
     """lanes and inserters for a row of machines doing `c`, `target` of them (`exact` before rounding), and the
     speed they end up at. Fastest first; when no inserters can feed a machine at full speed (slow early
     inserters, no research), plan each machine slower - inserter-limited - with more of them per row.
@@ -425,6 +426,10 @@ def pick_feed(calib, belt, bonus, zero, near_ins, far_ins, out_ins, slots, out_s
             t_target = max(1, _ceil(target / throttle)) if throttle < 1 else target
         else:
             t_target = max(target if per_row else 1, _ceil(exact / throttle)) if throttle < 1 else target
+        # (never more than a row holds: a machine slowed to a ten-thousandth asked for millions of them - the layout
+        # of one such plan took 48 GB)
+        if not per_row:
+            t_target = min(t_target, max(target, max_per_row))
         found = _pick_inputs(calib, belt, bonus, near_ins, far_ins, slots, t_rates, lane_cap, t_target,
                              whole_belt_items, failures)
         if found:
@@ -529,12 +534,17 @@ class RowFeed:
     craft_rate: float
     out_per_machine: float
     notes: list = field(default_factory=list)
+    ins_lane: InserterChoice | None = None  # 7+ belt items: the one picking the output belt's near lane
+    ins_far_more: list = field(default_factory=list)  # per north belt past the far one (3+ tiles out)
+    ins_south_more: list = field(default_factory=list)  # per south belt past the south one
 
 
 def pick_feed_row(calib, belt, bonus, zero, near_ins, far_ins, out_ins, slots_n, slots_s, c, near, far, south,
-                  lane_cap, target, per_row, machine):
+                  lane_cap, target, per_row, machine, out_lane=None, far_more=(), south_more=(), reach_ins=None):
     """the one-row layout: input inserters for the near, far and south belts (lane items near, far, south; one
-    item per lane), the output inserter, the machines' speed under INSERTER_THROTTLE, how many the lanes feed"""
+    item per lane), the output inserter, the machines' speed under INSERTER_THROTTLE, how many the lanes feed.
+    7+ belt items: out_lane rides the output belt's near lane (a near inserter south picks it), far_more / south_more
+    are belts 3+ tiles out, picked by reach_ins[d] (inserters reaching d tiles)"""
     rates = c.rates
     craft_rate, out_per_machine = c.craft_rate, c.out_per_machine
     notes = []
@@ -545,12 +555,29 @@ def pick_feed_row(calib, belt, bonus, zero, near_ins, far_ins, out_ins, slots_n,
         try:
             ins_out = _output_choice(calib, [n for n in out_ins if "stack-inserter" not in n] or out_ins, belt, zero,
                                      bonus, zero, c.out_all * throttle, slots_s, True)
+            left = slots_s - ins_out.count
+            ins_lane = None
+            if out_lane:
+                ins_lane = pick_inserter(calib, near_ins, belt, "belt_to_machine", bonus, t[out_lane], left)
+                left -= ins_lane.count
             ins_s = pick_inserter(calib, far_ins, belt, "belt_to_machine", bonus, sum(t[i] for i in south if i),
-                                  slots_s - ins_out.count) if any(south) else None
+                                  left) if any(south) else None
+            left -= ins_s.count if ins_s else 0
+            s_more = []
+            for d, lanes in enumerate(south_more, 3):
+                s_more.append(pick_inserter(calib, reach_ins[d], belt, "belt_to_machine", bonus,
+                                            sum(t[i] for i in lanes if i), left))
+                left -= s_more[-1].count
             ins_near = pick_inserter(calib, near_ins, belt, "belt_to_machine", bonus, sum(t[i] for i in near if i),
                                      slots_n)
             ins_far = pick_inserter(calib, far_ins, belt, "belt_to_machine", bonus, sum(t[i] for i in far if i),
                                     slots_n - ins_near.count)
+            left = slots_n - ins_near.count - ins_far.count
+            f_more = []
+            for d, lanes in enumerate(far_more, 3):
+                f_more.append(pick_inserter(calib, reach_ins[d], belt, "belt_to_machine", bonus,
+                                            sum(t[i] for i in lanes if i), left))
+                left -= f_more[-1].count
             found = throttle
             break
         except PlanError as e:
@@ -568,4 +595,5 @@ def pick_feed_row(calib, belt, bonus, zero, near_ins, far_ins, out_ins, slots_n,
         out_per_machine *= found
         notes.append(f"its inserters can't keep one {machine} busy: each runs at {pct(found)} speed")
     rates = {it: v * found for it, v in rates.items()}
-    return RowFeed(per, found, ins_near, ins_far, ins_out, ins_s, rates, craft_rate, out_per_machine, notes)
+    return RowFeed(per, found, ins_near, ins_far, ins_out, ins_s, rates, craft_rate, out_per_machine, notes, ins_lane,
+                   f_more, s_more)
