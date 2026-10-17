@@ -488,7 +488,7 @@ def plan_base(service, params, progress=None, cancel=None):
     fluid_plans = params.get("fluid_plans") or {}
     steps = solve(data, targets, picks, raw, overrides, fluid_plans)
     machine_for = machines_by_category(data, picks)
-    common = {k: params[k] for k in ("bonuses", "inserters", "productivity") if params.get(k) is not None}
+    common = {k: params[k] for k in ("bonuses", "inserters", "productivity", "shared_fluid") if params.get(k) is not None}
     common["inserters"] = params.get("inserters") or list(EARLY_INSERTERS)
 
     sections, not_automated, outputs = [], [], []
@@ -532,20 +532,17 @@ def plan_base(service, params, progress=None, cancel=None):
         if res is None:
             try:
                 res = service.plan(p)
-            except Exception as e:  # noqa: BLE001 - try a fluid line, else list it for the player
-                try:
-                    res = service.plan_fluid(p)
-                except Exception as e2:  # noqa: BLE001
-                    try:  # fluids only, in a machine the fluid lines don't fit: the several-fluid layout
-                        if not _all_fluid(data, st.recipe):
-                            raise
-                        res = special_section(service, {"multi": True, "recipe": st.recipe, "machine": st.machine,
-                                                        "target": st.item, "rate": st.rate * head,
-                                                        "productivity": params.get("productivity") or 0, "belt": belt})
-                    except Exception as e3:  # noqa: BLE001
-                        not_automated.append({"item": item, "rate": round(st.rate * 60, 1), "recipe": st.recipe,
-                                              "machine": st.machine, "why": f"{e}; {e2}; {e3}"})
-                        continue
+            except Exception as e:  # noqa: BLE001 - fluids only: the several-fluid section, else list it for the player
+                try:  # (sized for the fluid this base wants of it)
+                    if not _all_fluid(data, st.recipe):
+                        raise
+                    res = special_section(service, {"multi": True, "recipe": st.recipe, "machine": st.machine,
+                                                    "target": st.item, "rate": st.rate * head,
+                                                    "productivity": params.get("productivity") or 0, "belt": belt})
+                except Exception as e3:  # noqa: BLE001
+                    not_automated.append({"item": item, "rate": round(st.rate * 60, 1), "recipe": st.recipe,
+                                          "machine": st.machine, "why": str(e) if e3 is e else f"{e}; {e3}"})
+                    continue
         made = res["summary"]["expected"]
         copies = max(1, math.ceil(st.rate / made - 1e-6)) if made else 1
         name = item if st.kind != "convert" else f"{st.of} -> {st.item}"
@@ -699,37 +696,48 @@ def _all_fluid(data, recipe):
     return bool(parts) and all(x.get("type", "item") == "fluid" for x in parts)
 
 
-def _special_layout(data, params):
+def _multi_plan(service, params):
+    """a fluids-only block (advanced oil processing, cracking, coal liquefaction) through the one line planner, sized
+    for `rate` of `target` (the fluid this base wants of it)"""
+    line = {"recipe": params["recipe"], "machine": params["machine"], "belt": params.get("belt") or "transport-belt",
+            "inserters": params.get("inserters")}
+    calib = service.ensure_calibrated(line)
+    return planner.plan(service.data, calib, params["recipe"], params["machine"], line["belt"],
+                        allowed=service._inserters(line), productivity=params.get("productivity") or 0,
+                        target_rate=params["rate"], output_item=params["target"], one_row=True)
+
+
+def _special_layout(service, params):
     """(entities, sources, sinks) of a several-product / all-fluid block or a flare block"""
-    from bpgen import fluidlines
+    from bpgen import flares
     if params.get("flare"):
-        ents, srcs, sinks, _ = fluidlines.layout_flare(data, params["flare"], params["rate"])
+        ents, srcs, sinks, _ = flares.layout_flare(service.data, params["flare"], params["rate"])
         return ents, srcs, sinks
-    p = fluidlines.plan_multi(data, params["recipe"], params["machine"], params["target"], params["rate"],
-                              params.get("productivity") or 0, params.get("belt") or "transport-belt")
-    return fluidlines.layout_multi(p)
+    return planner.layout(_multi_plan(service, params))
 
 
 def special_section(service, params):
     """a section result for a several-product / all-fluid block, or a flare block"""
-    from bpgen import fluidlines
+    from bpgen import flares
     data = service.data
     if params.get("flare"):
-        ents, srcs, sinks, notes = fluidlines.layout_flare(data, params["flare"], params["rate"])
+        ents, srcs, sinks, notes = flares.layout_flare(data, params["flare"], params["rate"])
         summary = {"mode": "fluid", "kind": "flare", "output": params["flare"], "expected": round(params["rate"], 3),
                    "machines": sum(1 for e in ents if e["name"] != planner.PIPE and e["name"] != planner.POLE),
                    "notes": notes, "text": "; ".join(notes)}
         label = f"burn {params['flare']}"
     else:
-        p = fluidlines.plan_multi(data, params["recipe"], params["machine"], params["target"], params["rate"],
-                                  params.get("productivity") or 0, params.get("belt") or "transport-belt")
-        ents, srcs, sinks = fluidlines.layout_multi(p)
+        p = _multi_plan(service, params)
+        ents, srcs, sinks = planner.layout(p)
+        outputs = {k: v * p.rows for k, v in p.fluid_outputs.items()}  # (whole line)
+        inputs = {k: v * p.rows for k, v in p.fluid_inputs.items()}
+        inputs.update({k: v * p.rows for k, v in p.input_need.items()})
         text = (f"{p.recipe}: {p.machines} x {p.machine}; makes " +
-                ", ".join(f"{k} {v * 60:.0f}/min" for k, v in p.outputs.items()))
+                ", ".join(f"{k} {v * 60:.0f}/min" for k, v in outputs.items()))
         summary = {"mode": "fluid", "kind": "multi", "recipe": p.recipe, "machine": p.machine, "machines": p.machines,
-                   "output": p.target, "expected": round(p.outputs[p.target], 3),
-                   "outputs": {k: round(v, 3) for k, v in p.outputs.items()},
-                   "input_need": {k: round(v, 3) for k, v in p.inputs.items()}, "notes": p.notes, "text": text}
+                   "output": params["target"], "expected": round(outputs.get(params["target"], 0.0), 3),
+                   "outputs": {k: round(v, 3) for k, v in outputs.items()},
+                   "input_need": {k: round(v, 3) for k, v in inputs.items()}, "notes": p.notes, "text": text}
         label = f"{p.recipe} x{p.machines}"
     return {"mode": "fluid", "params": dict(params), "summary": summary, "text": summary["text"],
             "entities": [service.decorate(e) for e in ents], "sources": srcs, "sinks": sinks,
@@ -755,7 +763,7 @@ def routed(service, sections, steps, packs, rate, belt, labs=True, labs_params=N
         params = s["result"]["params"]
         st = steps[s["item"]]
         if params.get("multi") or params.get("flare"):
-            ents, srcs, sinks = _special_layout(data, params)
+            ents, srcs, sinks = _special_layout(service, params)
             capacity = params.get("rate", 0)
             for c in range(s["copies"]):
                 blocks.append(compose_base.Block(s["name"] + (f" #{c + 1}" if s["copies"] > 1 else ""),
@@ -763,18 +771,10 @@ def routed(service, sections, steps, packs, rate, belt, labs=True, labs_params=N
                                                  st.depth, capacity))
             continue
         calib = service.ensure_calibrated(params)
-        if params.get("fluid_line"):
-            from bpgen import fluidlines
-            p = fluidlines.plan_fluid(data, calib, params["recipe"], params["machine"], params["belt"],
-                                      bonuses=dict(params.get("bonuses") or {}), allowed=service._inserters(params),
-                                      target_rate=(params.get("rate_per_min") or 0) / 60 or None)
-            ents, srcs, sinks = fluidlines.layout(p)
-            capacity = p.expected
-        else:
-            p = planner.plan(data, calib, params["recipe"], params["machine"], params["belt"],
-                             **service._line_kwargs(params))
-            ents, srcs, sinks = planner.layout(p)
-            capacity = p.expected_output
+        p = planner.plan(data, calib, params["recipe"], params["machine"], params["belt"],
+                         **service._line_kwargs(params))
+        ents, srcs, sinks = planner.layout(p)
+        capacity = p.expected_output
         for c in range(s["copies"]):
             name = s["item"] + (f" #{c + 1}" if s["copies"] > 1 else "")
             blocks.append(compose_base.Block(name, st.item, ents, srcs, sinks, st.depth, capacity))

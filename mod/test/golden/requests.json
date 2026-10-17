@@ -872,5 +872,235 @@
     ]
    }
   ]
+ },
+ "fluidkind-in-casting-iron": {
+  "recipe": "casting-iron",
+  "machine": "foundry",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 120
+ },
+ "fluidkind-in-casting-iron-default": {
+  "recipe": "casting-iron",
+  "machine": "foundry",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ]
+ },
+ "fluidkind-fluid-basic-oil": {
+  "recipe": "basic-oil-processing",
+  "machine": "oil-refinery",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ]
+ },
+ "fluidkind-out-ice-melting": {
+  "recipe": "ice-melting",
+  "machine": "chemical-plant",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ]
+ },
+ "fluidkind-out-acid-cryo": {
+  "recipe": "acid-neutralisation",
+  "machine": "cryogenic-plant",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ]
+ },
+ "fluidkind-twoitems-lds": {
+  "recipe": "casting-low-density-structure",
+  "machine": "foundry",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 30
+ },
+ "fluidkind-twoitems-lithium-cryo": {
+  "recipe": "lithium",
+  "machine": "cryogenic-plant",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 60
+ },
+ "fluidkind-two-solid-fuel-ammonia": {
+  "recipe": "solid-fuel-from-ammonia",
+  "machine": "chemical-plant",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 60
+ },
+ "fluidkind-multi-biolubricant": {
+  "recipe": "biolubricant",
+  "machine": "biochamber",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ]
+ },
+ "fluidkind-multi-coal-liquefaction": {
+  "recipe": "coal-liquefaction",
+  "machine": "oil-refinery",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ]
+ },
+ "shape-molten-iron-foundry": {
+  "recipe": "molten-iron",
+  "machine": "foundry",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ]
+ },
+ "shape-sulfuric-acid": {
+  "recipe": "sulfuric-acid",
+  "machine": "chemical-plant",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ]
+ },
+ "shape-lithium-cryo": {
+  "recipe": "lithium",
+  "machine": "cryogenic-plant",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "rate_per_min": 300
+ },
+ "shape-fluoroketone-cryo": {
+  "recipe": "fluoroketone",
+  "machine": "cryogenic-plant",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ]
+ },
+ "shape-lava-foundry": {
+  "recipe": "molten-iron-from-lava",
+  "machine": "foundry",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ]
  }
 }

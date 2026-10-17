@@ -56,6 +56,15 @@ DEFAULT_CASES = [
     ("engine-unit", "assembling-machine-3", "transport-belt", {"beacon": "beacon", "beacon_modules": "speed-module-3:2"}),
     ("processing-unit", "assembling-machine-3", "transport-belt",
      {"modules": "productivity-module-3:4", "beacon": "beacon", "beacon_modules": "speed-module-3:2"}),
+    # lines with fluids the row solver lays out (0.28): fluid in, items out (foundry, 5x5); items and a fluid in, a
+    # fluid out; items in, a fluid out (foundry); fluids only; two fluids and an item in a 5x5
+    # (electrolyte in the 4x4 electromagnetic plant isn't laid out yet: its two fluid inputs are on its west and east
+    # edges, which machines touching in a row can't reach)
+    ("casting-iron", "foundry", "transport-belt"),
+    ("sulfuric-acid", "chemical-plant", "transport-belt"),
+    ("molten-iron", "foundry", "transport-belt"),
+    ("heavy-oil-cracking", "chemical-plant", "transport-belt"),
+    ("lithium", "cryogenic-plant", "transport-belt", {"rate": 300}),  # (5/s: a full belt of it is 32 plants)
 ]
 
 
@@ -68,6 +77,7 @@ def main():
     args = ap.parse_args()
 
     data = Data.load(args.dump)
+    planner.configure(data)  # (the pole, pipes and power pass read the game data from it)
     calib = json.loads((ROOT / "data" / "calibration.json").read_text())
     plans, cases = [], []
     for recipe, machine, belt, *extra in DEFAULT_CASES:
@@ -83,7 +93,8 @@ def main():
                 p = direct.plan(data, calib, recipe, machine, belt, mi, mv["recipe"], mv["machine"],
                                 bonuses=BONUS_LEVELS[args.bonus], target_rate=(opts.get("rate") or 0) / 60 or None,
                                 allowed=opts.get("inserters"))
-                ents, sources, sinks = direct.layout(p)
+                from bpgen import rowlayout, rowspec
+                ents, sources, sinks = rowlayout.layout(rowspec.RowSpec.from_direct_plan(p), p)
             elif opts.get("make"):
                 c = chain.plan_chain(data, calib, {"recipe": recipe, "machine": machine, "belt": belt}, opts["make"],
                                      bonuses=BONUS_LEVELS[args.bonus])
@@ -91,7 +102,8 @@ def main():
             else:
                 p = planner.plan(data, calib, recipe, machine, belt, bonuses=BONUS_LEVELS[args.bonus],
                                  modules=Modules.parse(opts.get("modules")), beacon=opts.get("beacon"),
-                                 beacon_modules=Modules.parse(opts.get("beacon_modules")))
+                                 beacon_modules=Modules.parse(opts.get("beacon_modules")),
+                                 target_rate=(opts.get("rate") or 0) / 60 or None)
                 ents, sources, sinks = planner.layout(p)
         except planner.PlanError as e:
             print(f"SKIP {cid}: {e}")

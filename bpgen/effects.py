@@ -70,6 +70,11 @@ def machine_effects(data, machine, recipe, modules=None, beacon=None, beacon_mod
     _check(data, modules, allowed, f"{machine['name']} making {recipe['name']}")
 
     total = defaultdict(float)
+    # the machine's own bonus (Space Age: foundry, biochamber, electromagnetic plant +50 % productivity), for the
+    # effects the recipe takes
+    for k, v in ((machine.get("effect_receiver") or {}).get("base_effect") or {}).items():
+        if k != "productivity" or "productivity" in allowed:
+            total[k] += v
     for name, q, count in modules.items:
         for k, v in module_effect(data, name, q).items():
             total[k] += v * count

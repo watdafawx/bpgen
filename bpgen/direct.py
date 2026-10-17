@@ -18,11 +18,10 @@ A unit (CE, CECEC, CEC) is picked from k = what one E takes of the made item / w
 """
 from dataclasses import dataclass, field
 
-from bpgen import geom, planner
-from bpgen.ents import adder
+from bpgen import planner, rates
 from bpgen.calibrate import ZERO, level_key, template_inserters
-from bpgen.effects import Modules, quality_level
-from bpgen.planner import EAST, NORTH, SOUTH, WEST, PlanError
+from bpgen.effects import Modules
+from bpgen.planner import PlanError
 
 UNITS = (("CE", 1.0), ("CECEC", 1.5), ("CEC", 2.0))  # unit, the k it feeds (each C making as much as one E takes)
 
@@ -126,12 +125,16 @@ def plan(data, calib, recipe, machine, belt, made, made_recipe, made_machine, bo
     m, mm = data.raw["assembling-machine"][machine], data.raw["assembling-machine"][made_machine]
     size = planner._dims(m)[0]
     bonuses = bonuses or ZERO
-    speed = 1 + 0.3 * quality_level(data, machine_quality)
-    craft = m["crafting_speed"] * speed / r.get("energy_required", 0.5)  # E crafts/s
-    made_craft = mm["crafting_speed"] * speed / mr.get("energy_required", 0.5)  # C crafts/s
+    # (rate math shared with the belt-fed lines: quality_speed, craft_rate_of, main_output, full_belt_note. Not
+    # shared, for the row solver to settle: no modules or beacons here, so the productivity isn't capped at the
+    # recipe's maximum as rates.crafting does; the machines per row come from units of C and E sized by a ratio k,
+    # not from a full output lane; the inserters (C into E through a gap, in, out) are sized one by one per throttle)
+    speed = rates.quality_speed(data, machine_quality)
+    craft = rates.craft_rate_of(m, r, speed)  # E crafts/s
+    made_craft = rates.craft_rate_of(mm, mr, speed)  # C crafts/s
     made_per = planner._amount(mr["results"][0])
     out_item = r["results"][0]["name"]
-    out_per = craft * planner._amount(r["results"][0]) * (1 + productivity)
+    out_per = rates.main_output(craft, r["results"][0], productivity)
     need = {i["name"]: craft * i["amount"] for i in _item_ings(r)}  # per E
     made_need = need.pop(made)
     sub_ing = _item_ings(mr)[0]
@@ -179,7 +182,7 @@ def plan(data, calib, recipe, machine, belt, made, made_recipe, made_machine, bo
     e_out = out_per * throttle
     want = target_rate / 2 * 1.03 if target_rate else lane * planner.OUTPUT_SLACK  # per row (one lane)
     if target_rate and want > lane * planner.OUTPUT_SLACK:
-        notes.append(f"{target_rate * 60:g}/min is more than one {belt} carries ({cap * 60:g}/min): planned a full belt")
+        notes.append(rates.full_belt_note(target_rate, belt, cap))
         want = lane * planner.OUTPUT_SLACK
     # the unit needing the fewest machines for this row (a few circuits: CEC; a belt of them: CECEC), then how many
     unit, units = min(((u, max(1, planner._ceil(want / (u.count("E") * e_out)))) for u in fitting),
@@ -208,66 +211,6 @@ def plan(data, calib, recipe, machine, belt, made, made_recipe, made_machine, bo
                       [[sub_ing["name"], sub_ing["name"]]] + ([far_lanes] if far_lanes else []),
                       {it: v * units for it, v in per_unit.items()}, ins_near, ins_far, side, ins_out,
                       speed=speed * throttle, productivity=productivity, notes=notes)
-
-
-def layout(p: DirectPlan):
-    """-> (entities, sources, sinks) with positions relative to the top-left corner, as planner.layout"""
-    s = p.size
-    kinds = p.unit * p.units
-    pitch = s + 1  # a machine and the gap after it
-    width = len(kinds) * pitch
-    has_far = len(p.belts) > 1
-    row = geom.Rows()
-    Y = row.Y
-    if has_far:
-        row("far_a")
-    row("near_a"), row("ins_a"), row("mach_a", s), row("out_a"), row("belt")
-    row("out_b"), row("mach_b", s), row("ins_b"), row("near_b")
-    if has_far:
-        row("far_b")
-    ents = []
-
-    put = adder(ents)
-    for x in range(width):
-        for name in ("near_a", "near_b") + (("far_a", "far_b") if has_far else ()):
-            put(p.belt, x + 0.5, Y[name] + 0.5, EAST)
-    for x in range(width + 1):  # (one extra tile: every output passes the end)
-        put(p.belt, x + 0.5, Y["belt"] + 0.5, EAST)
-    for side, facing in (("a", NORTH), ("b", SOUTH)):
-        for i, kind in enumerate(kinds):
-            x0 = i * pitch
-            main = kind == "E"
-            put(p.machine if main else p.made_machine, x0 + s / 2, Y["mach_" + side] + s / 2, facing,
-                recipe=p.recipe if main else p.made_recipe)
-            has_pole = i % planner.POLE_EVERY == 0
-            slots = list(range(s))
-            yi = Y["ins_" + side] + 0.5
-            if has_pole:
-                put(planner.POLE, x0 + slots.pop() + 0.5, yi)
-            choice = p.ins_far if main else p.ins_near
-            for _ in range(choice.count if choice else 0):
-                put(choice.name, x0 + slots.pop(0) + 0.5, yi, facing)
-            slots = list(range(s))
-            yo = Y["out_" + side] + 0.5
-            if has_pole and side == "a":
-                put(planner.POLE, x0 + slots.pop() + 0.5, yo)
-            if main:
-                extra = {"override_stack_size": p.ins_out.hand} if p.ins_out.hand else {}
-                for j in slots[:p.ins_out.count]:
-                    put(p.ins_out.name, x0 + j + 0.5, yo, facing, **extra)
-            # the gap east of this machine: C into E (an inserter faces where it picks up from)
-            if i + 1 < len(kinds) and {kind, kinds[i + 1]} == {"C", "E"}:
-                pick = WEST if kind == "C" else EAST
-                rows = sorted(range(s), key=lambda j: abs(j - (s - 1) / 2))[:p.ins_side.count]
-                for j in rows:
-                    put(p.ins_side.name, x0 + s + 0.5, Y["mach_" + side] + j + 0.5, pick)
-    sources = []
-    for side in "ab":
-        for i, lanes in enumerate(p.belts):
-            sources.append({"kind": "belt", "position": {"x": 0.5, "y": Y[("near_", "far_")[i] + side] + 0.5},
-                            "lanes": lanes, "rates": {it: p.input_need[it] for it in set(lanes) if it}})
-    sinks = [{"kind": "belt", "position": {"x": width + 0.5, "y": Y["belt"] + 0.5}}]
-    return ents, sources, sinks
 
 
 def describe(p: DirectPlan):

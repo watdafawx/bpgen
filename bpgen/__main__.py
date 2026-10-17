@@ -61,6 +61,7 @@ def add_beacon_args(ap):
 
 def cmd_plan(args):
     data = Data.load(args.dump)
+    planner.configure(data)
     calib = json.loads((ROOT / "data" / "calibration.json").read_text())
     bonuses = calibrate.BONUS_LEVELS[args.bonus]
     try:
@@ -81,6 +82,7 @@ def handle_request(req, args):
     if pack.sync():
         print("  your mods or settings changed: re-dumped prototype data")
     data = Data.load(pack.DATA)
+    planner.configure(data)
     bonuses = {k: req["bonuses"].get(k, 0) for k in calibrate.ZERO}
     if bonuses["belt_stack_size_bonus"]:
         print("  note: belt stacking research isn't modelled yet; the plan assumes unstacked input belts")

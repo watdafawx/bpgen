@@ -59,13 +59,16 @@ def _snap_of(bp_string, corner):
 FLOW = {"north": 0, "east": 4, "south": 8, "west": 12}
 
 
-def fit_to_bus(svc, ents, sources, bus, belt, beside=False, makes=None, split=False):
+def fit_to_bus(svc, ents, sources, bus, belt, beside=False, makes=None, split=False, one_lane=False):
     """a bus-layout base (flowing south, its inputs on row 0) fitted to the end of a bus's lanes: turned to the bus's
     direction, belts from each lane to the base's input of that item (in order, crossing underground). The lanes it
     doesn't need run on past its east side (its frame) and end there, side by side, for the next tier (`exits`).
     beside: the base all east of its lanes (a later tier, fitted to the lanes the last one passed on, next to it).
     split: a lane may feed up to 3 inputs of its item, through splitters at its start (a mall: it takes a trickle of
     each; the lanes a fitted base passes on are 3 apart for this).
+    one_lane: an input with one lane used is side-loaded onto that lane from outside its belt pair (the belt gets a
+    one-tile stub behind it so it stays straight), so the belt's other lane stays free; else it's fed straight in
+    and both lanes carry the item (a mall's inputs: mall_grid.plan_grid(outer_lanes=True) puts them on outer lanes).
     -> dict(entities (world), blueprint, box, corner (world), exits [{item, end}], notes) or None (nothing to fit)"""
     from bpgen import busdesign, chain, router
     direction = bus.get("direction") or "north"
@@ -82,7 +85,7 @@ def fit_to_bus(svc, ents, sources, bus, belt, beside=False, makes=None, split=Fa
     for ln in lanes:
         ln["u"] = ln["local"][0] - u0
     cols = sorted((s for s in sources if s.get("kind") == "belt"), key=lambda s: s["position"]["x"])
-    notes, pairs, spare, missing = [], [], [], []
+    notes, pairs, spare, missing, stubs = [], [], [], [], []
     # what each input wants: (item, goal: (x, y, the way the lane comes in)). One item: straight in from the north.
     # Two (iron plate and coal for steel furnaces): each from its own bus lane, side-loaded onto its lane of the
     # input's first belt (lanes[0], the east one of a belt flowing south: from the east, moving west)
@@ -92,6 +95,9 @@ def fit_to_bus(svc, ents, sources, bus, belt, beside=False, makes=None, split=Fa
         x = math.floor(s["position"]["x"])
         if a and b and a != b:
             wants += [(a, (x, 0, 12)), (b, (x, 0, 4))]
+        elif (a or b) and one_lane:  # (from outside the belt pair: east lane from the east, west lane from the west)
+            wants.append((a or b, (x, 0, 12 if a else 4)))
+            stubs.append(svc.decorate({"name": belt, "position": {"x": x + 0.5, "y": -0.5}, "direction": 8}))
         elif a or b:
             wants.append((a or b, (x, 0, 8)))
     for item in sorted({w[0] for w in wants} | {ln["item"] for ln in lanes}):
@@ -112,6 +118,7 @@ def fit_to_bus(svc, ents, sources, bus, belt, beside=False, makes=None, split=Fa
         return None
     ug, max_ug = chain.related_belts(svc.data, belt)
     splitter = chain.related_splitter(svc.data, belt)
+    ents = list(ents) + stubs
     base_tiles = extend.plan_tiles([svc.decorate(e) for e in ents])
     span = max(ln["u"] for ln in lanes)
     if beside:  # (all of it east of its lanes: the last tier is west of them)
@@ -301,7 +308,8 @@ def add_mall(svc, params):
     g = mall_grid.plan_grid(svc.data, params.get("products") or [], params["machine"], params["belt"], inputs=items,
                             allowed=params.get("inserters"), chest=params.get("chest") or "wooden-chest",
                             chest_limit=int(params.get("chest_limit") or 2),
-                            stock=int(params["stock"]) if params.get("stock") is not None else mall_grid.STOCK)
+                            stock=int(params["stock"]) if params.get("stock") is not None else mall_grid.STOCK,
+                            outer_lanes=True)
     cw = fitted["corner"]
     old_world = extend.shifted([svc.decorate({k: v for k, v in e.items() if k in ("name", "position", "direction")})
                                 for e in old], cw[0], cw[1])
@@ -310,7 +318,7 @@ def add_mall(svc, params):
     fit = fit_to_bus(svc, [svc.decorate(e) for e in g["entities"]], g["sources"],
                      {"direction": fitted["direction"], "lanes": fitted["lanes"], "tiles": sorted(taken),
                       "end_pole": extend.nearest(extend.pole_tiles(old_world), tuple(fitted["lanes"][0]["end"]))},
-                     params["belt"], beside=True, split=True)
+                     params["belt"], beside=True, split=True, one_lane=True)
     if not fit:
         raise planner.PlanError("none of the lanes the held base passes on carry what the mall needs")
     notes = g["notes"] + fit["notes"]

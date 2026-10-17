@@ -40,6 +40,8 @@ CASES = {
     "mall-loop": {"script": T + "mall_loop_test.py"},
     "move": {"script": T + "move_test.py"},
     "power": {"script": T + "power_test.py"},
+    "ports": {"script": T + "ports_test.py"},
+    "rowsolve": {"script": T + "rowsolve_test.py"},
     "refit": {"script": T + "refit_test.py"},
     "ship": {"script": T + "ship_test.py"},
     "site": {"script": T + "site_test.py"},
@@ -58,10 +60,8 @@ CASES = {
     "stutter": {"script": T + "stutter_test.py", "game": True, "own_data": True},  # (through fse: needs it built)
     "addbus-run": {"script": H + "addbus_check.py", "args": ["--run"], "game": True},
     "blue-run": {"script": H + "blue_check.py", "args": ["--run", "--quick"], "game": True},
-    "mall-tier-run": {"script": H + "mall_tier_check.py", "args": ["--run"], "game": True,
-                      "known_fail": "0.27.11: 11 of 27 mall products made, needs 80 %"},
-    "oil-run": {"script": H + "oil_check.py", "args": ["--run"], "game": True,
-                "known_fail": "0.27.11: plastic-bar 1.45 of 1.95/s, needs 85 %"},
+    "mall-tier-run": {"script": H + "mall_tier_check.py", "args": ["--run"], "game": True},
+    "oil-run": {"script": H + "oil_check.py", "args": ["--run"], "game": True},
     "botmall": {"script": H + "botmall_test.py", "args": ["vanilla", "3"], "game": True},
     "busdesign-run": {"script": H + "busdesign_test.py", "args": ["vanilla", "3"], "game": True},
     "fit-bus-run": {"script": H + "fit_bus_run.py", "game": True, "needs": ["fit-bus"]},
@@ -113,7 +113,7 @@ def run_case(name, done, results):
             return
     env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
     cmd = [sys.executable, str(ROOT / c["script"])] + c.get("args", [])
-    shared = c.get("game") and not c.get("own_data")
+    shared = is_game(c) and not c.get("own_data")  # (real-client cases write to run/ too)
     if shared:
         GAME_LOCK.acquire()
     t = time.perf_counter()

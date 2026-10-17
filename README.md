@@ -267,8 +267,11 @@ python -m bpgen.pack        # re-read your mods now
    over a lane because inserters can't pack a lane perfectly, and capped by what an input lane carries.
 3. **Inserters** from *measured* throughput: each inserter on each belt, in each direction, at each inserter-capacity
    research level, built and timed in the game. The fewest per machine, the cheapest on ties.
-4. **Layout**: input belts, inserters, machines, inserters, the output belt, mirrored; poles with explicit wires;
-   belts between parts routed by an A* search with undergrounds.
+4. **Layout**: one row solver for every line (`rowsolve.py`). It reads the machine's fluid connections (`ports.py`),
+   tries each way the machine can face, and picks where each fluid comes in or goes out and which rows of belts,
+   pipes and inserters go on each side, preferring two rows mirrored about the output belt. One layout
+   (`rowlayout.py`) turns that into entities; poles with explicit wires; belts between parts routed by an A* search
+   with undergrounds.
 5. **Verification** (`harness\bpgen-test`): the blueprint string is imported and built on a lab surface, inputs are
    fed through a lead-in at real belt speed, the output is drained and items per second are measured after
    warm-up. In game, Test run does the same live.

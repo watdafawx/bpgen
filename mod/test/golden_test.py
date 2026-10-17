@@ -82,6 +82,24 @@ def render(snap):
     return "\n".join(lines + ["}"]) + "\n"
 
 
+def _duplicates(out):
+    """(name, x, y) placed more than once in any print of the answer"""
+    try:
+        bp = base._decode(out["blueprint"])
+    except Exception:  # noqa: BLE001 (no print: the caller reports that)
+        return []
+    prints = [p["blueprint"] for p in bp["blueprint_book"]["blueprints"]] if "blueprint_book" in bp else [bp["blueprint"]]
+    dup = []
+    for p in prints:
+        seen = set()
+        for e in p.get("entities") or []:
+            k = (e["name"], e["position"]["x"], e["position"]["y"])
+            if k in seen:
+                dup.append(k)
+            seen.add(k)
+    return dup
+
+
 def main():
     args = sys.argv[1:]
     update = "--update" in args
@@ -97,6 +115,11 @@ def main():
     failed = []
     for name in names or list(requests):
         out = json.loads(ingame.plan(json.dumps(requests[name])))
+        dup = _duplicates(out)
+        if dup:  # (two entities of a name on one spot: a layout bug whatever the snapshot says)
+            print(f"FAIL {name}: entities on top of each other: {dup[:4]}")
+            failed.append(name)
+            continue
         if out.get("error") or out.get("measure") or not out.get("blueprint"):
             failed.append(name)
             print(f"FAIL {name}: no plan ({'needs a measurement' if out.get('measure') else out.get('error')})")

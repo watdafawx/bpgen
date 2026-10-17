@@ -241,40 +241,6 @@ class Service:
                         "outputs": r.get("outputs") or [], "notes": r.get("notes") or [], "targets": {k: round(v, 1) for k, v in (params.get("targets") or {}).items()}},
         }
 
-    def plan_fluid(self, params, progress=None, cancel=None):
-        """a fluid line (fluid output, or two fluid inputs): see fluidlines.py"""
-        from bpgen import fluidlines
-        calib = self.ensure_calibrated(params, progress, cancel)
-        p = fluidlines.plan_fluid(self.data, calib, params["recipe"], params["machine"], params["belt"],
-                                  bonuses=dict(params.get("bonuses") or calibrate.ZERO),
-                                  allowed=self._inserters(params),
-                                  target_rate=(params.get("rate_per_min") or 0) / 60 or None)
-        ents, sources, sinks = fluidlines.layout(p)
-        ents, sources, sinks, description = labels.add_labels(self.data, ents, sources, sinks, p.output, p.expected)
-        ins = p.ins_in or p.ins_out
-        return {
-            "params": dict(params, fluid_line=True), "mode": "fluid", "description": description,
-            "summary": {"mode": "fluid", "kind": p.kind, "recipe": p.recipe, "machine": p.machine, "belt": p.belt,
-                        "machines": p.machines, "per_row": p.per_row, "output": p.output, "expected": round(p.expected, 3),
-                        "input_need": {k: round(v, 3) for k, v in p.input_need.items()}, "notes": p.notes,
-                        "inserter": {"name": ins.name, "count": ins.count} if ins else None,
-                        "text": fluidlines.describe(p)},
-            "entities": [self.decorate(e) for e in ents], "sources": sources, "sinks": sinks,
-            "blueprint": planner.blueprint_string(ents, f"{p.output} x{p.machines}", description=description),
-        }
-
-    def plan_multi_line(self, params):
-        """a recipe making only fluids (see fluidlines.plan_multi): a pipe row per output, sized for its main one"""
-        from bpgen import base
-        r = self.data.raw["recipe"][params["recipe"]]
-        m = self.data.raw["assembling-machine"].get(params["machine"]) or self.data.raw.get("furnace", {})[params["machine"]]
-        main = planner.main_result(r)
-        rate = (params.get("rate_per_min") or 0) / 60 or (  # (no rate set: one machine's worth)
-            m["crafting_speed"] / r.get("energy_required", 0.5) * planner._amount(main))
-        return base.special_section(self, {"multi": True, "recipe": params["recipe"], "machine": params["machine"],
-                                           "target": main["name"], "rate": rate, "belt": params.get("belt"),
-                                           "productivity": params.get("productivity") or 0})
-
     def plan_mall(self, params, progress=None, cancel=None):
         if params.get("feed") == "robots":
             return self.plan_bot_mall(params)
@@ -301,7 +267,6 @@ class Service:
         prints = []  # a split mall: each section is its own print, and the string is a book - unless they are
         chained = any(" gets " in n for n in split_notes)  # chained by belts: then it stays one print
         if len(malls) > 1 and not chained:
-            from bpgen import base
             for i, m in enumerate(malls):
                 p_ents, p_sources, _, p_desc = labels.add_labels(self.data, m.entities, m.sources, [], "", 0)
                 p_label = f"mall {i + 1}: {', '.join(m.products)}"[:60]
@@ -471,7 +436,8 @@ class Service:
                     modules=mods, machine_quality=params.get("machine_quality") or "normal",
                     per_row=params.get("per_row") or None, near=params.get("near") or None,
                     far=params.get("far") or None, out=params.get("out") or None,
-                    target_rate=(params.get("rate_per_min") or 0) / 60 or None, **beacon)
+                    target_rate=(params.get("rate_per_min") or 0) / 60 or None,
+                    shared_fluid=bool(params.get("shared_fluid")), **beacon)
 
     def pick_machine(self, params, machines):
         """the machine to show for a newly picked recipe: the current one if it plans, else the first that does
@@ -489,29 +455,17 @@ class Service:
         def copy(n):  # bioluminescent-/harene-infused- variants and the like run without power: not a default
             return proto(n).get("energy_source", {}).get("type") == "void"
 
-        from bpgen import base, fluidlines
+        from bpgen import base
         depth = base.unlock_depth(d)
         current = params.get("machine")
         order = ([current] if current in machines else []) + sorted(
             (n for n in machines if n != current),
             key=lambda n: (copy(n), depth.get(n, 999), proto(n).get("crafting_speed", 1), n))
-        r = d.raw["recipe"].get(params["recipe"]) or {}
-        product = (r.get("results") or [{}])[0].get("name")
         for n in order:
             try:
                 planner.plan(d, table, params["recipe"], n, params["belt"], **kw)
                 return n
             except (planner.PlanError, KeyError, ValueError):
-                pass
-            try:  # fluid recipes: the fluid line layouts
-                fluidlines.plan_fluid(d, table, params["recipe"], n, params["belt"], allowed=self._inserters(params))
-                return n
-            except (planner.PlanError, KeyError, ValueError, TypeError):
-                pass
-            try:
-                fluidlines.plan_multi(d, params["recipe"], n, product, 1.0)
-                return n
-            except (planner.PlanError, KeyError, ValueError, TypeError):
                 pass
         return order[0] if order else None  # nothing lays out: still the likeliest machine, not the first by name
 
@@ -560,7 +514,8 @@ class Service:
                     if progress:
                         progress(f"not by direct insertion ({e}): as a chain")
             if p is not None:
-                ents, sources, sinks = direct.layout(p)
+                from bpgen import rowlayout, rowspec
+                ents, sources, sinks = rowlayout.layout(rowspec.RowSpec.from_direct_plan(p), p)
                 warmup = direct.warmup_ticks(self.data, p)
                 n = p.machines - p.main_machines
                 stages.append({"item": mi, "recipe": p.made_recipe, "machine": p.made_machine, "machines": n,
@@ -589,25 +544,7 @@ class Service:
                                "output": round(blocks * min(s.plan.expected_output, s.plan.machines * s.plan.output_per_machine), 3),
                                "need": round(2 * p.input_need[item], 3), "notes": s.plan.notes})
         elif p is None:
-            try:
-                p = planner.plan(self.data, calib, params["recipe"], params["machine"], params["belt"], **kw)
-            except planner.PlanError as e:
-                # fluid output, or more fluids than the belt template's one pipe: the fluid lines (fluidlines.py)
-                # (and recipes with no item ingredients: their items come out of a fluid line's machine row)
-                r = self.data.raw["recipe"].get(params["recipe"]) or {}
-                if (not any(x.get("type") == "fluid" for x in (r.get("ingredients") or []) + (r.get("results") or []))
-                        and any(x.get("type", "item") == "item" for x in r.get("ingredients") or [])):
-                    raise
-                try:
-                    return self.plan_fluid(params, progress, cancel)
-                except planner.PlanError as e2:
-                    outs = planner.results_of(r)
-                    if not outs or any(x.get("type", "item") != "fluid" for x in outs):
-                        raise planner.PlanError(f"{e}; as a fluid line: {e2}") from e2
-                    try:  # fluids out (advanced oil processing, cracking): a pipe row per output
-                        return self.plan_multi_line(params)
-                    except planner.PlanError as e3:
-                        raise planner.PlanError(f"{e}; as a fluid line: {e2}; with a pipe per output: {e3}") from e3
+            p = planner.plan(self.data, calib, params["recipe"], params["machine"], params["belt"], **kw)
             ents, sources, sinks = planner.layout(p)
         ents, sources, sinks, description = labels.add_labels(self.data, ents, sources, sinks, p.output, p.expected_output)
         label = f"{p.recipe} x{p.machines} {p.expected_output:g}/s"
@@ -620,7 +557,8 @@ class Service:
                 "per_machine": round(p.output_per_machine, 4), "speed": round(p.speed, 3),
                 "productivity": round(p.productivity, 3), "input_need": {k: round(v, 3) for k, v in p.input_need.items()},
                 "fluid": p.fluid, "fluid_need": round(p.fluid_need, 2), "belts": p.belts,
-                "near": vars(p.ins_near), "far": vars(p.ins_far) if p.ins_far else None, "out": vars(p.ins_out),
+                "near": vars(p.ins_near) if p.ins_near else None, "far": vars(p.ins_far) if p.ins_far else None,
+                "out": vars(p.ins_out) if p.ins_out else None, "fluids": {k: round(v, 3) for k, v in getattr(p, "fluid_needs", {}).items()},
                 "beacon": p.beacon, "beacons_per_machine": p.beacons_per_machine, "packing": p.packing,
                 "notes": p.notes, "warmup": warmup or planner.warmup_ticks(self.data, p),
                 "measure": (direct.measure_ticks if isinstance(p, direct.DirectPlan) else planner.measure_ticks)(p),
@@ -669,11 +607,8 @@ class Service:
         rate = params.get("rate_per_min")
         if not rate:  # what the line would make on its own
             kw = self._line_kwargs(params)
-            try:
-                rate = planner.plan(d, self.ensure_calibrated(params, progress, cancel), params["recipe"],
-                                    params["machine"], params["belt"], **kw).expected_output * 60
-            except planner.PlanError:
-                rate = self.plan_fluid(params)["summary"]["expected"] * 60
+            rate = planner.plan(d, self.ensure_calibrated(params, progress, cancel), params["recipe"],
+                                params["machine"], params["belt"], **kw).expected_output * 60
             rate = self._fit_made(params, make, rate, progress, cancel)
         overrides = {product: params["recipe"]}
         targets = {product: rate}
@@ -712,7 +647,7 @@ class Service:
     def _share_lanes(self, out, belt, targets):
         """bundled products two to a belt, one per lane (lanes.py): the connected print and the book get the merge
         belts; what couldn't pair up keeps its own belt (notes in the route note)"""
-        from bpgen import base, lanes
+        from bpgen import lanes
         routed = next((sec for sec in out["sections"] if sec["kind"] == "routed"), None)
         if not routed:
             return
@@ -726,8 +661,7 @@ class Service:
         res["blueprint"] = planner.blueprint_string(res["entities"], label)
         out["blueprint"] = entlib.replace_print(out["blueprint"], out["sections"].index(routed), res["blueprint"],
                                                 label)
-        if i == 0:
-            out["entities"], out["sinks"] = res["entities"], sinks
+        out["entities"], out["sinks"] = res["entities"], sinks  # (the one routed section is the print shown)
         note = "; ".join(notes)
         if note:
             out["summary"]["route_note"] = (out["summary"].get("route_note") + "; " if out["summary"].get("route_note") else "") + note
@@ -992,7 +926,7 @@ class Service:
     def _fluid_makers(self, fluid, machines_for, final_machine=None):
         """recipes that make a fluid: one-product ones, and fluid-only ones with several products (each other
         product then needs a choice: burn it, send it out, or convert it)"""
-        from bpgen import fluidlines
+        from bpgen import flares
         d = self.data
         recipes = d.raw["recipe"]
 
@@ -1014,7 +948,7 @@ class Service:
             others = [o["name"] for o in res if o["name"] != fluid]
             for b in others:
                 choices = []
-                if fluidlines.flare_for(d, b):
+                if flares.flare_for(d, b):
                     choices.append({"value": "flare", "label": "burn it"})
                 choices.append({"value": "out", "label": "send it out (output pipe)"})
                 for cn, c in recipes.items():

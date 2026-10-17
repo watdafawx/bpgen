@@ -125,7 +125,7 @@ steps = {
         check("themed elements", n > 100, n)
         check("sections", (roles.section or 0) >= 6, roles.section)
         check("field captions dim", (roles.dim or 0) >= 15, roles.dim)
-        check("rail tabs (8 modes, 8 preview tools)", (roles.rtab or 0) == 16, roles.rtab)
+        check("rail tabs (8 modes, 8 preview tools, Redo and Pick spot)", (roles.rtab or 0) == 18, roles.rtab)
         local screen = p().gui.screen
         check("modes on a rail", screen.bpgen_window__left ~= nil and find_in(screen.bpgen_window__left, "bpgen_tabs") ~= nil)
         check("actions in a dock", screen.bpgen_window__bottom ~= nil and find_in(screen.bpgen_window__bottom, "bpgen_cursor") ~= nil)

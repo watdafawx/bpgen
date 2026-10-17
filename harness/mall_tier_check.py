@@ -1,7 +1,8 @@
 """A grid mall as a tier on the bus: the bus design of fit_bus_test (iron, copper, coal, a wood lane), a starter base
 fitted to it, then the starter mall beside that base on the lanes it passes on. Fails when the mall doesn't fit or
 lands on the base or the bus. With --run: the bus, the base and the mall built and run headless (wood in the wood
-lane's chest): the products in the mall's chests counted, most must be there.
+lane's chest): the products in the mall's chests counted, 80 % of those the bus can feed (not the ones needing
+steel or stone, which the bus design doesn't carry) must be there.
 python harness/mall_tier_check.py [--run] [minutes]"""
 import json
 import shutil
@@ -83,6 +84,19 @@ script.on_event(defines.events.on_tick, function(e)
     end
     local out = {}
     for _, p in ipairs(spec.products) do out[#out + 1] = "product " .. p .. " " .. (got[p] or 0) end
+    local names, by = {}, {}
+    for k, v in pairs(defines.entity_status) do names[v] = k end
+    for _, m in pairs(s.find_entities_filtered({ area = { { b[1], b[2] }, { b[1] + b[3], b[2] + b[4] } }, type = "assembling-machine" })) do
+      local k = (m.get_recipe() and m.get_recipe().name or "?") .. ":" .. (names[m.status] or "?")
+      by[k] = (by[k] or 0) + 1
+      if m.status == defines.entity_status.item_ingredient_shortage then
+        local have = {}
+        for _, it in pairs(m.get_inventory(defines.inventory.crafter_input).get_contents()) do have[#have + 1] = it.name .. "=" .. it.count end
+        out[#out + 1] = "short " .. m.get_recipe().name .. " @" .. m.position.x .. "," .. m.position.y .. " has " .. table.concat(have, ",")
+      end
+    end
+    for k, v in pairs(by) do out[#out + 1] = "status " .. k .. " " .. v end
+    for it, n in pairs(got) do out[#out + 1] = "chest " .. it .. " " .. n end
     helpers.write_file("bpgen/malltier.txt", table.concat(out, "\n") .. "\n", true)
   end
 end)
@@ -113,6 +127,21 @@ def main():
     assert not clash, f"the mall sits on the base or the bus at {sorted(clash)[:4]}"
     made = mall["summary"]["products"]
     print(f"{len(made)} of {len(products)} products")
+    # (the bus design carries plates, coal and wood, no raw stone or steel: what needs an input the bus lacks can't be
+    # made, so the bar is on the rest)
+    recipes = s.data.raw["recipe"]
+    lanes = {ln["item"] for ln in bus["lanes"]}
+    lacking = set(mall["summary"]["raw_inputs"]) - lanes
+    result = {recipes[r]["results"][0]["name"]: r for r in list(made) + list(mall["summary"]["makers"])}
+
+    def needs(item, seen=()):  # the raw inputs of an item, through the parts made in the mall
+        r = result.get(item)
+        if r is None or item in seen:
+            return {item}
+        return set().union(*(needs(i["name"], seen + (item,)) for i in recipes[r].get("ingredients") or []
+                             if i.get("type", "item") == "item"))
+    unfed = {recipes[r]["results"][0]["name"] for r in made if needs(recipes[r]["results"][0]["name"]) & lacking}
+    print(f"{len(unfed)} products need an input the bus lacks ({', '.join(sorted(lacking))}): {', '.join(sorted(unfed))}")
     if "--run" not in sys.argv:
         print("ok")
         return
@@ -121,7 +150,7 @@ def main():
             for e in bus["entities"] + t1["sections"][0]["result"]["entities"] + mall["entities"]]
     xs = [e["position"]["x"] for e in ents]
     ys = [e["position"]["y"] for e in ents]
-    items = [base_item for base_item in (s.data.raw["recipe"][r]["results"][0]["name"] for r in made)]
+    items = [recipes[r]["results"][0]["name"] for r in made]
     ticks = int(MINUTES * 3600)
     spec = {"entities": ents, "wires": planner.pole_wires(ents), "patches": {k: list(v) for k, v in PATCHES.items()},
             "box": [int(min(xs)) - 10, int(min(ys)) - 10, int(max(xs)) + 10, int(max(ys)) + 10],
@@ -151,8 +180,14 @@ def main():
     got = {line.split()[1]: int(line.split()[2]) for line in text.splitlines() if line.startswith("product ")}
     assert "not built 0" in text and "networks 1" in text, "not all built, or more than one pole network"
     have = [k for k, v in got.items() if v > 0]
-    print(f"{len(have)} of {len(got)} products in their chests")
-    assert len(have) >= 0.8 * len(got), f"too few products made: {sorted(set(got) - set(have))}"
+    feedable = {k: v for k, v in got.items() if k not in unfed}
+    made_ = [k for k in feedable if feedable[k] > 0]
+    print(f"{len(have)} of {len(got)} products in their chests, {len(made_)} of {len(feedable)} of those the bus can feed")
+    assert len(made_) >= 0.8 * len(feedable), f"too few products made: {sorted(set(feedable) - set(made_))}"
+    # (the circuit parts must reach their users: with a plate on both lanes of an input belt there was no lane left
+    # for the circuits and cables made here, and none of these came out)
+    circuit = [k for k in ("inserter", "assembling-machine-1", "electric-mining-drill", "radar") if k in feedable]
+    assert all(feedable[k] > 0 for k in circuit), f"nothing made of {[k for k in circuit if not feedable[k]]}"
     print("ok")
 
 

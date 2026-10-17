@@ -67,7 +67,8 @@ def plan_block(svc, crude, belt, water=True):
     if not water:
         raw.discard("water")
     p = {"targets": want, "raw": sorted(raw), "labs": False, "mall": False, "layout": "compact", "belt": belt,
-         "machines": ["oil-refinery", "chemical-plant"]}
+         "machines": ["oil-refinery", "chemical-plant"],
+         "shared_fluid": True}  # (plastic and sulfur plants split one petroleum pipe by demand: see rates.pick_feed)
     if water and all(r in data.raw["recipe"] for f in ADVANCED.values()
                      for r in [f["recipe"]] + [c["convert"] for c in f["byproducts"].values()]):
         p["fluid_plans"] = ADVANCED

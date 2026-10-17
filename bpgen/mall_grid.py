@@ -119,9 +119,12 @@ def resolve(data, products, machine, inputs, fluids=False):
 
 
 def plan_grid(data, products, machine, belt, inputs=None, allowed=None, chest="wooden-chest", chest_limit=2,
-              max_rows=MAX_ROWS, stock=STOCK):
+              max_rows=MAX_ROWS, stock=STOCK, outer_lanes=False):
     """products: recipes, one machine and chest each. inputs: items that come in on the belts (default: the plates and
-    what's mined). -> dict(entities, sources, notes, products, makers, inputs, columns)"""
+    what's mined). outer_lanes: an input item only on the outer lane of its belt pair (the west lane of a pair's
+    west belt, the east lane of its east belt), where a belt from outside the mall can side-load it: a mall fed from
+    a bus (tiers.fit_to_bus), whose lanes carry a plate on both lanes of their belt, would otherwise fill the lane
+    that the parts made here drop on. -> dict(entities, sources, notes, products, makers, inputs, columns)"""
     recipes = data.raw["recipe"]
     m, cats, machine_for, products, inputs, notes = resolve(data, products, machine, inputs)
     made_by = {_result(data, r): r for r in products}
@@ -190,6 +193,8 @@ def plan_grid(data, products, machine, belt, inputs=None, allowed=None, chest="w
             return True
         free = [(b, ln) for b, _, _ in reach(c) for ln in (EAST_LANE, WEST_LANE) if (b, ln) not in st.lanes]
         if item in inputs or not recipe_for(item):
+            if outer_lanes:
+                free = [(b, ln) for b, ln in free if ln == (WEST_LANE if b % 2 == 0 else EAST_LANE)]
             if not free:
                 return False
             st.lanes[free[0]] = {"item": item, "kind": "in"}

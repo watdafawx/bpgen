@@ -422,6 +422,24 @@ _turn = geom.turn_entity
 _turn_tile = geom.turn_tile
 
 
+def _reach_groups(tiles, reach):
+    """pole tiles split into the groups their wires join (within `reach` of one another), largest first"""
+    tiles = list(dict.fromkeys(tiles))
+    groups = []
+    while tiles:
+        group, todo = [tiles.pop(0)], None
+        todo = [group[0]]
+        while todo:
+            a = todo.pop()
+            near = [t for t in tiles if (t[0] - a[0]) ** 2 + (t[1] - a[1]) ** 2 <= reach ** 2]
+            for t in near:
+                tiles.remove(t)
+            group += near
+            todo += near
+        groups.append(group)
+    return sorted(groups, key=len, reverse=True)
+
+
 def plan(svc, params):
     """params: snapshot (an area around the patches and the player), patches ([[x1, y1, x2, y2]] picked areas),
     origin {x, y} (the bus head goes near it), direction (north|east|south|west: the bus flows that way), belt,
@@ -762,7 +780,9 @@ def plan(svc, params):
             end_pole = list(t)
     if oil_block:  # (the oil block and each pumpjack's pole: onto the network, each from the nearest pole so far)
         net = extend.pole_tiles(head_ents) + extend.pole_tiles(lines)
-        for group in (extend.pole_tiles(oil_ents), *[[p] for p in pj_poles]):
+        # (the oil block's poles by wire reach: one group each - the coal chest's pole may stand out of reach of
+        # the block's own)
+        for group in (*_reach_groups(extend.pole_tiles(oil_ents), planner.POLE_REACH), *[[p] for p in pj_poles]):
             if not group or not net:
                 continue
             a, b = min(((extend.nearest(net, g), g) for g in group),

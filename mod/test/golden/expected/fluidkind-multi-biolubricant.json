@@ -1,0 +1,38 @@
+{
+ "label": "biolubricant x2",
+ "mode": "line",
+ "output": "lubricant",
+ "expected": 4.0,
+ "summary": {"beacons_per_machine": 0, "belt": "transport-belt", "expected": 4.0, "machine": "biochamber", "machines": 2, "output": "lubricant", "per_row": 1, "productivity": 0.5, "recipe": "biolubricant", "stages": []},
+ "notes": ["burner: each machine burns 0.250 nutrients/s, fed on the input belt", "its inserters can't keep one biochamber busy: each runs at 10% speed, 10 per row instead", "input-limited: jelly (1 lane(s), 7.5/s each) feeds only 1 machines per row"],
+ "sections": null,
+ "absolute": null,
+ "sources": [{"kind": "belt", "lanes": ["jelly", "nutrients"], "position": {"x": 1.5, "y": 0.5}, "rates": {"jelly": 4.0, "nutrients": 0.025}}, {"kind": "belt", "lanes": ["jelly", "nutrients"], "position": {"x": 1.5, "y": 10.5}, "rates": {"jelly": 4.0, "nutrients": 0.025}}],
+ "sinks": [{"item": "lubricant", "kind": "fluid", "position": {"x": 4.5, "y": 5.5}, "rate": 2.0}],
+ "entities": [
+  {"name": "biochamber", "position": {"x": 2.5, "y": 3.5}, "recipe": "biolubricant"},
+  {"direction": 8, "name": "biochamber", "position": {"x": 2.5, "y": 7.5}, "recipe": "biolubricant"},
+  {"control_behavior": {"sections": {"sections": [{"filters": [{"comparator": "=", "count": 240, "index": 1, "name": "jelly", "quality": "normal", "type": "item"}, {"comparator": "=", "count": 2, "index": 2, "name": "nutrients", "quality": "normal", "type": "item"}], "index": 1}]}}, "name": "constant-combinator", "player_description": "bpgen input: jelly, nutrients (left lane jelly / right lane nutrients), jelly 4.00/s, nutrients 0.03/s", "position": {"x": 0.5, "y": 1.5}},
+  {"control_behavior": {"sections": {"sections": [{"filters": [{"comparator": "=", "count": 240, "index": 1, "name": "jelly", "quality": "normal", "type": "item"}, {"comparator": "=", "count": 2, "index": 2, "name": "nutrients", "quality": "normal", "type": "item"}], "index": 1}]}}, "name": "constant-combinator", "player_description": "bpgen input: jelly, nutrients (left lane jelly / right lane nutrients), jelly 4.00/s, nutrients 0.03/s", "position": {"x": 0.5, "y": 11.5}},
+  {"control_behavior": {"sections": {"sections": [{"filters": [{"comparator": "=", "count": 240, "index": 1, "name": "lubricant", "quality": "normal", "type": "fluid"}], "index": 1}]}}, "name": "constant-combinator", "player_description": "bpgen output: lubricant 4.00/s", "position": {"x": 4.5, "y": 4.5}},
+  {"name": "fast-inserter", "position": {"x": 1.5, "y": 1.5}},
+  {"direction": 8, "name": "fast-inserter", "position": {"x": 1.5, "y": 9.5}},
+  {"name": "fast-inserter", "position": {"x": 2.5, "y": 1.5}},
+  {"direction": 8, "name": "fast-inserter", "position": {"x": 2.5, "y": 9.5}},
+  {"name": "medium-electric-pole", "position": {"x": 3.5, "y": 1.5}},
+  {"name": "medium-electric-pole", "position": {"x": 3.5, "y": 9.5}},
+  {"name": "pipe", "position": {"x": 1.5, "y": 5.5}},
+  {"name": "pipe", "position": {"x": 2.5, "y": 5.5}},
+  {"name": "pipe", "position": {"x": 3.5, "y": 5.5}},
+  {"name": "pipe", "position": {"x": 4.5, "y": 5.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 1.5, "y": 0.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 1.5, "y": 10.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 2.5, "y": 0.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 2.5, "y": 10.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 3.5, "y": 0.5}},
+  {"direction": 4, "name": "transport-belt", "position": {"x": 3.5, "y": 10.5}}
+ ],
+ "wires": [
+  ["medium-electric-pole@3.5,1.5", 5, "medium-electric-pole@3.5,9.5", 5]
+ ]
+}

@@ -1,4 +1,20 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.28.0
+Date: 2026-10-17
+  Features:
+    - Production lines: one layout for every recipe. Lines with fluids in and fluids out, fluids only (cracking,
+      oil processing), several fluids, and machines of even size (foundry, cryogenic plant) are planned like any
+      other line: two mirrored rows where they fit, the machine turned so its inputs face the belts and pipes.
+  Bugfixes:
+    - Mall beside a base on your bus: its inputs were fed straight in, a plate on both lanes of the belt, so the
+      parts the mall makes itself (cable, circuits, gears) had no lane to drop on and everything that needs
+      circuits (inserters, mining drills, radars, assembling machines) never came out. An input now goes on the
+      outer lane of its belt, side-loaded, and the other lane stays free for the parts made here.
+    - Oil block: the plastic and sulfur plants share one petroleum pipe and split it by how many plants draw from
+      it. Since 0.25.6 the plastic rows were sized smaller when their inserters slow them, so sulfur took half the
+      petroleum (plastic 1.45/s of 1.95 planned, sulfur 0.95 of 0.65). The oil block now keeps the plants a
+      slowed row had before.
+---------------------------------------------------------------------------------------------------
 Version: 0.27.10
 Date: 2026-10-16
   Features:
