@@ -63,6 +63,17 @@ def section_needs(data, sec, base_summary):
     return None
 
 
+def _last(s, out, params):
+    """what place() puts next to the base for this answer (st["last"])"""
+    sm = out.get("summary") or {}
+    return {"entities": out["entities"], "sources": out.get("sources") or [],
+            "needs": line_needs(s.data, sm) if not out.get("sections") else section_needs(
+                s.data, out["sections"][0], sm),
+            "sinks": [dict(k, item=k.get("item") or sm.get("output")) for k in out.get("sinks") or []],
+            "belt": sm.get("belt") or params.get("belt"), "mode": params.get("mode") or "line",
+            "label": f"bpgen: {sm.get('recipe') or params.get('recipe') or params.get('mode')} next to the base"}
+
+
 def absolute(placed):
     """what the window needs of a plan placed next to the base: its box, what it ties into, the bus's axis (its
     arrows move it along the bus) and the bus lanes it overdraws (its upgrade buttons)"""
@@ -203,7 +214,8 @@ def run(s, params, progress=None, cancel=None, measure=True, keep=None, site=Non
                        "mall": bool(a.get("mall")),
                        "machines": sorted({m["machine"] for m in a.get("machines") or []}),
                        "before": {"size": a.get("size"), "entities": a.get("entities")}})
-    bus, bus_notes = None, []
+    bus, bus_notes, layouts, shown = None, [], None, None
+    st["layouts"] = None
     refit = params.get("refit") if params.get("mode") in ("mall", "base") else None
     if refit:
         params["origin"] = {"x": (refit["area"][0] + refit["area"][2]) / 2,
@@ -249,6 +261,8 @@ def run(s, params, progress=None, cancel=None, measure=True, keep=None, site=Non
                 stage(f"planning {params.get('mode') or 'a line'}"
                       + (f" with {params.get('machine')}" if params.get("machine") else ""), 1)
                 out = result = s.plan(params, progress=progress, cancel=cancel)
+                # (a line's other layouts: kept out of "result", whose callers print or send it whole)
+                layouts = out.pop("layouts", None) if isinstance(out, dict) else None
                 break
             except planner.PlanError:
                 if i == len(tries[:4]) - 1 or not tries:
@@ -294,12 +308,15 @@ def run(s, params, progress=None, cancel=None, measure=True, keep=None, site=Non
         elif out.get("entities"):  # (for place(): this plan, put next to the base on request)
             sm = out.get("summary") or {}
             st["sections"] = {x["name"]: x for x in out.get("sections") or []}
-            st["last"] = {"entities": out["entities"], "sources": out.get("sources") or [],
-                          "needs": line_needs(s.data, sm) if not st["sections"] else section_needs(
-                              s.data, (out.get("sections") or [{}])[0], sm),
-                          "sinks": [dict(k, item=k.get("item") or sm.get("output")) for k in out.get("sinks") or []],
-                          "belt": sm.get("belt") or params.get("belt"), "mode": params.get("mode") or "line",
-                          "label": f"bpgen: {sm.get('recipe') or params.get('recipe') or params.get('mode')} next to the base"}
+            st["last"] = _last(s, out, params)
+            if layouts and not (bus or refit):  # (the window's layout picker: each one's print, test and place)
+                st["layouts"] = [{"last": _last(s, c["out"], params),
+                                  "sections": {x["name"]: x for x in c["out"].get("sections") or []}} for c in layouts]
+                shown = [{k: c[k] for k in ("kind", "w", "h", "area", "belts", "pipes", "machines", "score")}
+                         | {"blueprint": c["out"]["blueprint"],
+                            "sections": [x["name"] for x in c["out"].get("sections") or []] or None,
+                            "test": test_spec(c["out"], params) if (c["out"].get("summary") or {}).get("expected")
+                            and c["out"].get("sinks") else None} for c in layouts]
             if bus or refit:  # (fed from the bus: placed beside it straight away, its inputs tapped from
                 o = params.get("origin") or {}  # the lanes; a refit: where the area was)
                 try:
@@ -351,5 +368,7 @@ def run(s, params, progress=None, cancel=None, measure=True, keep=None, site=Non
         # (the window's test run: the harness case for this line, run live on its preview)
         "test": test_spec(out, params) if summary.get("expected") and out.get("sinks")
         else mall_test_spec(s.data, out, params) if summary.get("mode") == "mall" and out.get("sources") else None,
+        # (a line with ingredients made here: its layouts, the one above first, for the window's picker)
+        "layouts": shown if shown and len(shown) > 1 else None,
         "result": result,
     }

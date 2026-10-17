@@ -3,6 +3,7 @@
 
 local W = require("window_core")
 local ui, safe, place, hand, sandbox, ctx, NAME = W.ui, W.safe, W.place, W.hand, W.sandbox, W.ctx, W.NAME
+local build = W.build
 local T, find, placed, results, say, status, tried = W.T, W.find, W.placed, W.results, W.say, W.status, W.tried
 local turns, unmark = W.turns, W.unmark
 
@@ -28,20 +29,23 @@ local function ghosts_left(player)
   return n
 end
 
---- Undo: bpgen's unbuilt ghosts removed, what they'd have replaced unmarked
+--- Undo: bpgen's unbuilt ghosts removed (a few hundred a tick), what they'd have replaced unmarked
 local function unplace(player)
   place.clear_outline(player)
-  local n = 0
+  local doomed = {}
   for _, g in pairs(placed[player.index] or {}) do
-    if g.valid and (g.type == "entity-ghost" or g.type == "tile-ghost") then g.destroy({ raise_destroy = true }) n = n + 1 end
+    if g.valid and (g.type == "entity-ghost" or g.type == "tile-ghost") then doomed[#doomed + 1] = g end
   end
-  for _, e in pairs(unmark[player.index] or {}) do  -- (the belts its splitters would have replaced: kept)
-    if e.valid and e.to_be_deconstructed() then e.cancel_deconstruction(player.force, player) end
+  for _, g in ipairs(place.cancel(player.index)) do  -- (a placement still going on: stopped, what it put down too)
+    if g.valid and (g.type == "entity-ghost" or g.type == "tile-ghost") then doomed[#doomed + 1] = g end
   end
+  -- (the belts its splitters would have replaced: kept)
+  local kept = {}
+  for _, e in pairs(unmark[player.index] or {}) do kept[#kept + 1] = e end
   placed[player.index], unmark[player.index] = nil, nil
   hand.forget(player)
-  local frame = player.gui.screen[NAME]
-  say(player, T("ghosts-removed", n))
+  build.destroy_later(doomed, true, nil, nil, player.index, kept, player.force)
+  say(player, T("ghosts-removed", #doomed))
 end
 ui.on_yes("bpgen_unplace", function(player) unplace(player) end)
 W.unplace = unplace  -- (tests: Undo, as its button does once asked)
@@ -68,11 +72,19 @@ function W.place_absolute(player)
       if not e.to_be_deconstructed() and e.order_deconstruction(player.force, player) then cleared[#cleared + 1] = e end
     end
   end
-  local ghosts, _, area, marks = place.place(player, r.blueprint, nil, r.res.absolute.box)
-  for _, e in ipairs(cleared) do marks[#marks + 1] = e end
+  unmark[player.index] = cleared
+  say(player, T("placing"))
+  place.start(player, r.res, nil, r.res.absolute.box, nil, "absolute", { label = r.res.label, absolute = r.res.absolute,
+    blueprint = r.blueprint, mode = r.res.mode, cleared = cleared })
+end
+
+--- the absolute plan's ghosts placed (place.start): what Undo takes back, outlined, said
+place.after.absolute = function(player, ghosts, _, area, marks, d)
+  for _, e in ipairs(d.cleared or {}) do marks[#marks + 1] = e end
   placed[player.index], unmark[player.index] = ghosts, marks
-  if area then place.outline(player, area, r.res.label or T("placed-by-bpgen")) end
-  local a = r.res.absolute
+  if area then place.outline(player, area, d.label or T("placed-by-bpgen")) end
+  local a = d.absolute
+  local r = { blueprint = d.blueprint, res = { mode = d.mode } }
   if a.head then  -- (a new bus lane: where to feed it)
     rendering.draw_text({ text = T("feed-here", "[item=" .. a.item .. "]"), surface = player.surface, target = a.head,
       color = { 1, 0.85, 0.2 }, scale = 2, alignment = "center", use_rich_text = true, players = { player },
@@ -102,7 +114,7 @@ local function try_sandbox(player)
   if not (frame and r and r.blueprint) then return end
   local why = sandbox.cant(player)
   if why then return say(player, T(why)) end
-  local plan = { blueprint = r.blueprint }
+  local plan = { blueprint = r.blueprint, pieces = r.res.pieces }
   local a = r.res.absolute
   if a then
     local b = a.box
@@ -206,7 +218,7 @@ function W.spot(player, area)
   tried[player.index] = nil
   local sec = find(frame, "bpgen_section")
   local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off", seed = seed,
-    spot = true, turn = turns[player.index], section = sec.visible and sec.items[sec.selected_index] or nil })
+    spot = true, turn = turns[player.index], section = sec.visible and sec.items[sec.selected_index] or nil, layout = W.layout_pick(frame) })
   status(frame, ok and T("placing-clicked") or T("cant", tostring(why)))
 end
 
@@ -214,60 +226,49 @@ function W.move(player, area)
   if not player.gui.screen[NAME] then W.open(player, { mode = "move" }) end
   local frame = player.gui.screen[NAME]
   W.set_mode(frame, "move")
-  local inv = game.create_inventory(1)
-  local stack = inv[1]
-  stack.set_stack({ name = "blueprint" })
-  local map = stack.create_blueprint({ surface = player.surface, force = player.force, area = area,
-    include_modules = true, include_station_names = true })
-  if not stack.is_blueprint_setup() then
-    inv.destroy()
-    return status(frame, T("nothing-to-move"))
-  end
-  local offset
-  for _, be in pairs(stack.get_blueprint_entities() or {}) do  -- (a blueprint position plus offset: the world's)
-    local ent = map[be.entity_number]
-    if ent and ent.valid then
-      offset = { ent.position.x - be.position.x, ent.position.y - be.position.y }
-      break
-    end
-  end
-  local bp = stack.export_stack()
-  inv.destroy()
-  if not offset then return status(frame, T("nothing-to-move")) end
-  local a = area
+  status(frame, T("reading-area"))
+  -- (the area blueprinted a cell a tick: bpgen joins the cells into the one print)
+  build.area_print(player.surface, player.force, area, "move_area", { area = { math.floor(area.left_top.x),
+    math.floor(area.left_top.y), math.ceil(area.right_bottom.x), math.ceil(area.right_bottom.y) } }, player.index)
+end
+
+build.on_done.move_area = function(t)
+  local player = game.get_player(t.player)
+  local frame = player and player.gui.screen[NAME]
+  if not frame then return end
+  if not t.parts[1] then return status(frame, T("nothing-to-move")) end
   local ok, why = ctx.start(player, { tick = game.tick, surface = player.surface.name, params = { mode = "move",
-    move = { area = { math.floor(a.left_top.x), math.floor(a.left_top.y), math.ceil(a.right_bottom.x),
-                      math.ceil(a.right_bottom.y) }, blueprint = bp, offset = offset },
+    move = { area = t.data.area, blueprint = { parts = t.parts, wires = t.wires } },
     seed = { x = player.position.x, y = player.position.y } } })
   status(frame, ok and T("moving-section") or T("cant-plan", tostring(why)))
 end
 
---- an area picked with the refit tool: its assembling machines' recipes fill the mall's products, then it plans
---- them as a compact mall in the area's place (see ingame._refit)
---- the area as a blueprint string (nil: nothing in it)
-local function area_blueprint(player, area)
-  local inv = game.create_inventory(1)
-  inv[1].set_stack({ name = "blueprint" })
-  inv[1].create_blueprint({ surface = player.surface, force = player.force, area = area, include_modules = true })
-  local bp = inv[1].is_blueprint_setup() and inv[1].export_stack() or nil
-  inv.destroy()
-  return bp
+--- an area picked with the refit tool as a base on a bus (blueprinted a cell a tick): planned for the science it makes
+build.on_done.refit_area = function(t)
+  local player = game.get_player(t.player)
+  local frame = player and player.gui.screen[NAME]
+  if not frame then return end
+  if not t.parts[1] then return status(frame, T("nothing-to-refit")) end
+  local u = W.unlocked(player)
+  local ok, why = ctx.start(player, { tick = game.tick, surface = player.surface.name,
+    seed = player.surface.map_gen_settings.seed, bonuses = ctx.bonuses(player.force), inserters = u.inserters,
+    belts = u.belts, poles = u.poles, belt = u.belts[#u.belts],
+    params = { mode = "base", import = { parts = t.parts, wires = t.wires }, layout = "bus", belt = u.belts[#u.belts],
+      productivity = 0, refit = { area = t.data.area } } })
+  status(frame, ok and T("planning-refit-base") or T("cant-plan", tostring(why)))
 end
 
+--- an area picked with the refit tool: its assembling machines' recipes fill the mall's products, then it plans
+--- them as a compact mall in the area's place (see ingame._refit)
 function W.refit(player, area)
   if not player.gui.screen[NAME] then W.open(player, { mode = "mall" }) end
   local frame = player.gui.screen[NAME]
   if find(frame, "bpgen_refit_as").selected_index == 2 then  -- (a base on a bus: the science the area makes)
-    local bp = area_blueprint(player, area)
-    if not bp then return status(frame, T("nothing-to-refit")) end
-    local u = W.unlocked(player)
+    status(frame, T("reading-area"))
     local a = area
-    local ok, why = ctx.start(player, { tick = game.tick, surface = player.surface.name,
-      seed = player.surface.map_gen_settings.seed, bonuses = ctx.bonuses(player.force), inserters = u.inserters,
-      belts = u.belts, poles = u.poles, belt = u.belts[#u.belts],
-      params = { mode = "base", import = bp, layout = "bus", belt = u.belts[#u.belts], productivity = 0,
-        refit = { area = { a.left_top.x, a.left_top.y, a.right_bottom.x, a.right_bottom.y } } } })
-    return status(frame, ok and T("planning-refit-base") or T("cant-plan", tostring(why)))
+    build.area_print(player.surface, player.force, area, "refit_area",
+      { area = { a.left_top.x, a.left_top.y, a.right_bottom.x, a.right_bottom.y } }, player.index)
+    return
   end
   W.set_mode(frame, "mall")
   local count, machines, order = {}, {}, {}
@@ -352,11 +353,11 @@ function W.placing(player, ghosts)
   placed[player.index], unmark[player.index] = ghosts, {}
 end
 
-function W.place_plan(player, res)
+--- a plan's ghosts placed (another mod's plan_line): at its box next to the base, else around the player; then
+--- place.after[then_kind] (placed: what Undo takes back)
+function W.place_plan(player, res, then_kind, data)
   local box = res.absolute and res.absolute.box
-  local ghosts = place.place(player, res.blueprint, not box and player.position or nil, box)
-  placed[player.index] = ghosts
-  return #ghosts, box
+  place.start(player, res, not box and player.position or nil, box, nil, then_kind, data)
 end
 
 -- (what the other parts call)

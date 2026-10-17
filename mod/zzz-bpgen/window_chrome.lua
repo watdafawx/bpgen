@@ -275,6 +275,9 @@ local function build_result(info)
   tiles.style.horizontal_spacing, tiles.style.vertical_spacing = 4, 4
   result.add({ type = "flow", name = "bpgen_badges", direction = "vertical" }).style.vertical_spacing = 4
   ui.add(result, { type = "label", name = "bpgen_notes" }, "dim", { single_line = false, maximal_width = 266 })
+  -- (a line with ingredients made here: its other layouts, the plan's own first; then the book's prints)
+  result.add({ type = "drop-down", name = "bpgen_layout", items = {}, visible = false, tags = { bpgen_layout = true },
+    tooltip = T("layout-tip") }).style.horizontally_stretchable = true
   result.add({ type = "drop-down", name = "bpgen_section", items = {}, visible = false, tags = { bpgen_section = true },
     tooltip = T("section-tip") })
   local dets = ui.fold(result, T("details"), false)

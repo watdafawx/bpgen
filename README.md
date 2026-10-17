@@ -22,6 +22,12 @@ places the same (no desyncs). The window's mouse-dragged preview works with its 
   not from formulas. Optionally its ingredients too (the recipe tree), fed by belts or by robots. One ingredient made
   in the blueprint (copper cable for circuits) is made by **direct insertion** when the recipes allow it: its machines
   sit beside the line's and insert straight into them (3 cable : 2 circuit assemblers), a full belt of circuits.
+  With ingredients made in the blueprint the line is laid out every way that fits (direct insertion, on the line's
+  own belts, separate blocks with belts routed between them under several spacings, column heights and orders) and
+  up to four of the smallest are offered in a **layout picker** under the preview (size, tiles, belts, machines):
+  the first is bpgen's pick, another picked is what To cursor, Copy, Place by my base and the test run take
+  (`layouts.py`). Separate blocks now pack tighter by default (a 7-tile channel between columns, no extra slack when
+  that routes): a quarter to a third less ground than before.
   **More lines** (under the recipe): more recipes, each planned as its own line as if picked alone (its best
   machine, the same rate, belt, feed and modules), all in one blueprint book; pick one under the preview to see it,
   place it here or by your base.
@@ -338,7 +344,11 @@ differing lines of any that changed. After a change that is meant to alter plans
 The scripts:
 
 `mod\test\stutter_test.py` (planning doesn't stutter the game: the game thread's longest wait while Rust routes run
-on the worker stays under 20 ms; needs fse 0.17.2+), `mod\test\run_mp.py` (multiplayer: a headless server and a client; a line planned in the client's Python placed
+on the worker stays under 20 ms; needs fse 0.17.2+), `mod\test\hitch_test.py [--budget MS] [--only TEXT]` (nothing
+bpgen does on the game thread hitches it: a dense 400x400 base, then the preview, placing and Undo, Try in sandbox,
+reading the base, the Move tool's area, small to huge; each step's ticks of bpgen's own work under 8 ms (99 of 100, none
+over twice that), timed on the P-cores; and the work spread over ticks gives what doing it at once did: the snapshot,
+the preview, an absolute paste, the area's blueprint), `mod\test\run_mp.py` (multiplayer: a headless server and a client; a line planned in the client's Python placed
 the same on both peers, no desync), `mod\test\comp_test.py` (the mod's exports, headless), `extend_test.py` (headless game with the mod; `bus` as its fourth argument: a main bus),
 `bus_extend_test.py` (placement beside a bus, no game), `harness\botmall_test.py` (a robot-fed mall built and
 run), `mod\test\bus_feed_test.py` (a line fed from the bus, no game), `mod\test\mall_bus_test.py` (a grid mall fed

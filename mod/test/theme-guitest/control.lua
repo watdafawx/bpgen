@@ -356,19 +356,20 @@ steps[#steps + 1] = { run = function()
     if themed then
       check("Undo asks first", confirm() ~= nil)
       check("nothing removed yet", ghosts() == n, ghosts())
-    else
-      check("Undo without fse-std: removed at once", ghosts() == 0, ghosts())
     end
   end, ticks = 10 }
-steps[#steps + 1] = { run = function() shot("confirm") end, ticks = 25 }
+steps[#steps + 1] = { run = function()
+    -- (Undo takes them away a few hundred a tick: gone by now)
+    if not themed then check("Undo without fse-std: removed", ghosts() == 0, ghosts()) end
+    shot("confirm")
+  end, ticks = 25 }
 steps[#steps + 1] = { run = function()
     if themed then
       local n = ghosts()
       p().opened = nil  -- (as Esc: a no)
       check("Esc: the dialog goes", confirm() == nil)
       check("Esc: the ghosts stay", ghosts() == n, ghosts())
-      rc("click", 1, { bpgen = "unplace" })  -- (a script's press: at once)
-      check("scripted Undo removes them", ghosts() == 0, ghosts())
+      rc("click", 1, { bpgen = "unplace" })  -- (a script's press: not asked; checked next step)
       check("toasts", p().gui.screen["fstd_toasts_zzz-bpgen"] ~= nil)
     end
     find(w(), "bpgen_rate").text = "90"
@@ -377,6 +378,7 @@ steps[#steps + 1] = { run = function()
     if themed then check("changed: Plan breathes", find(w(), "bpgen_plan").tags.fstd_role == "pulse") end
   end, ticks = 30 }
 steps[#steps + 1] = { run = function()
+    if themed then check("scripted Undo removes them", ghosts() == 0, ghosts()) end
     shot("changed")
     rc("click", 1, { bpgen = "test" })
     rc("click", 1, { bpgen = "test_speed" })  -- (x5)
@@ -440,6 +442,58 @@ steps[#steps + 1] = { run = function()
     check("fast-forward x10, kept in its tags", game.speed == 10 and b and b.tags.speed == 10, game.speed)
     rc("click", 1, { bpgen = "close" })
     check("closed mid-run: the game's own speed again", game.speed == 1, game.speed)
+  end, ticks = 5 }
+-- a line with ingredients made here: its layouts in a picker under the preview; another picked is what the preview
+-- and To cursor take
+local function make_rows()
+  local box = w() and find(w(), "bpgen_make")
+  local rows = {}
+  for _, r in pairs(box and box.children or {}) do
+    local c = r.children and r.children[1]
+    if c and c.type == "checkbox" then rows[c.tags.item] = c end
+  end
+  return rows
+end
+local function layouts_shown() local l = w() and find(w(), "bpgen_layout") return l and l.visible end
+local before_pick
+steps[#steps + 1] = { run = function()
+    rc("open_window", 1, { recipe = "engine-unit", machine = "assembling-machine-2" })
+  end, until_ = function() return make_rows()["iron-gear-wheel"] ~= nil end, ticks = 5 }
+steps[#steps + 1] = { run = function()
+    local rows = make_rows()
+    rows["iron-gear-wheel"].state, rows["pipe"].state = true, true
+    find(w(), "bpgen_rate").text = "30"
+    rc("touch", 1, "bpgen_rate")
+    rc("plan_window", 1)
+  end, until_ = layouts_shown, ticks = 10 }
+steps[#steps + 1] = { run = function()
+    local l = find(w(), "bpgen_layout")
+    check("layouts offered under the preview", #l.items >= 2 and l.selected_index == 1, #l.items)
+    log("layouts: " .. text(l.items[1]) .. " | " .. text(l.items[2] or ""))
+    before_pick = rc("last_blueprint", 1)
+    shot("layouts")
+  end, ticks = 25 }
+steps[#steps + 1] = { run = function() rc("pick", 1, "bpgen_layout", 2) end, ticks = 25 }
+steps[#steps + 1] = { run = function()
+    local now = rc("last_blueprint", 1)
+    check("another layout picked: the buttons' plan is it", now and before_pick and now.layout == 2
+      and now.blueprint ~= before_pick.blueprint, now and now.layout)
+    check("the picker shows it", find(w(), "bpgen_layout").selected_index == 2)
+    check("its preview", find(w(), "bpgen_cam").visible)
+    shot("layout-2")
+  end, ticks = 25 }
+steps[#steps + 1] = { run = function() rc("click", 1, { bpgen = "cursor" }) end, ticks = 10 }
+steps[#steps + 1] = { run = function()
+    local inv = game.create_inventory(1)
+    inv[1].import_stack(rc("last_blueprint", 1).blueprint)
+    local function count(stack)
+      local bp = stack.is_blueprint_book and stack.get_inventory(defines.inventory.item_main)[1] or stack
+      return bp and bp.valid_for_read and #(bp.get_blueprint_entities() or {}) or -1
+    end
+    local want, got = count(inv[1]), p().cursor_stack.valid_for_read and count(p().cursor_stack) or -2
+    check("To cursor holds the picked layout", want > 0 and want == got, got .. " of " .. want)
+    inv.destroy()
+    p().clear_cursor()
   end, ticks = 5 }
 steps[#steps + 1] = { run = function()
     rc("click", 1, { bpgen = "close" })

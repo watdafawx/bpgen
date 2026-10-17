@@ -373,7 +373,7 @@
     if (st.test.running && !S.running) openDrawer("test");
     S.running = !!st.test.running;
     if (st.history_n && st.history_n !== S.histN) { S.histN = st.history_n; openDrawer("history"); }
-    if (changed("result", [st.tiles, st.badges, st.notes, st.stats, st.extra, st.vis.bpgen_section, st.f.bpgen_section, st.dd.bpgen_section, S.iconsN, st.has_plan]))
+    if (changed("result", [st.tiles, st.badges, st.notes, st.stats, st.extra, st.vis.bpgen_section, st.f.bpgen_section, st.dd.bpgen_section, st.vis.bpgen_layout, st.f.bpgen_layout, st.dd.bpgen_layout, S.iconsN, st.has_plan]))
       renderResult(st);
     renderTest(st);
     if (changed("history", [st.history, S.iconsN])) renderHistory(st);
@@ -433,7 +433,9 @@
     }
     const tiles = (st.tiles || []).map((t) => `<div class="tile"><b>${L(t.v)}</b><span>${L(t.c)}</span></div>`).join("");
     const badges = (st.badges || []).map((b) => `<span class="badge"${b.tip ? ` data-tip-ls='${esc(JSON.stringify(b.tip))}'` : ""}>${L(b.t)}</span>`).join("");
-    const sec = st.vis.bpgen_section ? `<label class="f"><span class="cap">${esc(T("section-tip"))}</span><select data-ref="bpgen_section">${(st.dd.bpgen_section || []).map((it, i) => `<option value="${i + 1}"${st.f.bpgen_section === i + 1 ? " selected" : ""}>${esc(fmt(it))}</option>`).join("")}</select></label>` : "";
+    // (a line's layouts, then the book's prints: the Lua window's drop-downs, picked there)
+    const select = (ref, tip) => st.vis[ref] ? `<label class="f"><span class="cap">${esc(T(tip))}</span><select data-ref="${ref}">${(st.dd[ref] || []).map((it, i) => `<option value="${i + 1}"${st.f[ref] === i + 1 ? " selected" : ""}>${esc(fmt(it))}</option>`).join("")}</select></label>` : "";
+    const sec = select("bpgen_layout", "layout-tip") + select("bpgen_section", "section-tip");
     p.innerHTML = `<h5>${esc(T("result"))}</h5>${tiles ? `<div class="tiles">${tiles}</div>` : ""}${badges ? `<div class="badges">${badges}</div>` : ""}` +
       `${st.notes ? `<div class="notes">${L(st.notes)}</div>` : ""}${sec}` +
       `${st.stats ? `<details class="more"><summary>${esc(T("details"))}</summary><div>${L(st.stats)}</div></details>` : ""}` +

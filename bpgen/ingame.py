@@ -15,11 +15,12 @@ for the web app and the console.
 import json
 import math
 import sys
+import threading
 import time
 import traceback
 import types
 
-from bpgen import geom
+from bpgen import geom, snapfmt
 from bpgen.request import absolute as _absolute, line_needs as _line_needs, section_needs as _section_needs  # noqa: F401
 from bpgen.session import Session, crash, post_icons
 
@@ -35,6 +36,99 @@ class _Module(types.ModuleType):
 sys.modules[__name__].__class__ = _Module
 
 
+_PARTS = {}  # key -> {(kind, number): text}: a big snapshot's records, handed over a part a game tick before its job
+_JOINED = {}  # key -> (entities, obstacles) as JSON text: the last few snapshots (Place by my base again sends one again)
+_PARTS_LOCK = threading.Lock()
+
+
+def part(text: str) -> str:
+    """a part of a snapshot the game reads (reader.lua): "key<tab>kind<tab>number<newline>" then its records, comma
+    separated (kind E: entities, O: obstacles); the request names them {"@parts": key, "n": parts, ...}"""
+    head, _, body = text.partition("\n")
+    key, kind, n = head.split("\t")
+    with _PARTS_LOCK:
+        _PARTS.setdefault(key, {})[(kind, int(n))] = body
+        for old in [k for k in _PARTS if k != key][:-4]:  # (a job that never came: its parts dropped)
+            del _PARTS[old]
+    return "ok"
+
+
+def _joined(ref, wait=30.0):
+    """{"@parts": key, "n", the rest of the snapshot}: the snapshot, with its records from the parts sent ahead (they
+    may still be arriving)"""
+    key, n = ref["@parts"], ref["n"]
+    t = time.perf_counter()
+    while True:
+        with _PARTS_LOCK:
+            got = _PARTS.get(key) or {}
+            if key not in _JOINED and len(got) >= n:
+                _JOINED[key] = tuple("[" + ",".join(got[k] for k in sorted(got) if k[0] == kind) + "]"
+                                     for kind in ("E", "O"))
+                del _PARTS[key]
+                for old in list(_JOINED)[:-3]:
+                    del _JOINED[old]
+            joined = _JOINED.get(key)
+        if joined:
+            break
+        if time.perf_counter() - t > wait:
+            raise ValueError(f"the game's snapshot came in {len(got)} of {n} parts")
+        time.sleep(0.01)
+    snap = {k: v for k, v in ref.items() if k not in ("@parts", "n", "count")}
+    snap["entities"], snap["obstacles"] = json.loads(joined[0]), json.loads(joined[1])
+    return snap
+
+
+_SIZES = {}  # entity name -> (w, h) facing north: the pieces' frames
+
+
+def _size(name):
+    if name not in _SIZES:
+        e = SESSION.svc().decorate({"name": name, "position": {"x": 0, "y": 0}})
+        _SIZES[name] = (e.get("w", 1), e.get("h", 1))
+    return _SIZES[name]
+
+
+def _answer(out):
+    """an answer for the mod as JSON: with a blueprint, its pieces for the game to build a few a tick
+    (pieces.py), or refused when it's more than the game should build"""
+    from bpgen import pieces
+    bp = out.get("blueprint") if isinstance(out, dict) else None
+    if bp:
+        try:
+            n = pieces.count(bp)
+            if n > pieces.MAX_ENTITIES:
+                return json.dumps({"error": f"that's {n} entities: too big to build in the game at once (at most "
+                                            f"{pieces.MAX_ENTITIES}); plan less, or a part of it",
+                                   "seconds": out.get("seconds")})
+            with SESSION.lock:
+                out["pieces"] = pieces.pieces(bp, _size)
+                for lay in out.get("layouts") or []:  # (a line's other layouts, for the window's picker)
+                    if isinstance(lay, dict) and lay.get("blueprint"):
+                        lay["pieces"] = pieces.pieces(lay["blueprint"], _size)
+        except Exception:  # noqa: BLE001 - the game builds the whole print instead
+            traceback.print_exc()
+    return json.dumps(out)
+
+
+def _load(request):
+    """a request from the mod: its snapshot (sent ahead in parts, for a big base) joined, its records (compact rows
+    since 0.29) read as dicts"""
+    req = json.loads(request or "{}")
+    for holder, key in ((req, "snapshot"), (req, "delta"), (req.get("params"), "snapshot")):
+        if isinstance(holder, dict) and isinstance(holder.get(key), dict) and "@parts" in holder[key]:
+            holder[key] = _joined(holder[key])
+    # (an area the Move or Refit tool picked, blueprinted a cell a tick: its cells joined into the one print)
+    params = req.get("params") if isinstance(req.get("params"), dict) else {}
+    mv = params.get("move")
+    if isinstance(mv, dict) and isinstance(mv.get("blueprint"), dict):
+        from bpgen import pieces
+        mv["blueprint"], mv["offset"] = pieces.join(mv["blueprint"]), [0, 0]
+    if isinstance(params.get("import"), dict):
+        from bpgen import pieces
+        params["import"] = pieces.join(params["import"])
+    return snapfmt.expand_request(req)
+
+
 def _crash(e, request):
     return json.dumps(crash(e, request))
 
@@ -47,7 +141,7 @@ def progress(_: str = "") -> str:
 def plan(request: str) -> str:
     """a request from the mod (recipe, machine, unlocked belts and inserters, bonuses...) -> {blueprint, label, text}
     or {error} (Session.plan: Service.params, then Service.request)"""
-    return json.dumps(SESSION.plan(request))
+    return _answer(SESSION.plan(_load(request)))
 
 
 def stale(active: str = "") -> str:
@@ -191,7 +285,7 @@ def move(request: str) -> str:
     from bpgen import planner
     t = time.perf_counter()
     try:
-        req = json.loads(request)
+        req = _load(request)
         st = SESSION.player(req)
         params = req.get("params") or {}
         SESSION.progress.begin()
@@ -211,13 +305,20 @@ def move(request: str) -> str:
                      "prune": params["move"]["area"], "clear": clear}
             placed = s.extend(dict(st["last"], bus="here", seed=params.get("seed"), snapshot=params["snapshot"]))
             absolute = dict(_absolute(placed), clear=clear)
-        return json.dumps({"blueprint": placed["blueprint"], "label": "a section moved", "mode": "move",
+        return _answer({"blueprint": placed["blueprint"], "label": "a section moved", "mode": "move",
                            "absolute": absolute, "notes": notes + list(placed.get("notes") or []), "summary": {},
                            "seconds": round(time.perf_counter() - t, 3)})
     except planner.PlanError as e:
         return json.dumps({"error": str(e), "seconds": round(time.perf_counter() - t, 3)})
     except Exception as e:  # noqa: BLE001 - shown in game
         return _crash(e, request)
+
+
+def _pick_layout(st, i):
+    """one of the last plan's layouts (the window's layout picker, 1 = the plan's own) becomes the plan to place"""
+    lays = st.get("layouts") or []
+    if isinstance(i, (int, float)) and 1 <= int(i) <= len(lays):
+        st["last"], st["sections"] = lays[int(i) - 1]["last"], lays[int(i) - 1]["sections"]
 
 
 def _pick_section(st, name):
@@ -240,8 +341,9 @@ def place(request: str) -> str:
     t = time.perf_counter()
     from bpgen import extend
     try:
-        req = json.loads(request or "{}")
+        req = _load(request)
         st = SESSION.player(req)
+        _pick_layout(st, req.get("layout"))
         _pick_section(st, req.get("section"))
         if not st["last"] or not st["last"].get("entities"):
             return json.dumps({"error": "plan something first"})
@@ -262,7 +364,7 @@ def place(request: str) -> str:
         absolute = _absolute(placed)
         if st["last"].get("clear"):
             absolute["clear"] = st["last"]["clear"]
-        return json.dumps({
+        return _answer({
             "blueprint": placed["blueprint"], "label": st["last"]["label"], "mode": st["last"]["mode"],
             "absolute": absolute,
             "notes": placed.get("notes") or [], "summary": {}, "seconds": round(time.perf_counter() - t, 3)})
@@ -280,8 +382,9 @@ def hand(request: str) -> str:
     from bpgen import extend, planner
     t = time.perf_counter()
     try:
-        req = json.loads(request or "{}")
+        req = _load(request)
         st = SESSION.player(req)
+        _pick_layout(st, req.get("layout"))
         if req.get("section"):
             _pick_section(st, req["section"])
         last = st["last"]
@@ -320,7 +423,7 @@ def hand(request: str) -> str:
                     for i, e in enumerate(posed["entities"])]
             bp = planner.blueprint_string(ents, last.get("label") or "bpgen",
                                           description="Put it down where you like; bpgen ties it into your base.")
-        return json.dumps({"blueprint": bp, "id": n, "spot": spot, "notes": posed["notes"],
+        return _answer({"blueprint": bp, "id": n, "spot": spot, "notes": posed["notes"],
                            "seconds": round(time.perf_counter() - t, 3)})
     except Exception as e:  # noqa: BLE001 - shown in game
         return _crash(e, request)
@@ -336,7 +439,7 @@ def connect(request: str) -> str:
     from bpgen import extend
     t = time.perf_counter()
     try:
-        req = json.loads(request or "{}")
+        req = _load(request)
         st = SESSION.player(req)
         held = (st.get("hands") or {}).get(req.get("id"))
         if not held:
@@ -367,7 +470,7 @@ def connect(request: str) -> str:
         absolute = _absolute(placed) if placed["box"] else None
         if absolute and last.get("clear"):
             absolute["clear"] = last["clear"]
-        return json.dumps({"blueprint": placed["blueprint"], "absolute": absolute, "notes": placed["notes"],
+        return _answer({"blueprint": placed["blueprint"], "absolute": absolute, "notes": placed["notes"],
                            "mirror": how[0], "turns": how[1], "seconds": round(time.perf_counter() - t, 3)})
     except Exception as e:  # noqa: BLE001 - shown in game
         return _crash(e, request)
@@ -380,7 +483,7 @@ def bus_report(request: str) -> str:
     from bpgen import extend
     from bpgen.service import SAVE_STATE
     try:
-        req = json.loads(request or "{}")
+        req = _load(request)
         with SESSION.lock:
             s = SESSION.svc()
             main = SESSION.site(SESSION.player(req), req["snapshot"]).bus if req.get("snapshot") else None
@@ -422,7 +525,7 @@ def add_lane(request: str) -> str:
     from bpgen import extend
     t = time.perf_counter()
     try:
-        req = json.loads(request or "{}")
+        req = _load(request)
         item = req.get("item")
         with SESSION.lock:
             s = SESSION.svc()
@@ -435,7 +538,7 @@ def add_lane(request: str) -> str:
             ents, head, length = got
             bp, box = extend.absolute_blueprint([dict(s.decorate(e), new=True) for e in ents],
                                                 f"bpgen: a new {item} lane", description="Feed it at its head.")
-        return json.dumps({
+        return _answer({
             "blueprint": bp, "label": f"a new {item} lane", "mode": "lane",
             "absolute": {"box": box, "taps": 0, "deliveries": 0, "new_lanes": 1, "axis": main["axis"],
                          "upgrades": [], "head": {"x": head[0] + 0.5, "y": head[1] + 0.5}, "item": item},

@@ -7,11 +7,13 @@
 -- taken away and the blueprint back in the cursor), Undo (the window's).
 local safe = require("safe")
 local place = require("place")
+local build = require("build")
 local ui = require("ui")
 
 local M = {}
 local ctx  -- from control.lua: measure(player, area, kind, data), around(c, r), start_job, site_set, site_delta,
--- placing(player, ghosts): the window's Undo takes these from now on
+-- placing(player, ghosts): the window's Undo takes these from now on; connected(player, res, ghosts, marks, area):
+-- a paste tied in (the window's card and its Undo)
 
 local held = safe.stored("hand_held")        -- player index -> {id, blueprint, spot = render ids}: in their cursor
 local pending = safe.stored("hand_pending")  -- player index -> {id, tick, built = {{i, x, y, direction}}, ghosts}
@@ -67,25 +69,33 @@ end
 local connect  -- (below)
 
 --- the plan put down at bpgen's spot for it (ingame.hand's answer with a spot), as if the player had pasted it
---- there: its ghosts tied into the base, the card to move it, route it again or take it back. -> true, or false
---- (no spot, or nothing could be built there: the caller hands it over instead)
+--- there (a part a tick): its ghosts tied into the base, the card to move it, route it again or take it back.
+--- -> true, or false (no spot: the caller hands it over instead; nothing built there: handed over then)
 function M.put(player, res)
   local s = res.spot
   if not (res.blueprint and s) then return false end
-  local ghosts = place.place(player, res.blueprint, { x = s[1] + s[3] / 2, y = s[2] + s[4] / 2 })
+  place.start(player, res, { x = s[1] + s[3] / 2, y = s[2] + s[4] / 2 }, nil, nil, "hand_put",
+    { id = res.id, blueprint = res.blueprint, spot = s })
+  return true
+end
+
+place.after.hand_put = function(player, ghosts, _, _, _, d)
   local built, mine = {}, {}
   for _, g in pairs(ghosts) do
     local t = g.valid and g.type == "entity-ghost" and g.tags and g.tags.bpgen_place
-    if t and t.id == res.id then
+    if t and t.id == d.id then
       built[#built + 1] = { i = t.i, x = g.position.x, y = g.position.y, direction = g.direction }
       mine[#mine + 1] = g
     end
   end
-  if #built == 0 then return false end
+  if #built == 0 then  -- (nothing could be built at the spot: in the hand to put down instead)
+    local ok, why = M.give(player, { blueprint = d.blueprint, id = d.id, spot = d.spot })
+    if ok then ui.toast(player, T("hand-put-down-spot")) else player.print({ "", "[bpgen] ", why }) end
+    return
+  end
   clear_spot(player.index)
-  held[player.index] = { id = res.id, blueprint = res.blueprint, spot = {} }
-  connect(player, { id = res.id, built = built, ghosts = mine, blueprint = res.blueprint })
-  return true
+  held[player.index] = { id = d.id, blueprint = d.blueprint, spot = {} }
+  connect(player, { id = d.id, built = built, ghosts = mine, blueprint = d.blueprint })
 end
 
 --- a ghost (or, with cheat mode, an entity) built from bpgen's handed blueprint: gathered for its placement
@@ -96,6 +106,7 @@ function M.on_built(e)
   local t = tags and tags.bpgen_place
   local h = held[e.player_index]
   if not (t and h and t.id == h.id) then return end
+  if place.placing(e.player_index, "hand_put") then return end  -- (bpgen putting it down itself: not a paste)
   local p = pending[e.player_index]
   if not p or p.tick ~= game.tick then  -- (a paste builds all its ghosts in one tick: a new tick, a new paste)
     if p then M.flush(e.player_index) end
@@ -127,8 +138,8 @@ connect = function(player, paste, full)
   local cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
   local delta = not full and ctx.site_delta(player, { cx - r, cy - r, cx + r, cy + r })
   if delta then
-    ctx.start_job(player.index, "bpgen.ingame:connect", helpers.table_to_json({ player = player.index, id = paste.id,
-      built = paste.built, delta = delta }), { player = player.index, connect = true, paste = paste })
+    ctx.start_job(player.index, "bpgen.ingame:connect", { player = player.index, id = paste.id,
+      built = paste.built, delta = delta }, { player = player.index, connect = true, paste = paste })
     return
   end
   ctx.measure(player, ctx.around({ x = cx, y = cy }, r), "connect", paste)
@@ -160,8 +171,8 @@ end
 --- the measured ground round a paste: to Python (which keeps it as the player's site: later pastes there send deltas)
 function M.measured(player, snap, paste)
   ctx.site_set(player, snap)
-  ctx.start_job(player.index, "bpgen.ingame:connect", helpers.table_to_json({ player = player.index, id = paste.id,
-    built = paste.built, snapshot = snap }), { player = player.index, connect = true, paste = paste })
+  ctx.start_job(player.index, "bpgen.ingame:connect", { player = player.index, id = paste.id,
+    built = paste.built, snapshot = snap }, { player = player.index, connect = true, paste = paste })
 end
 
 --- ingame.connect's answer: what ties the paste in, pasted as ghosts where it belongs (superforced: its splitters
@@ -178,19 +189,25 @@ function M.latest(player, job)
   return f ~= nil and job.paste ~= nil and f.latest == job.paste.token
 end
 
+--- what ties a paste in (ingame.connect's answer) placed (a part a tick), then the paste kept as the player's last
+--- and, when it is still their latest, ctx.connected(player, res, every ghost of it, what it marked, its area)
 function M.connected(player, res, job)
   local paste = job.paste or {}
   local f = inflight[player.index]
   local latest = f and f.latest == paste.token
   if f then f.tokens[paste.token or 0] = nil end
-  local plan, links, marks, area = {}, {}, {}, nil
-  for _, g in ipairs(paste.ghosts or {}) do if g.valid then plan[#plan + 1] = g end end
+  local d = { paste = paste, latest = latest, res = res }
   if res.blueprint and res.absolute then
-    local more, _, a, m = place.place(player, res.blueprint, nil, res.absolute.box)
-    for _, g in pairs(more) do links[#links + 1] = g end
-    marks, area = m, a
+    return place.start(player, res, nil, res.absolute.box, nil, "hand_links", d)
   end
-  if latest then
+  place.after.hand_links(player, {}, nil, nil, {}, d)
+end
+
+place.after.hand_links = function(player, more, _, area, marks, d)
+  local paste, plan, links = d.paste, {}, {}
+  for _, g in ipairs(paste.ghosts or {}) do if g.valid then plan[#plan + 1] = g end end
+  for _, g in pairs(more) do links[#links + 1] = g end
+  if d.latest then
     records[player.index] = { id = paste.id, blueprint = paste.blueprint, built = paste.built, plan = plan,
       links = links, marks = marks }
   end
@@ -198,13 +215,15 @@ function M.connected(player, res, job)
   local x1, y1, x2, y2
   for _, list in ipairs({ plan, links }) do
     for _, g in ipairs(list) do
-      ghosts[#ghosts + 1] = g
-      local b = g.bounding_box
-      x1, y1 = math.min(x1 or b.left_top.x, b.left_top.x), math.min(y1 or b.left_top.y, b.left_top.y)
-      x2, y2 = math.max(x2 or b.right_bottom.x, b.right_bottom.x), math.max(y2 or b.right_bottom.y, b.right_bottom.y)
+      if g.valid then
+        ghosts[#ghosts + 1] = g
+        local b = g.bounding_box
+        x1, y1 = math.min(x1 or b.left_top.x, b.left_top.x), math.min(y1 or b.left_top.y, b.left_top.y)
+        x2, y2 = math.max(x2 or b.right_bottom.x, b.right_bottom.x), math.max(y2 or b.right_bottom.y, b.right_bottom.y)
+      end
     end
   end
-  return ghosts, marks, x1 and { { x1, y1 }, { x2, y2 } } or area
+  if d.latest then ctx.connected(player, d.res, ghosts, marks, x1 and { { x1, y1 }, { x2, y2 } } or area) end
 end
 
 --- the blueprint in the player's cursor now (bpgen's handed one, or nil)
@@ -249,22 +268,22 @@ function M.card(player, text)
   card.location = { math.max(0, (player.display_resolution.width - 380 * scale) / 2), math.floor(60 * scale) }
 end
 
---- the last paste's own ghosts and its links (what it ties in with) removed, what they marked unmarked.
---- -> how many of the plan's own were built already (those stay)
-local function take_away(player, rec, plan_too)
-  local built = 0
+--- the last paste's own ghosts and its links (what it ties in with) removed (a few hundred a tick, raised: the site
+--- sees them go), what they marked unmarked; then build.on_done[then_kind] when given. -> how many of the plan's own
+--- were built already (those stay)
+local function take_away(player, rec, plan_too, then_kind, data)
+  local built, doomed = 0, {}
   for _, g in ipairs(rec.links or {}) do
-    if g.valid and g.type == "entity-ghost" then g.destroy({ raise_destroy = true }) end  -- (raised: the site sees it go)
+    if g.valid and g.type == "entity-ghost" then doomed[#doomed + 1] = g end
   end
   for _, g in ipairs(plan_too and rec.plan or {}) do
     if g.valid then
-      if g.type == "entity-ghost" then g.destroy({ raise_destroy = true }) else built = built + 1 end
+      if g.type == "entity-ghost" then doomed[#doomed + 1] = g else built = built + 1 end
     end
   end
-  for _, e in ipairs(rec.marks or {}) do
-    if e.valid and e.to_be_deconstructed() then e.cancel_deconstruction(player.force, player) end
-  end
+  local marks = rec.marks or {}
   rec.links, rec.marks = {}, {}
+  build.destroy_later(doomed, true, then_kind, data, player.index, marks, player.force)
   return built
 end
 
@@ -273,12 +292,19 @@ end
 function M.reroute(player)
   local rec = records[player.index]
   if not rec then return false, T("paste-none") end
-  take_away(player, rec, false)
   place.clear_outline(player)
+  -- (routed again once the old links are gone: the site's delta has them gone)
+  take_away(player, rec, false, "hand_reroute", { id = rec.id })
+  return true
+end
+
+build.on_done.hand_reroute = function(t)
+  local player = game.get_player(t.player)
+  local rec = player and records[player.index]
+  if not (rec and rec.id == t.data.id) then return end
   local plan = {}
   for _, g in ipairs(rec.plan or {}) do if g.valid then plan[#plan + 1] = g end end
   connect(player, { id = rec.id, built = rec.built, ghosts = plan, blueprint = rec.blueprint })
-  return true
 end
 
 --- Move: the last paste taken away (its ghosts; what's built of it already stays) and its blueprint back in the

@@ -2,6 +2,7 @@
 -- input pointed at the nearest belt of theirs already carrying that item. "Remove placed" takes the ghosts away.
 
 local safe = require("safe")
+local build = require("build")  -- (a plan built a part a tick)
 local M = {}
 
 local function free(s, force, area)
@@ -108,6 +109,60 @@ function M.place(player, bp, c, box, section)
   end
   if not x1 then return ghosts, nil, nil, now end
   return ghosts, { x = math.floor(x1 + 0.5), y = math.floor(y1 + 0.5) }, { { x1, y1 }, { x2, y2 } }, now
+end
+
+--- an answer's blueprint placed as ghosts a part a tick (its pieces: build.lua), then what follows:
+--- M.after[then_kind](player, ghosts, origin, area, marks, data) as M.place returns them (data: plain, kept).
+--- At its box when it has one (an absolute plan), else centred on c; the print labelled `section`, else the book's
+--- active one. Without pieces (an answer from before 0.29) placed at once, what follows called right away.
+M.after = {}
+function M.start(player, res, c, box, section, then_kind, data)
+  local print = build.pick(res.pieces, section, true)
+  if not print then
+    local ghosts, origin, area, marks = M.place(player, res.blueprint, c, box, section)
+    return M.after[then_kind](player, ghosts, origin, area, marks, data)
+  end
+  local fake = not player.object_name and { surface = player.surface.name, force = player.force.name } or nil
+  build.start({ surface = player.surface, force = player.force, print = print, superforced = box ~= nil,
+    origin = build.origin(print, c, box), raise = true, by_player = not fake and player.index or nil,
+    player = player.index, fake = fake, then_kind = "place", after = then_kind, data = data })
+end
+
+build.on_done.place = function(t)
+  local player = t.fake and { surface = game.get_surface(t.fake.surface), force = game.forces[t.fake.force] }
+    or game.get_player(t.player)
+  if not (player and player.valid ~= false) then return end
+  local e = t.extent
+  local origin = e and { x = math.floor(e[1] + 0.5), y = math.floor(e[2] + 0.5) } or nil
+  local area = e and { { e[1], e[2] }, { e[3], e[4] } } or nil
+  local marks = {}
+  for _, m in ipairs(t.marks) do if m.valid and m.to_be_deconstructed() then marks[#marks + 1] = m end end
+  M.after[t.after](player, t.ghosts, origin, area, marks, t.data)
+end
+
+--- the placements still going on for this player stopped -> the ghosts they put down so far
+function M.cancel(player_index)
+  local out = {}
+  local l = storage.bpgen_tasks or {}
+  for i = #l, 1, -1 do
+    local t = l[i]
+    if t.kind == "build" and t.then_kind == "place" and t.player == player_index then
+      for _, g in ipairs(t.ghosts) do out[#out + 1] = g end
+      table.remove(l, i)
+    end
+  end
+  return out
+end
+
+--- whether ghosts are still being placed for this player (as `then_kind`, or any)
+function M.placing(player_index, then_kind)
+  for _, t in ipairs(storage.bpgen_tasks or {}) do
+    if t.kind == "build" and t.then_kind == "place" and t.player == player_index
+        and (not then_kind or t.after == then_kind) then
+      return true
+    end
+  end
+  return false
 end
 
 local outlines = safe.stored("outlines")  -- player index -> the outline drawn round their last placement

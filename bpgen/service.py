@@ -533,40 +533,67 @@ class Service:
         calib = self.ensure_calibrated(params, progress, cancel)
         if progress:
             progress("planning the layout")
-        kw = self._line_kwargs(params)
         make = {k: v for k, v in (params.get("make") or {}).items() if v and v.get("recipe") and v.get("machine")}
         also = {k: v for k, v in (params.get("also") or {}).items() if v and v.get("recipe")}
-        if also or any(k in self.data.raw.get("fluid", {}) for k in make):
+        if also:  # (bundled products: one composed layout, its lanes shared after)
             return self.plan_fluid_chain(params, make, progress, cancel, also)
-        stages, warmup, p = [], None, None
+        if any(k in self.data.raw.get("fluid", {}) for k in make):
+            return self._with_layouts(params, make, self.plan_fluid_chain(params, make, progress, cancel,
+                                                                           layouts=True), "composed", progress, cancel)
+        out = kind = None
         if len(make) == 1:  # (one ingredient made next to it: by direct insertion, when the recipes fit that)
-            (mi, mv), = make.items()
-            if direct.fits(self.data, params["recipe"], params["machine"], mi, mv["recipe"], mv["machine"]) is True:
-                try:
-                    p = direct.plan(self.data, calib, params["recipe"], params["machine"], params["belt"], mi,
-                                    mv["recipe"], mv["machine"], **kw)
-                except planner.PlanError as e:
-                    if progress:
-                        progress(f"not by direct insertion ({e}): as a chain")
-            if p is not None:
-                from bpgen import rowlayout, rowspec
-                ents, sources, sinks = rowlayout.layout(rowspec.RowSpec.from_direct_plan(p), p)
-                warmup = direct.warmup_ticks(self.data, p)
-                n = p.machines - p.main_machines
-                stages.append({"item": mi, "recipe": p.made_recipe, "machine": p.made_machine, "machines": n,
-                               "per_block": n, "blocks": 1, "output": round(n * p.made_rate, 3),
-                               "need": round(n * p.made_rate, 3), "notes": [], "direct": True})
-        if p is None and make:
+            try:
+                out, kind = self.line_as(params, make, "direct", calib), "direct"
+            except planner.PlanError as e:
+                if progress:
+                    progress(f"not by direct insertion ({e}): as a chain")
+        if out is None and make:
             if progress:
                 progress(f"planning the chain: {', '.join(make)} made in the blueprint, routing belts")
             try:
-                c = chain.plan_chain(self.data, calib, params, make, **kw)
+                out, kind = self.line_as(params, make, "chain", calib), "chain"
             except planner.PlanError as e:
                 # the chain template feeds made items on the final block's own belts (2 per belt, 2 belts): when
                 # they don't fit there, the starter-base composer lays each out as its own block with routed belts
                 if progress:
                     progress(f"{e}: planning it as separate blocks with routed belts instead")
-                return self.plan_fluid_chain(params, make, progress, cancel)
+                out, kind = self.plan_fluid_chain(params, make, progress, cancel, layouts=True), "composed"
+        elif out is None:
+            return self.line_as(params, make, "plain", calib)
+        return self._with_layouts(params, make, out, kind, progress, cancel)
+
+    def _with_layouts(self, params, make, out, kind, progress=None, cancel=None):
+        """a line with ingredients made here: its other layouts too, for the window's picker (layouts.py), in
+        out["layouts"] (params "layouts": False leaves them out)"""
+        if make and params.get("layouts", True):
+            from bpgen import layouts
+            out["layouts"] = layouts.collect(self, params, make, out, kind, progress, cancel)
+        return out
+
+    def line_as(self, params, make, kind, calib=None):
+        """a line laid out one way: "direct" (its one made ingredient by direct insertion), "chain" (made items on the
+        final block's own belts) or "plain" (no ingredient made here) -> Service.plan's answer; PlanError when it
+        doesn't lay out that way"""
+        calib = calib if calib is not None else self.ensure_calibrated(params)
+        kw = self._line_kwargs(params)
+        stages, warmup = [], None
+        if kind == "direct":
+            if len(make) != 1:
+                raise planner.PlanError("direct insertion takes one ingredient made here")
+            (mi, mv), = make.items()
+            if direct.fits(self.data, params["recipe"], params["machine"], mi, mv["recipe"], mv["machine"]) is not True:
+                raise planner.PlanError("the recipes don't fit direct insertion")
+            p = direct.plan(self.data, calib, params["recipe"], params["machine"], params["belt"], mi,
+                            mv["recipe"], mv["machine"], **kw)
+            from bpgen import rowlayout, rowspec
+            ents, sources, sinks = rowlayout.layout(rowspec.RowSpec.from_direct_plan(p), p)
+            warmup = direct.warmup_ticks(self.data, p)
+            n = p.machines - p.main_machines
+            stages.append({"item": mi, "recipe": p.made_recipe, "machine": p.made_machine, "machines": n,
+                           "per_block": n, "blocks": 1, "output": round(n * p.made_rate, 3),
+                           "need": round(n * p.made_rate, 3), "notes": [], "direct": True})
+        elif kind == "chain":
+            c = chain.plan_chain(self.data, calib, params, make, **kw)
             p, ents, sources, sinks = c.final.plan, c.entities, c.sources, c.sinks
             warmup = chain.warmup_ticks(self.data, c)
             for s in c.stages:
@@ -578,7 +605,7 @@ class Service:
                                "machines": blocks * s.plan.machines, "per_block": s.plan.machines, "blocks": blocks,
                                "output": round(blocks * min(s.plan.expected_output, s.plan.machines * s.plan.output_per_machine), 3),
                                "need": round(2 * p.input_need[item], 3), "notes": s.plan.notes})
-        elif p is None:
+        else:
             p = planner.plan(self.data, calib, params["recipe"], params["machine"], params["belt"], **kw)
             ents, sources, sinks = planner.layout(p)
         ents, sources, sinks, description = labels.add_labels(self.data, ents, sources, sinks, p.output, p.expected_output)
@@ -631,7 +658,7 @@ class Service:
                     progress(f"no rate set: {round(rate, 1)}/min, what one block of {item} feeds")
         return rate
 
-    def plan_fluid_chain(self, params, make, progress=None, cancel=None, also=None):
+    def plan_fluid_chain(self, params, make, progress=None, cancel=None, also=None, layouts=False):
         """a line with ingredients made in the blueprint, fluids among them, and/or other products bundled in (`also`:
         {item: {recipe, rate_per_min}}, sharing its inputs): planned like a starter base (blocks, belts and pipes
         routed between them), with by-products burnt, sent out or converted as chosen"""
@@ -672,7 +699,10 @@ class Service:
                               # (a production line may use every calibrated inserter, not only the early ones the
                               # starter base defaults to)
                               "machines": machines, "inserters": params.get("inserters") or self._inserters(params),
-                              "bonuses": params.get("bonuses"), "productivity": params.get("productivity")},
+                              "bonuses": params.get("bonuses"), "productivity": params.get("productivity"),
+                              # (the window's layout picker: every connected layout that routes, the best by
+                              # layouts.score as the one shown)
+                              "layouts": layouts},
                              progress, cancel)
         if also and params.get("share_lanes"):
             self._share_lanes(out, params["belt"], targets)
@@ -1486,6 +1516,8 @@ class Service:
             if not SNAPSHOT.exists():
                 return None
             snap = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
+        from bpgen import snapfmt
+        snap = snapfmt.expand(snap)  # (the mod's compact records)
         snap["entities"] = [self.decorate(e) for e in snap["entities"]]
         return snap
 

@@ -5,7 +5,7 @@ local W = require("window_core")
 local ui, web, safe, MODES, NAME, T, find, forms = W.ui, W.web, W.safe, W.MODES, W.NAME, W.T, W.find, W.forms
 local join, patch_areas, results = W.join, W.patch_areas, W.results
 
-local NOT_KEPT = { bpgen_only_unlocked = true, bpgen_section = true, bpgen_docked = true, bpgen_web = true,
+local NOT_KEPT = { bpgen_only_unlocked = true, bpgen_section = true, bpgen_layout = true, bpgen_docked = true, bpgen_web = true,
   bpgen_size = true }
 
 local function keep_form(player)
@@ -94,6 +94,7 @@ end
 local function changed(e)
   local el = e.element
   if not (el and el.valid) or el.name == "bpgen_only_unlocked" or el.name == "bpgen_section"
+    or el.name == "bpgen_layout"
     or el.name == "bpgen_docked" or el.name == "bpgen_web" then return end
   local root = el
   while root.parent and root.parent.parent do root = root.parent end

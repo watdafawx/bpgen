@@ -38,7 +38,9 @@ local function show_tiles(frame, res, w, h)
   end
   if a.box then tile(a.box[3] .. " × " .. a.box[4], "tile-size")
   elseif type(w) == "number" then tile(math.floor(w) .. " × " .. math.floor(h), "tile-size") end
-  tile(sm.machines or (res.mall and res.mall.machines), "tile-machines")
+  -- (a line with layouts: every machine of the print, as the layout picker counts them)
+  local lay = res.layouts and res.layouts[res.layout or 1]
+  tile(lay and lay.machines or sm.machines or (res.mall and res.mall.machines), "tile-machines")
   if a.taps then tile(a.taps, "tile-taps") end
   if a.inputs and #a.inputs > 0 then tile(#a.inputs, "tile-by-hand") end
   if res.expected then  -- (whole numbers from 100 on: three tiles fit the left panel's width)
@@ -107,17 +109,37 @@ local function no_blueprint(player, frame, res)
   return true
 end
 
---- the plan built on the preview and the camera on it; -> center, w, h, where (or the error in w)
-local function show_preview(player, frame, res, reuse)
+--- one of a line's layouts in the picker, short enough for the left panel: "A  26×17 = 486  [belt] 55  [machine] 4  blocks"
+local LETTERS = "ABCDEFGH"
+local function layout_item(i, l, s)
+  local belt = s.belt and prototypes.entity[s.belt] and ("[entity=" .. s.belt .. "]") or "[item=transport-belt]"
+  local machine = s.machine and prototypes.entity[s.machine] and ("[entity=" .. s.machine .. "]")
+    or "[item=assembling-machine-2]"
+  return T("layout-item", LETTERS:sub(i, i), l.w, l.h, l.area, belt .. l.belts, machine .. l.machines,
+    T("layout-" .. (l.kind or "composed")))
+end
+
+--- the plan built on the preview and the camera on it; -> center, w, h, where (or the error in w; or nil,
+--- "pending": the preview is being built over the next ticks, W.preview_built does `redo` again once it is)
+local function show_preview(player, frame, res, reuse, redo)
   local old = bench.find("test", player.index)
   if old then bench.stop(old.id) end
   W.test_speed_off(frame)  -- (a test run's fast-forward: off with it)
   find(frame, "bpgen_test_status").caption = ""
-  local center, w, h, where = W.build_preview(player, res.blueprint, res.absolute and res.absolute.box, nil, reuse)
+  local center, w, h, where = W.build_preview(player, res.blueprint, res.absolute and res.absolute.box, nil, reuse,
+    res.pieces)
   local sec = find(frame, "bpgen_section")
   sec.items = res.sections or {}
   sec.visible = res.sections ~= nil and #res.sections > 1
   if sec.visible then sec.selected_index = 1 end
+  local lay = find(frame, "bpgen_layout")
+  if lay then
+    local items = {}
+    for i, l in ipairs(res.layouts or {}) do items[i] = layout_item(i, l, res.summary or {}) end
+    lay.items = items
+    lay.visible = #items > 1
+    if lay.visible then lay.selected_index = res.layout or 1 end
+  end
   local cam, empty = find(frame, "bpgen_cam"), find(frame, "bpgen_empty")
   if center then
     local z = W.fit(player, w, h)
@@ -126,12 +148,28 @@ local function show_preview(player, frame, res, reuse)
     cam.position = center
     cam.zoom = z
     cam.visible, empty.visible = true, false
+  elseif w == "pending" then
+    results[player.index] = { blueprint = res.blueprint, res = res, redo = redo or { "result" } }
+    cam.visible, empty.visible = false, true
+    empty.caption = T("drawing-preview")
   else
     results[player.index] = { blueprint = res.blueprint, res = res }
     cam.visible, empty.visible = false, true
     empty.caption = T("no-preview", type(w) == "table" and w or tostring(w))
   end
   return center, w, h, where
+end
+
+--- the preview being built (show_preview: pending) is: the window shows it, as what asked for it would have
+function W.preview_built(player, key)
+  local r = results[player.index]
+  local frame = player.gui.screen[NAME]
+  if not (r and r.redo and frame) then return end
+  local redo = r.redo
+  r.redo = nil
+  if redo[1] == "layout" then return W.pick_layout(player, redo[2], true) end
+  if redo[1] == "section" then return W.show_section(player, redo[2], true) end
+  W.on_result(player, r.res, true, true)
 end
 
 --- the buttons that have a plan to act on now (To cursor, Copy, Place it, Place by my base, Sandbox, the moves, Test run)
@@ -272,7 +310,8 @@ local function ask_helpers(player, res, s)
   end
 end
 
-function W.on_result(player, res, reuse)
+--- `again`: the same answer once more, its preview built now (its helpers aren't asked again)
+function W.on_result(player, res, reuse, again)
   local frame = player.gui.screen[NAME]
   if not frame then return false end
   web.dirty(player)
@@ -292,12 +331,45 @@ function W.on_result(player, res, reuse)
   status(frame, res.mode == "lane" and T("preview-shows-lane") or res.mode == "busdesign" and T("preview-shows-bus")
     or res.absolute and T("preview-shows-base") or "")
   upgrade_buttons(frame, res)
-  ask_helpers(player, res, s)
-  if to_sandbox[player.index] then  -- ("Try in sandbox" asked for it by the base first: there now, on to the lab)
+  if not again then ask_helpers(player, res, s) end
+  if to_sandbox[player.index] and center then  -- ("Try in sandbox" asked for it by the base first: on to the lab)
     to_sandbox[player.index] = nil
     if res.absolute then W.try_sandbox(player) end
   end
   return true
+end
+
+--- another of the line's layouts picked under the preview: its print in the preview, and the plan To cursor, Copy,
+--- Place by my base and the test run take; nothing is planned again
+function W.pick_layout(player, i, reuse)
+  local frame = player.gui.screen[NAME]
+  local r = results[player.index]
+  local base = r and (r.layouts_of or r.res)
+  local l = base and base.layouts and base.layouts[i]
+  if not (frame and l) then return end
+  local res = {}
+  for k, v in pairs(base) do res[k] = v end
+  res.blueprint, res.sections, res.test, res.layout, res.pieces = l.blueprint, l.sections, l.test, i, l.pieces
+  local center, w, h, where = show_preview(player, frame, res, reuse, { "layout", i })
+  r = results[player.index]
+  r.layouts_of = base  -- (the plan as it came: the picker's list and its own layout)
+  find(frame, "bpgen_layout").selected_index = i
+  show_tiles(frame, res, w, h)
+  result_buttons(frame, res, where)
+  web.dirty(player)
+  return center ~= nil
+end
+
+--- (tests) the plan the buttons act on now: its blueprint string and the layout picked
+function W.last_blueprint(player_index)
+  local r = results[player_index]
+  return r and { blueprint = r.blueprint, layout = r.res and r.res.layout or 1 } or nil
+end
+
+--- the layout picked under the preview (1 = the plan's own), or nil
+function W.layout_pick(frame)
+  local lay = frame and find(frame, "bpgen_layout")
+  return lay and lay.visible and lay.selected_index > 0 and lay.selected_index or nil
 end
 
 -- (what the other parts call)

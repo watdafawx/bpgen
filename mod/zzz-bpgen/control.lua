@@ -4,6 +4,10 @@
 --   snapshot.json  an area of the base picked with the snapshot tool (the window's Extend tab)
 
 local safe = require("safe")
+local tasks = require("tasks")  -- (work spread over ticks)
+local reader = require("reader")  -- (an area of the base read for Python, over ticks)
+local place = require("place")  -- (ghosts placed a part a tick)
+local build = require("build")
 -- (every handler guarded: an error never takes the game down)
 local function on_event(ev, fn, filters) script.on_event(ev, safe.guard("bpgen", fn), filters) end
 local function on_nth(n, fn) script.on_nth_tick(n, safe.guard("bpgen", fn)) end
@@ -123,6 +127,14 @@ local function deliver(n, status, out)
   end
 end
 
+--- a part of a big snapshot handed to Python ahead of its job (reader.request_json)
+local function send_part(text)
+  local id = native.start("py", "bpgen.ingame:part", text)
+  if id then local_jobs[id] = { part = true } end
+end
+
+--- `input`: the request as text, or as a table (its snapshot is written as text over the next ticks, by this peer
+--- only, before the job starts)
 local function start_job(player_index, fn, input, job)
   storage.bpgen_jobs = storage.bpgen_jobs or {}
   storage.bpgen_job_n = (storage.bpgen_job_n or 0) + 1
@@ -130,76 +142,48 @@ local function start_job(player_index, fn, input, job)
   job.at = game.tick
   storage.bpgen_jobs[n] = job
   if runs_here(player_index) then
-    local id, err = native.start("py", fn, input)
-    if id then running[id] = n else deliver(n, "error", tostring(err)) end
+    local function go(text)
+      local id, err = native.start("py", fn, text)
+      if id then running[id] = n else deliver(n, "error", tostring(err)) end
+    end
+    if type(input) == "table" then
+      local ok, err = pcall(reader.request_json, input, go)
+      if not ok then deliver(n, "error", tostring(err)) end  -- (a request that won't write: said, not waited for)
+    else
+      go(input)
+    end
   end
   return true
 end
 
-local snapshot  -- (below: an area of the base, for bpgen to build next to)
-local record  -- (below: one entity as the snapshot records it)
--- what makes power: a pole on the same network as one of these has power to give (a mall's own poles may not)
-local POWER_SOURCES = { ["generator"] = true, ["burner-generator"] = true, ["solar-panel"] = true,
-  ["accumulator"] = true, ["electric-energy-interface"] = true, ["fusion-generator"] = true,
-  ["lightning-attractor"] = true }
 local PLACE_R = 48  -- without an area picked with the snapshot tool: the snapshot reaches this far around a spot
 local snaps = safe.stored("snaps")  -- player index -> the area last picked with the snapshot tool
 local function around(c, r)
   r = r or PLACE_R
   return { left_top = { x = c.x - r, y = c.y - r }, right_bottom = { x = c.x + r, y = c.y + r } }
 end
+local record = reader.record  -- (one entity as the snapshot records it)
 
--- What the belts carry, measured: an area's snapshot, then each belt looked at again MEASURE_TICKS later; a belt's
--- flow is its belt speed times the items that moved on it (items/s, both lanes), so bpgen knows how much of a bus
--- lane is used and whether it runs dry or backs up. Pending measurements are kept in storage (what follows is a
--- kind of after[] and its plain data, so a peer joining meanwhile finishes them too).
-local MEASURE_TICKS = 30
+-- An area of the base read for Python (reader.lua: over ticks, a few cells a tick), with the belts' flows measured
+-- unless `flows` is false; then after[kind](player, snapshot, data). The reader is kept in storage, so a peer
+-- joining meanwhile finishes it too; `data` is plain data.
 local after = {}  -- kind -> function(player, snap, data): what follows a measurement
-local function measuring()
-  storage.bpgen_measuring = storage.bpgen_measuring or {}  -- {tick, snap, belts = {{e, ids, rec}}, kind, data, player | fake}
-  return storage.bpgen_measuring
+-- Its records go to Python as they are read, from the peer that runs the job (a big base's never pile up in Lua);
+-- KEEP: kinds whose snapshot is also written to a file (kept by this peer). `flows` false: belts not measured.
+local KEEP = { snapshot_tool = true, measure_area = true }
+local SINK_ONLY = { test_request = true }  -- (tests: sent nowhere, as a job's would be)
+local function measure(player, area, kind, data, flows)
+  local send = player.index and in_game() and runs_here(player.index) and send_part
+    or SINK_ONLY[kind] and function() end or nil
+  reader.start(player.surface, player.force, area, flows ~= false, { then_kind = kind, data = data,
+    player = player.index, fake = not player.index and { surface = player.surface.name, force = player.force.name } or nil },
+    send, KEEP[kind])
 end
-
-local function belt_ids(e)  -- unique id -> position along its line, both lines
-  local t = {}
-  for i = 1, 2 do
-    for _, it in pairs(e.get_transport_line(i).get_detailed_contents()) do t[it.unique_id] = it.position end
-  end
-  return t
-end
-
---- snapshot `area` and, MEASURE_TICKS later, give it to done(snap) with each transport belt's flow and items
-local function measure(player, area, kind, data)
-  local snap = snapshot(player, area, true)
-  local recs = {}
-  for _, r in ipairs(snap.entities) do
-    if r.type == "transport-belt" and not r.ghost then recs[string.format("%.1f,%.1f", r.position.x, r.position.y)] = r end
-  end
-  local belts = {}
-  for _, e in pairs(player.surface.find_entities_filtered({ area = area, type = "transport-belt", force = player.force })) do
-    local rec = recs[string.format("%.1f,%.1f", e.position.x, e.position.y)]
-    if rec then belts[#belts + 1] = { e = e, ids = belt_ids(e), rec = rec } end
-  end
-  local m = measuring()
-  m[#m + 1] = { tick = game.tick + MEASURE_TICKS, snap = snap, belts = belts, kind = kind, data = data,
-    player = player.index, fake = not player.index and { surface = player.surface.name, force = player.force.name } or nil }
-end
-
-local function measured_now(m)
-  for _, b in ipairs(m.belts) do
-    if b.e.valid then
-      local now, n, moved = belt_ids(b.e), 0, 0
-      for id, pos in pairs(b.ids) do
-        n = n + 1
-        if now[id] ~= pos then moved = moved + 1 end
-      end
-      b.rec.items = n
-      b.rec.flow = math.floor(b.e.prototype.belt_speed * 60 * moved * 10 + 0.5) / 10
-    end
-  end
-  local player = m.player and game.get_player(m.player)
-    or m.fake and { surface = game.get_surface(m.fake.surface), force = game.forces[m.fake.force] }
-  if player and player.surface then after[m.kind](player, m.snap, m.data) end
+reader.done = function(r)
+  if not r.then_kind then return end
+  local player = r.player and game.get_player(r.player)
+    or r.fake and { surface = game.get_surface(r.fake.surface), force = game.forces[r.fake.force] }
+  if player and player.surface then after[r.then_kind](player, r.snap, r.data) end
 end
 
 local window = require("window")
@@ -271,8 +255,17 @@ local function site_removed(e)
   end
 end
 
+-- (what a reading for the window shows in its progress bar)
+local READ_SHOWN = { plan = true, move = true, place_base = true, add_lane = true }
+reader.progress = function(r, fraction)
+  local player = r.player and READ_SHOWN[r.then_kind] and game.get_player(r.player)
+  if player then window.on_progress(player, { fraction = fraction, step = { "bpgen-window.reading-base",
+    math.floor(fraction * 100) } }) end
+end
+
 hand.setup({ measure = measure, around = around, start_job = start_job, site_set = site_set, site_delta = site_delta,
-  placing = function(player, ghosts) window.placing(player, ghosts) end })
+  placing = function(player, ghosts) window.placing(player, ghosts) end,
+  connected = function(player, res, ghosts, marks, area) window.on_connected(player, res, ghosts, marks, area) end })
 -- the last plan as a blueprint for the player's cursor (params: seed, bus, section, turn): measured round them first
 local function hand_plan(player, params)
   if not in_game() then return false, "start the game with the fse loader" end
@@ -296,13 +289,14 @@ window.setup({
     request.player = player.index  -- (bpgen keeps each player's last plan: Place by my base finds this one)
     helpers.write_file("bpgen/request.json", helpers.table_to_json(request), false)
     local function go()
-      return start_job(player.index, "bpgen.ingame:plan", helpers.table_to_json(request),
+      return start_job(player.index, "bpgen.ingame:plan", request,
         { player = player.index, recipe = request.recipe, window = true })
     end
     if request.params and (request.params.mode == "base" and (request.params.fit_bus or request.params.add_to)
         or request.params.mode == "mall" and request.params.add_to) then
       -- (a base fitted to a bus lands where the bus ends: the ground there, water and what's built, around you)
-      request.params.snapshot = snapshot(player, around(player.position, 200), true)
+      measure(player, around(player.position, 200), "plan", request, false)
+      return true
     end
     if request.params and request.params.mode == "busdesign" then
       -- (the ground from the patches to the player and round it: ore, what's in the way, room for the bus head)
@@ -312,8 +306,9 @@ window.setup({
         x1, y1, x2, y2 = math.min(x1, a[1]), math.min(y1, a[2]), math.max(x2, a[3]), math.max(y2, a[4])
       end
       local m = 100
-      request.params.snapshot = snapshot(player,
-        { left_top = { x = x1 - m, y = y1 - m }, right_bottom = { x = x2 + m, y = y2 + m } }, true)
+      measure(player, { left_top = { x = x1 - m, y = y1 - m }, right_bottom = { x = x2 + m, y = y2 + m } }, "plan",
+        request, false)
+      return true
     end
     if request.params and request.params.move then
       -- (the section and where it goes, round both: the ground it lands on, the belts it's run to)
@@ -335,6 +330,11 @@ window.setup({
       if picked and (picked.surface ~= player.surface.name or pos.x < picked.area[1] - PLACE_R
           or pos.x > picked.area[3] + PLACE_R or pos.y < picked.area[2] - PLACE_R or pos.y > picked.area[4] + PLACE_R) then
         snaps[player.index], picked = nil, nil  -- (an area picked somewhere else: the player has moved on)
+      end
+      if picked and not reader.sent(picked) then  -- (picked before the game was loaded: Python hasn't its parts)
+        measure(player, { left_top = { x = picked.area[1], y = picked.area[2] },
+          right_bottom = { x = picked.area[3], y = picked.area[4] } }, "plan", request)
+        return true
       end
       if picked then
         request.params.snapshot = picked
@@ -360,6 +360,7 @@ window.setup({
     local m = r - PLACE_R / 2
     -- (the window's arrows, Rotate, Redo: the last snapshot again while the spot is well inside it, not measured anew)
     local last = params.again and (storage.bpgen_place_snap or {})[player.index]
+    if not reader.sent(last) then last = nil end  -- (read before the game was loaded: read again)
     if last and seed.x - last.area[1] > m and last.area[3] - seed.x > m
         and seed.y - last.area[2] > m and last.area[4] - seed.y > m then
       after.place_base(player, last, params)
@@ -383,7 +384,7 @@ window.setup({
   -- the web app's helpers (recipe tree, save check, module ideas, history): answers go to window.on_api
   api = function(player, fn, params, tag)
     if in_game() then
-      start_job(player.index, "bpgen.ingame:api", helpers.table_to_json({ fn = fn, params = params }),
+      start_job(player.index, "bpgen.ingame:api", { fn = fn, params = params },
         { player = player.index, api = tag })
     end
   end,
@@ -450,6 +451,14 @@ local function line_done(player, ghosts, err, abs)
   end
 end
 
+build.on_done.test_area = function(t) storage.bpgen_test_area = { parts = t.parts, wires = t.wires } end
+place.after.test = function(_, ghosts, _, _, marks) storage.bpgen_test_placed, storage.bpgen_test_marks = ghosts, marks end
+-- (a line placed for another mod: its ghosts are what Undo takes back, the asker told)
+place.after.auto_line = function(player, ghosts, _, _, _, d)
+  window.placing(player, ghosts)
+  line_done(player, #ghosts, nil, d.absolute)
+end
+
 local function plan_line(player, item, rate, reply)
   auto[player.index] = { item = item, rate = rate, reply = reply or "ai-crew" }
   if not in_game() then return line_done(player, nil, "bpgen plans only with the fse loader") end
@@ -464,18 +473,14 @@ local function finish(job, out)
   if job.auto then
     if res.measure then return window.calibrate(player, res.measure) end -- then planned again (job.measured)
     if not res.blueprint then return line_done(player, nil, tostring(res.error)) end
-    local n = window.place_plan(player, res)
-    return line_done(player, n, nil, res.absolute or {})
+    return window.place_plan(player, res, "auto_line", { absolute = res.absolute or {} })
   end
   if job.hand then return window.on_hand(player, res) end
   if job.connect then
     if not hand.current(player, job) then return end  -- (undone, or another paste since: dropped)
     if res.rescan then return hand.rescan(player, job) end  -- (Python's site isn't the one the delta was from)
     if res.error then return window.on_connected(player, res) end
-    local latest = hand.latest(player, job)
-    local ghosts, marks, area = hand.connected(player, res, job)
-    if latest then window.on_connected(player, res, ghosts, marks, area) end
-    return
+    return hand.connected(player, res, job)  -- (then window.on_connected, once its links are placed)
   end
   if job.window and window.on_result(player, res) then return end
   if not res.blueprint then
@@ -523,10 +528,6 @@ end
 
 on_nth(6, function()
   hand.tick()
-  local m = measuring()
-  for i = #m, 1, -1 do
-    if game.tick >= m[i].tick then measured_now(table.remove(m, i)) end
-  end
   if not warmed then
     warmed = true
     -- (loads bpgen's data before the first plan; its answer is collected and dropped)
@@ -545,7 +546,9 @@ on_nth(6, function()
     local status, out = native.poll(id)
     if status ~= "pending" then
       local_jobs[id] = nil
-      if job.warm then
+      if job.part then
+        if status ~= "done" then safe.log("bpgen.ingame:part failed: " .. tostring(out)) end
+      elseif job.warm then
         if status ~= "done" then safe.log("bpgen.ingame:warm failed: " .. tostring(out)) end
       else
         local r = status == "done" and helpers.json_to_table(out) or {}
@@ -858,10 +861,15 @@ on_event(defines.events.on_research_reversed, function(e)
 end)
 -- (what a force has unlocked changed without a research: the window's "Only unlocked" pickers build theirs again)
 on_event(defines.events.on_force_reset, function(e) window.forget_unlocked(e.force) end)
-on_event(defines.events.on_technology_effects_reset, function(e) window.forget_unlocked(e.force) end)
+on_event(defines.events.on_technology_effects_reset, function(e)
+  window.forget_unlocked(e.force)
+  window.preview_stale()  -- (the preview's force: its recipes enabled again next time)
+end)
 script.on_configuration_changed(safe.guard("bpgen", function()
   research_cache, static = {}, nil
+  storage.bpgen_measuring = nil  -- (before 0.29.0: readings done in one tick)
   window.forget_unlocked()  -- (other mods, other recipes and machines)
+  window.preview_stale()
 end))
 on_nth(60, function(e)
   if dirty_tick and e.tick >= dirty_tick then
@@ -878,139 +886,19 @@ end)
 
 -- Snapshot of an area ------------------------------------------------------------------------------------------
 
-local SKIP = { character = true, ["item-entity"] = true, ["item-request-proxy"] = true, ["entity-ghost"] = false,
-  ["character-corpse"] = true, corpse = true, ["flying-text"] = true, ["highlight-box"] = true, explosion = true,
-  smoke = true, particle = true, projectile = true, sticker = true, fire = true, ["deconstructible-tile-proxy"] = true,
-  ["tile-ghost"] = true }
-local OBSTACLE = { tree = true, ["simple-entity"] = true, cliff = true, ["unit-spawner"] = true, turret = false,
-  ["fish"] = false }
-local BELTS = { ["transport-belt"] = 2, ["underground-belt"] = 2, splitter = 4, loader = 2, ["loader-1x1"] = 2 }
-
---- the item most present on each lane of a belt-like entity (nil when empty)
-local function lanes(ent)
-  local out = {}
-  for i = 1, BELTS[ent.type] do
-    local best, n = nil, 0
-    for _, c in pairs(ent.get_transport_line(i).get_contents()) do
-      if c.count > n then best, n = c.name, c.count end
-    end
-    out[i] = best or false
-  end
-  return out
-end
-
-local PIPES = { pipe = true, ["pipe-to-ground"] = true, ["storage-tank"] = true, pump = true }
-
---- the fluid in a pipe-like entity, or the one its network is locked to while it is empty
-local function pipe_fluid(ent)
-  local f = ent.fluidbox[1]
-  if f then return f.name end
-  local ok, locked = pcall(ent.fluidbox.get_locked_fluid, 1)
-  return ok and locked or nil
-end
-
---- tiles -> {y: [[x1, x2], ...]} runs (much smaller than one entry per tile)
-local function runs(positions)
-  local rows = {}
-  for _, p in pairs(positions) do
-    local y = math.floor(p.y)
-    rows[y] = rows[y] or {}
-    rows[y][#rows[y] + 1] = math.floor(p.x)
-  end
-  local out = {}
-  for y, xs in pairs(rows) do
-    table.sort(xs)
-    local r, start, prev = {}, xs[1], xs[1]
-    for i = 2, #xs + 1 do
-      local x = xs[i]
-      if x ~= prev + 1 then
-        r[#r + 1] = { start, prev }
-        start = x
-      end
-      prev = x
-    end
-    out[tostring(y)] = r
-  end
-  return out
-end
-
---- an entity of `force` (or a ghost) as the snapshot records it, or nil (not one bpgen builds round)
-record = function(e, force)
-  local t = e.type
-  if OBSTACLE[t] or SKIP[t] or t == "resource" or not (e.force == force or t == "entity-ghost") then return nil end
-  local name, ty = e.name, t
-  if t == "entity-ghost" then name, ty = e.ghost_name, e.ghost_type end
-  local b = e.bounding_box
-  local out = { name = name, type = ty, position = { x = e.position.x, y = e.position.y }, direction = e.direction,
-    box = { b.left_top.x, b.left_top.y, b.right_bottom.x, b.right_bottom.y } }
-  if t == "entity-ghost" then out.ghost = true end
-  if ty == "assembling-machine" or ty == "furnace" then
-    local r = e.get_recipe()
-    if not r and ty == "furnace" and t ~= "entity-ghost" then r = e.previous_recipe and e.previous_recipe.name end
-    out.recipe = type(r) == "string" and r or (r and r.name) or nil
-  end
-  if ty == "underground-belt" then out.ug_type = e.belt_to_ground_type end
-  if (ty == "loader" or ty == "loader-1x1") then out.ug_type = e.loader_type end
-  if BELTS[t] then out.lanes = lanes(e) end
-  if t == "electric-pole" then out.network = e.electric_network_id end
-  if PIPES[t] then out.fluid = pipe_fluid(e) end
-  return out
-end
-
-snapshot = function(player, area, keep)  -- keep: the snapshot back instead of written to snapshot.json
-  local surface = player.surface
-  local ents, obstacles = {}, {}
-  local powered, poles = {}, {}  -- electric network ids with a power source on them; the poles' records
-  for _, e in pairs(surface.find_entities_filtered({ area = area })) do
-    local t = e.type
-    if OBSTACLE[t] then
-      local b = e.bounding_box
-      obstacles[#obstacles + 1] = { b.left_top.x, b.left_top.y, b.right_bottom.x, b.right_bottom.y, t }
-    else
-      local out = record(e, player.force)
-      if out then
-        if t == "electric-pole" then poles[#poles + 1] = out end
-        if POWER_SOURCES[t] and e.electric_network_id then powered[e.electric_network_id] = true end
-        ents[#ents + 1] = out
-      end
-    end
-  end
-  for _, p in ipairs(poles) do p.powered = p.network ~= nil and powered[p.network] == true end
-  local resources, fluid_resources = {}, {}
-  for _, r in pairs(surface.find_entities_filtered({ area = area, type = "resource" })) do
-    if r.prototype.resource_category == "basic-fluid" then  -- (oil: each one a pumpjack's spot, and its yield)
-      fluid_resources[#fluid_resources + 1] = { name = r.name, x = r.position.x, y = r.position.y, amount = r.amount }
-    end
-    resources[r.name] = resources[r.name] or {}
-    local list = resources[r.name]
-    list[#list + 1] = r.position
-  end
-  for name, list in pairs(resources) do resources[name] = runs(list) end
-  local water = {}
-  for _, tile in pairs(surface.find_tiles_filtered({ area = area, collision_mask = "water_tile" })) do
-    water[#water + 1] = tile.position
-  end
-  local snap = {
-    tick = game.tick,
-    surface = surface.name,
-    area = { area.left_top.x, area.left_top.y, area.right_bottom.x, area.right_bottom.y },
-    entities = ents,
-    obstacles = obstacles,
-    resources = resources,
-    fluid_resources = fluid_resources,
-    water = runs(water),
-  }
-  if keep then return snap end
-  helpers.write_file("bpgen/snapshot.json", helpers.table_to_json(snap), false)
+--- the area read now and written to snapshot.json (with state.json): the web app's, and the tests'
+local function snapshot_now(player, area, file)
+  local snap, kept = reader.read_now(player.surface, player.force, area)
+  reader.write_file(file or "bpgen/snapshot.json", reader.pieces(snap, kept), true)
   write_state(player.force)
-  return #ents
+  return snap.count
 end
 
 -- what follows a measurement (see measure): one function per kind, the data plain
 local function plan_with(player, snap, request, fn, job)
   request.player = player.index  -- (bpgen keeps each player's last plan and ground apart)
   request.params.snapshot = snap
-  start_job(player.index, fn, helpers.table_to_json(request), job)
+  start_job(player.index, fn, request, job)
 end
 after.plan = function(player, snap, request)
   plan_with(player, snap, request, "bpgen.ingame:plan", { player = player.index, recipe = request.recipe, window = true })
@@ -1027,33 +915,36 @@ after.place_base = function(player, snap, params)
   params.again = nil
   params.snapshot = snap
   params.player = player.index
-  start_job(player.index, "bpgen.ingame:place", helpers.table_to_json(params), { player = player.index, recipe = "", window = true })
+  start_job(player.index, "bpgen.ingame:place", params, { player = player.index, recipe = "", window = true })
 end
 after.hand = function(player, snap, params)
   site_set(player, snap)  -- (Python keeps this one: pastes in it send what changed since)
   params.snapshot, params.player = snap, player.index
   params.seed = params.seed or { x = player.position.x, y = player.position.y }
-  start_job(player.index, "bpgen.ingame:hand", helpers.table_to_json(params), { player = player.index, hand = true })
+  start_job(player.index, "bpgen.ingame:hand", params, { player = player.index, hand = true })
 end
 after.connect = function(player, snap, data) hand.measured(player, snap, data) end
 after.bus_report = function(player, snap, belts)
-  start_job(player.index, "bpgen.ingame:bus_report", helpers.table_to_json({ snapshot = snap, belts = belts }),
+  start_job(player.index, "bpgen.ingame:bus_report", { snapshot = snap, belts = belts },
     { player = player.index, api = "bus" })
 end
 after.add_lane = function(player, snap, item)
-  start_job(player.index, "bpgen.ingame:add_lane", helpers.table_to_json({ snapshot = snap, item = item }),
+  start_job(player.index, "bpgen.ingame:add_lane", { snapshot = snap, item = item },
     { player = player.index, recipe = "", window = true })
 end
 after.snapshot_tool = function(player, snap, area)
   snaps[player.index] = snap  -- (in game: sent with the next extend; the file is for the web app)
-  helpers.write_file("bpgen/snapshot.json", helpers.table_to_json(snap), false)
-  write_state(player.force)
-  player.print({ "", "[bpgen] snapshot sent: ", #snap.entities, " entities, ",
+  reader.write_file("bpgen/snapshot.json", reader.pieces(snap, reader.kept(snap)))
+  start_state(player.force)
+  player.print({ "", "[bpgen] snapshot sent: ", snap.count, " entities, ",
     math.floor(area.right_bottom.x - area.left_top.x), "x", math.floor(area.right_bottom.y - area.left_top.y), " tiles" })
 end
+after.test_request = function(fake, snap)  -- (tests: a request as a plan's, handed to nobody)
+  reader.request_json({ recipe = "test", params = { snapshot = snap } }, function() end)
+end
 after.measure_area = function(fake, snap)
-  helpers.write_file("bpgen/snapshot.json", helpers.table_to_json(snap), false)
-  write_state(fake.force)
+  reader.write_file("bpgen/snapshot.json", reader.pieces(snap, reader.kept(snap)))
+  start_state(fake.force)
 end
 
 -- answers from the peer that ran a job (multiplayer)
@@ -1140,6 +1031,8 @@ remote.add_interface("bpgen", {
   -- (tests) the recipe filters "Only unlocked" sets, for a force
   recipe_filters = function(force_name) return window.recipe_filters(game.forces[force_name or "player"]) end,
   plan_window = function(player_index) window.plan(game.get_player(player_index)) end,
+  -- (tests) the blueprint the window's buttons act on now, and which of a line's layouts it is
+  last_blueprint = function(player_index) return window.last_blueprint(player_index) end,
   -- (tests) a button press, as its tags; as_button: as the player's own press (Undo asks first, as for a click)
   click = function(player_index, tags, as_button) window.click(player_index, tags, as_button) end,
   -- (tests) the planning progress bar at {fraction, step, lines}
@@ -1165,23 +1058,60 @@ remote.add_interface("bpgen", {
   hover_grip = function(player_index) window.test_hover_grip(player_index) end,
   compat_scan = function(player_index) compat.scan(game.get_player(player_index)) end,
   hovered_recipe = function(e) return compat.hovered_recipe(e) end,  -- (tests: Ctrl+Shift+B over that)
-  preview = function(bp, force_name) return window.preview({ index = 1, force = game.forces[force_name or "player"] }, bp) end,
+  -- (tests) a blueprint's preview, built at once; or an answer's (JSON, its pieces): built over the next ticks
+  -- ({pending = true}), preview_done then tells what was built
+  preview = function(bp, force_name, answer)
+    return window.preview({ index = 1, force = game.forces[force_name or "player"] }, bp,
+      answer and helpers.json_to_table(answer))
+  end,
+  preview_done = function(force_name)
+    return window.preview_result({ index = 1, force = game.forces[force_name or "player"] })
+  end,
   bench_test = function(spec, where) return window.bench_test(1, spec, where) end,
   bench_calibrate = function(spec) return window.bench_calibrate(1, spec) end,
   bench_last = function(kind) return window.bench_last(kind) end,
   write_request = function(entity) local r, err = write_request(entity.force, entity) return err end,
   write_state = function(force_name) write_state(game.forces[force_name or "player"]) end,
-  snapshot_area = function(surface_name, area, force_name)
+  snapshot_area = function(surface_name, area, force_name, file)
     -- headless: a pretend player on that surface and force
     local fake = { surface = game.surfaces[surface_name or "nauvis"], force = game.forces[force_name or "player"] }
-    return snapshot(fake, area)
+    return snapshot_now(fake, area, file)
   end,
+  -- (tests) an answer's plan placed as ghosts (its pieces, a part a tick) by a stand-in player at c or at box, as
+  -- Place it does; test_placed: what was placed ({name, x, y, direction} each, and how many), test_unplace: Undo
+  test_place = function(answer, c, box, surface_name, force_name)
+    local fake = { surface = game.surfaces[surface_name or "nauvis"], force = game.forces[force_name or "player"] }
+    storage.bpgen_test_placed = nil
+    place.start(fake, helpers.json_to_table(answer), c, box, nil, "test", {})
+  end,
+  test_placed = function()
+    local out = {}
+    for _, g in ipairs(storage.bpgen_test_placed or {}) do
+      if g.valid then out[#out + 1] = { name = g.ghost_name or g.name, x = g.position.x, y = g.position.y,
+        direction = g.direction } end
+    end
+    return out
+  end,
+  -- (tests) an area blueprinted a cell a tick, as the Move tool does; test_area_printed: its parts and wires
+  test_area_print = function(area, surface_name, force_name)
+    storage.bpgen_test_area = nil
+    build.area_print(game.surfaces[surface_name or "nauvis"], game.forces[force_name or "player"], area, "test_area", {})
+  end,
+  test_area_printed = function() return storage.bpgen_test_area end,
+  test_unplace = function()
+    build.destroy_later(storage.bpgen_test_placed or {}, true, nil, nil, nil, storage.bpgen_test_marks or {})
+  end,
+  -- (tests) whether bpgen still has work spread over the coming ticks
+  busy = function() return tasks.busy() end,
+  debug_tasks = function(on, gc_kb) tasks.debug, tasks.gc_kb = on, gc_kb or tasks.gc_kb end,
+  heap = function() return collectgarbage("count") end,
   -- the same, with the belts' flows measured: snapshot.json is written MEASURE_TICKS later
   -- the sandbox without a player: a lab of `plan` (see sandbox.open) -> its surface and edges; then what pasting it
   -- back would place (ghost names and positions) and remove, the lab closed
   sandbox_open = function(index, surface_name, force_name, plan)
-    local st = sandbox.open(index, game.get_surface(surface_name), game.forces[force_name], plan)
-    return { surface = st.surface, area = st.area, feeds = #st.feeds, drains = #st.drains, pipes = #st.pipes }
+    local st = sandbox.open(index, game.get_surface(surface_name), game.forces[force_name],
+      type(plan) == "string" and helpers.json_to_table(plan) or plan)
+    return { surface = st.surface, area = st.area }
   end,
   -- (tests, debugging) where the lab's plan stands: its area, the plan's spot and box, how many entities it has
   sandbox_state = function(index)
@@ -1191,19 +1121,28 @@ remote.add_interface("bpgen", {
     for _, e in pairs(st.plan_ents or {}) do if e.valid then n = n + 1 end end
     for _ in pairs(st.plan_real or {}) do real = real + 1 end
     return { surface = st.surface, area = st.area, at = st.plan and st.plan.at, dir = st.plan and st.plan.dir,
-      plan_box = st.plan_box, plan_ents = n, plan_real = real }
+      plan_box = st.plan_box, plan_ents = n, plan_real = real, feeds = #st.feeds, drains = #st.drains,
+      pipes = #st.pipes, busy = sandbox.busy(index) }
   end,
   sandbox_move = function(index, dx, dy, turn)
     local ok, why = sandbox.move(index, dx, dy, turn)
     return { ok = ok, why = why }
   end,
-  sandbox_paste = function(index)
-    local ghosts, marks, removed = sandbox.paste(sandbox.state(index))
-    sandbox.close(index)
+  -- (over the next ticks, then the lab closed: sandbox_pasted tells what it placed)
+  sandbox_paste = function(index) sandbox.paste(index) end,
+  sandbox_pasted = function()
+    local last = storage.bpgen_sandbox_last or {}
     local g, r = {}, {}
-    for _, e in pairs(ghosts) do if e.valid then g[#g + 1] = { name = e.ghost_name or e.name, position = e.position } end end
-    for _, e in pairs(removed) do r[#r + 1] = { name = e.name, position = e.position } end
-    return { ghosts = g, removed = r, marks = #marks }
+    for _, e in pairs(last.ghosts or {}) do
+      if e.valid then g[#g + 1] = { name = e.ghost_name or e.name, position = e.position } end
+    end
+    for _, e in pairs(last.removed or {}) do if e.valid then r[#r + 1] = { name = e.name, position = e.position } end end
+    return { ghosts = g, removed = r, marks = #(last.marks or {}) }
+  end,
+  -- (tests) the area measured and its snapshot made into a request for Python, as a plan's (sent nowhere)
+  test_request = function(surface_name, area, force_name, flows)
+    local fake = { surface = game.surfaces[surface_name or "nauvis"], force = game.forces[force_name or "player"] }
+    measure(fake, area, "test_request", nil, flows)
   end,
   measure_area = function(surface_name, area, force_name)
     local fake = { surface = game.surfaces[surface_name or "nauvis"], force = game.forces[force_name or "player"] }
@@ -1213,7 +1152,7 @@ remote.add_interface("bpgen", {
 
 for event, handler in pairs(window.handlers) do on_event(event, handler) end
 -- (the sandbox: its edges fed, god mode's instant building; after the others, onto them)
-safe.chain("bpgen", { sandbox.handlers })
+safe.chain("bpgen", { tasks.handlers, build.handlers, sandbox.handlers })
 -- bpgen buttons in Recipe Book's and Factory Planner's windows (with in-game planning: they open the bpgen window)
 on_nth(compat.RESCAN, function()
   if not in_game() then return end

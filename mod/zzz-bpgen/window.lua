@@ -160,7 +160,8 @@ function W.rebuild(player)
   W.open(player, { mode = mode, recipe = recipe, machine = machine and machine.name,
     machine_quality = machine and machine.quality, lines = W.more_lines(frame), rebuilt = true })
   local r = results[player.index]
-  if r and r.blueprint and r.res then W.on_result(player, r.res) end
+  -- (the preview there is the same plan's: kept, not built again)
+  if r and r.blueprint and r.res then W.on_result(player, r.res, true, true) end
 end
 
 -- (tests: a setting changed, as if by the player)
@@ -188,6 +189,7 @@ end
 -- the sandbox's view of this file
 sandbox.setup({
   shown = function(player, on) W.window_shown(player, on) end,
+  making = function(player, on) if on then say(player, T("sandbox-making")) end end,
   card = W.sandbox_card,
   placed = function(player, ghosts, marks, area, removed)
     for _, e in ipairs(removed) do marks[#marks + 1] = e end
@@ -216,7 +218,7 @@ for ev, fn in pairs(web.handlers) do
   W.handlers[ev] = own and function(e) own(e) fn(e) end or fn
 end
 
-local PUBLIC = { "NAME", "TOOLS", "add_patch", "bench_calibrate", "bench_last", "bench_test", "best_machine", "calibrate", "click", "close", "extend_request", "forget_unlocked", "handlers", "history_use", "last_absolute", "measuring", "more_lines", "move", "on_api", "on_connected", "on_cursor", "on_hand", "on_progress", "on_result", "open", "pick", "place_absolute", "place_plan", "placing", "plan", "plan_size", "preview", "rebuild", "rebuild_any", "recipe_cats", "recipe_filters", "refit", "reflow", "restrict", "set_docked", "set_only_unlocked", "setup", "spot", "steps", "test_hover_camera", "test_hover_grip", "test_resize", "tool_card", "tool_done", "touch", "unplace", "upgrade_lane", "view_resized", "warm" }
+local PUBLIC = { "NAME", "TOOLS", "add_patch", "bench_calibrate", "bench_last", "bench_test", "best_machine", "calibrate", "click", "close", "extend_request", "forget_unlocked", "handlers", "history_use", "last_absolute", "last_blueprint", "measuring", "more_lines", "move", "on_api", "on_connected", "on_cursor", "on_hand", "on_progress", "on_result", "open", "pick", "place_absolute", "place_plan", "placing", "plan", "plan_size", "preview", "preview_pending", "preview_result", "preview_stale", "rebuild", "rebuild_any", "recipe_cats", "recipe_filters", "refit", "reflow", "restrict", "set_docked", "set_only_unlocked", "setup", "spot", "steps", "test_hover_camera", "test_hover_grip", "test_resize", "tool_card", "tool_done", "touch", "unplace", "upgrade_lane", "view_resized", "warm" }
 local M = {}
 for _, name in ipairs(PUBLIC) do M[name] = W[name] end
 return M

@@ -36,6 +36,7 @@ CASES = {
     "fit-bus": {"script": T + "fit_bus_test.py"},
     "hand": {"script": T + "hand_test.py"},
     "lines": {"script": T + "lines_test.py"},
+    "layouts": {"script": T + "layouts_test.py"},  # (a line's layouts, the window's layout picker)
     "mall-bus": {"script": T + "mall_bus_test.py"},
     "mall-loop": {"script": T + "mall_loop_test.py"},
     "move": {"script": T + "move_test.py"},
@@ -59,11 +60,14 @@ CASES = {
     "extend-bus": {"script": T + "extend_test.py", "args": ["logistic-science-pack", "30", "8", "bus"], "game": True},
     "sandbox": {"script": T + "sandbox_test.py", "game": True},
     "stutter": {"script": T + "stutter_test.py", "game": True, "own_data": True},  # (through fse: needs it built)
+    # (bpgen's ticks on a dense 400x400 base: every step under 8 ms a tick; pinned to the P-cores while it times)
+    "hitch": {"script": T + "hitch_test.py", "game": True, "own_data": True, "timeout": 1500},
     "addbus-run": {"script": H + "addbus_check.py", "args": ["--run"], "game": True},
     "blue-run": {"script": H + "blue_check.py", "args": ["--run", "--quick"], "game": True},
     "mall-tier-run": {"script": H + "mall_tier_check.py", "args": ["--run"], "game": True},
     "oil-run": {"script": H + "oil_check.py", "args": ["--run"], "game": True},
     "many-items-run": {"script": H + "many_items_check.py", "game": True},  # (7+ item test recipes, a mod of their own)
+    "layouts-run": {"script": H + "layouts_check.py", "game": True},  # (a line's smallest layout, in a game)
     "botmall": {"script": H + "botmall_test.py", "args": ["vanilla", "3"], "game": True},
     "busdesign-run": {"script": H + "busdesign_test.py", "args": ["vanilla", "3"], "game": True},
     "fit-bus-run": {"script": H + "fit_bus_run.py", "game": True, "needs": ["fit-bus"]},

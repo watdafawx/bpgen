@@ -49,6 +49,7 @@ local CAM_MIN_W, CAM_MIN_H, CAM_TIGHT_H = 420, 420, 340
 local bench = require("bench")
 local safe = require("safe")
 local place = require("place")
+local build = require("build")  -- (plans built, ghosts taken away, a few a tick)
 local hand = require("hand")
 local sandbox = require("sandbox")
 
@@ -153,6 +154,7 @@ W.dnd = dnd
 W.bench = bench
 W.safe = safe
 W.place = place
+W.build = build
 W.hand = hand
 W.sandbox = sandbox
 W.ctx = ctx

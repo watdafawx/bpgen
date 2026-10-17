@@ -307,7 +307,7 @@ function W.click_test(player, frame, r)
     test_speed_off(frame)
     W.glow(player, false)
   else
-    W.shown[player.index] = nil  -- (the test run changes the preview: built again next time)
+    W.shown()[player.index] = nil  -- (the test run changes the preview: built again next time)
     bench.test(player.index, r.res.test, r.where.origin, r.where.area, PREVIEW)
     find(frame, "bpgen_test").caption = T("stop-test")
     find(frame, "bpgen_test_status").caption = T("starting-dots")

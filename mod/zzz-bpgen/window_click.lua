@@ -181,7 +181,7 @@ ACTIONS.sandbox = function(player, el, e, frame, r)
     local sec = find(frame, "bpgen_section")
     local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off",
       seed = { x = player.position.x, y = player.position.y },
-      section = sec.visible and sec.items[sec.selected_index] or nil })
+      section = sec.visible and sec.items[sec.selected_index] or nil, layout = W.layout_pick(frame) })
     to_sandbox[player.index] = ok or nil
     status(frame, ok and T("looking-around") or T("cant", tostring(why)))
   else
@@ -266,7 +266,7 @@ ACTIONS.place_base = function(player, el, e, frame, r)
   turns[player.index], tried[player.index] = nil, nil
   local ok, why = ctx.place_base(player, { bus = find(frame, "bpgen_ext_bus").state and "auto" or "off",
     seed = { x = player.position.x, y = player.position.y },
-    section = sec.visible and sec.items[sec.selected_index] or nil })
+    section = sec.visible and sec.items[sec.selected_index] or nil, layout = W.layout_pick(frame) })
   status(frame, ok and T("looking-around") or T("cant", tostring(why)))
 end
 

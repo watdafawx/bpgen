@@ -267,7 +267,8 @@ local function snapshot(player, frame)
   out.only_unlocked = storage.bpgen_state and storage.bpgen_state.only_unlocked
     and storage.bpgen_state.only_unlocked[player.index] == true or false
   for _, n in ipairs({ "bpgen_more", "bpgen_next_box", "bpgen_base_tools", "bpgen_progress", "bpgen_result",
-                       "bpgen_test_box", "bpgen_stale", "bpgen_also_near", "bpgen_section", "bpgen_tiles" }) do
+                       "bpgen_test_box", "bpgen_stale", "bpgen_also_near", "bpgen_section", "bpgen_layout",
+                       "bpgen_tiles" }) do
     local el = named[n]
     out.vis[n] = el ~= nil and el.visible
   end

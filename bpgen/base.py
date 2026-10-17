@@ -609,9 +609,11 @@ def plan_base(service, params, progress=None, cancel=None):
         for layout, with_mall in dict.fromkeys([(want, True)] + ([(want, False)] if want == "bus" and has_mall else [])
                                                + [("compact", True)]):
             info = {}
+            variants = [] if params.get("layouts") else None  # (a Line's layout picker: every layout that routes)
             try:
                 ents, srcs, sinks, desc = routed(service, sections, steps, packs, rate, belt, labs=bool(lp),
-                                                 labs_params=lp, raw=raw, layout=layout, info=info, with_mall=with_mall)
+                                                 labs_params=lp, raw=raw, layout=layout, info=info, with_mall=with_mall,
+                                                 variants=variants)
             except planner.PlanError as e:
                 err = err or e
                 continue
@@ -644,7 +646,8 @@ def plan_base(service, params, progress=None, cancel=None):
                                            "sources": srcs, "sinks": sinks, "blueprint": bp, "description": desc,
                                            "summary": {"mode": "routed", "packs": packs, "rate": rate,
                                                        "layout": layout, "mall": info.get("mall", False),
-                                                       "inputs": [x.get("lanes") or [x.get("fluid") + " (pipe)"] for x in srcs]}}})
+                                                       "inputs": [x.get("lanes") or [x.get("fluid") + " (pipe)"] for x in srcs]},
+                                           "variants": variants}})
             if layout != want:
                 route_note = f"couldn't lay it out as a main bus ({err}); the compact layout instead"
             elif has_mall and want == "bus" and not with_mall:
@@ -748,10 +751,13 @@ def special_section(service, params):
 ROUTED_SECONDS = 45
 
 
-def routed(service, sections, steps, packs, rate, belt, labs=True, labs_params=None, raw=None, layout="compact", info=None, with_mall=True):
+def routed(service, sections, steps, packs, rate, belt, labs=True, labs_params=None, raw=None, layout="compact", info=None, with_mall=True,
+           variants=None):
     """compose the line sections (and the labs) into one blueprint with routed belts.
     labs=False leaves the science outputs as sinks (that is what verification measures).
     layout "bus": one column of blocks beside a main bus, the mall included. info (a dict) gets what was built.
+    variants (a list): every other layout that routes goes into it too ({ents, sources, sinks, desc, settings}),
+    and the one returned is the best of them (layouts.score), not the first that routed.
     -> (entities, sources, sinks, description)"""
     from bpgen import compose_base, labels
 
@@ -828,6 +834,32 @@ def routed(service, sections, steps, packs, rate, belt, labs=True, labs_params=N
             break  # looser slack only if nothing tight routed
     if best is None:
         raise err
-    ents, sources, sinks = best[1]
-    ents, sources, sinks, desc = labels.add_labels(data, ents, sources, sinks, "", 0)
-    return ents, sources, sinks, "\n".join(best[2] + [desc]) if best[2] else desc
+
+    def finish(out, nt):
+        ents, sources, sinks = out
+        ents, sources, sinks, desc = labels.add_labels(data, ents, sources, sinks, "", 0)
+        return ents, sources, sinks, "\n".join(nt + [desc]) if nt else desc
+    if variants is None:
+        return finish(best[1], best[2])
+    # a Line's layout picker: the layout above first, then tighter and other ones within LAYOUT_SECONDS (each that
+    # routes), and the best of them by layouts.score is the one returned
+    from bpgen import layouts
+    variants.append(dict(zip(("ents", "sources", "sinks", "desc"), finish(best[1], best[2])),
+                         settings={"layout": layout, "today": True}))
+    give_up = time.monotonic() + layouts.LAYOUT_SECONDS
+    tries = [dict(bus=False, slack=s_, channel=c, max_col_h=h, order=o) for s_ in (0, 2) for c in (7, 9, 11)
+             for o in ("producers", "reverse") for h in heights
+             if h is None or h >= max(b.height for b in blocks)]
+    tries += [dict(bus=True, slack=s_, channel=11, max_col_h=None, order="producers") for s_ in (0, 2)]
+    for t in tries:
+        if time.monotonic() > give_up:
+            break
+        try:
+            nt = []
+            out = compose_base.compose(data, blocks, belt, raw, row_gap=5 if t["bus"] else 3, notes=nt, **t)
+        except planner.PlanError:
+            continue
+        variants.append(dict(zip(("ents", "sources", "sinks", "desc"), finish(out, nt)),
+                             settings=dict(t, layout="bus" if t["bus"] else "compact")))
+    pick = min(variants, key=lambda v: layouts.score(data, v["ents"]))
+    return pick["ents"], pick["sources"], pick["sinks"], pick["desc"]

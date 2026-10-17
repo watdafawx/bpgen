@@ -1,4 +1,34 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.29.0
+Date: 2026-10-18
+  Changes:
+    - Nothing bpgen does holds the game for more than a few milliseconds a tick: what took a long tick is spread over
+      the next ones, a budget a tick (about 2 ms), while the window says what it's doing. Measured on a 400x400
+      base packed with 72,000 entities (mod/test/hitch_test.py, run.py hitch), worst tick before -> after:
+      reading the base for Place by my base, Extend, a fitted base (400x400) 3.1 s -> 6 ms (100x100: 139 -> 5);
+      the preview of a 2,700-entity line 60-70 ms -> 6; placing it 26 ms -> 4 (over the base: 54 -> 5); Try in
+      sandbox 0.6-1 s each way -> 9 ms; the Move and Refit tools' area (200x200) 450 ms -> 5.
+    - The base is read cell by cell, its records sent to bpgen's Python as they are read (never all in Lua at once),
+      the belts' flows measured cell by cell.
+    - Plans come with their blueprint in pieces of 250 entities (bpgen/pieces.py), built a piece a tick; the wires
+      between pieces are joined after. The preview, Place it, Place by my base, the hand's spot and its links, AI
+      Crew's lines and the sandbox build from them: the same ghosts and wires as the whole print.
+    - The sandbox copies the base in, finds what changed and pastes it back cell by cell.
+    - Undo takes the ghosts away a few hundred a tick.
+    - A plan over 20,000 entities is refused ("too big to build in the game at once").
+---------------------------------------------------------------------------------------------------
+Version: 0.28.4
+Date: 2026-10-17
+  Features:
+    - A line with ingredients made in the blueprint offers its other layouts in a picker under the preview (by
+      direct insertion, on the line's own belts, separate blocks under other spacings, column heights and orders,
+      up to four, with size, tiles, belts and machines). The first is bpgen's pick; the one picked is what To cursor,
+      Copy, Place by my base and the test run take. The web window shows the picker too.
+  Changes:
+    - Lines laid out as separate blocks with routed belts pack tighter: the smallest layout that routes is kept
+      (e.g. plastic with its petroleum made: 486 tiles, was 665; advanced circuits with circuits and cable: 900,
+      was 1121).
+---------------------------------------------------------------------------------------------------
 Version: 0.28.3
 Date: 2026-10-17
   Features:

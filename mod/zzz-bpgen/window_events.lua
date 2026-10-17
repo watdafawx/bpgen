@@ -128,20 +128,13 @@ W.handlers = {
       stdwin.set_scale(player, NAME, c and c / 100 or nil)
       return W.reflow(player)
     end
+    if el and el.valid and el.tags and el.tags.bpgen_layout then
+      -- (another of the line's layouts: in the preview, and what the buttons act on)
+      return W.pick_layout(game.get_player(e.player_index), el.selected_index)
+    end
     if el and el.valid and el.tags and el.tags.bpgen_section then
       -- (another print of the book in the preview)
-      local player = game.get_player(e.player_index)
-      local r = results[player.index]
-      local frame = player.gui.screen[NAME]
-      if r and frame then
-        local center, w, h, where = W.build_preview(player, r.blueprint, nil, el.items[el.selected_index])
-        if center then
-          local cam = find(frame, "bpgen_cam")
-          r.center, r.zoom, r.where, r.w, r.h = center, W.fit(player, w, h), where, w, h
-          cam.position, cam.zoom = center, r.zoom
-        end
-      end
-      return
+      return W.show_section(game.get_player(e.player_index), el.items[el.selected_index])
     end
   end,
   -- (the room the window has changed: the game's UI scale, the screen, the Window size setting)

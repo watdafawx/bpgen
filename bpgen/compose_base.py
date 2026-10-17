@@ -58,11 +58,14 @@ def _rank(block, feeds):
 COMPOSE_SECONDS = 20
 
 
-def compose(data, blocks, belt, raw, slack=4, row_gap=3, max_col_h=None, bus=False, notes=None):
+def compose(data, blocks, belt, raw, slack=4, row_gap=3, max_col_h=None, bus=False, notes=None, channel=11,
+            order="producers"):
     """blocks: [Block]; raw: items brought in from outside. -> (entities, sources, sinks)
     bus: one column of blocks beside a main bus (see bus_layout) instead of columns by recipe depth; notes (a list)
-    gets a line about it"""
+    gets a line about it. channel: the least room between two columns (their splitters and stations need about 7);
+    order "reverse": each column's blocks the other way up (a layout of its own, for the window's layout picker)"""
     deadline = time.monotonic() + COMPOSE_SECONDS
+    flip = order == "reverse"
 
     def in_time():
         if time.monotonic() > deadline:
@@ -173,14 +176,14 @@ def compose(data, blocks, belt, raw, slack=4, row_gap=3, max_col_h=None, bus=Fal
                 ys = [by_id[m].y0 + by_id[m].height / 2 for m in makers_of.get(id(b), ()) if m in placed]
                 return (0, sum(ys) / len(ys), k) if ys else (1, 0, k)
             order = {id(b): k for k, b in enumerate(col)}
-            col.sort(key=lambda b: mean_y(b, order[id(b)]))
+            col.sort(key=lambda b: mean_y(b, order[id(b)]), reverse=flip)
             y = 0
             for b in col:
                 placed.add(id(b))
                 b.x0, b.y0 = x, y
                 y += b.height + row_gap
             k = max(len(feeds.get(id(b), [])) for b in col)
-            x += max(b.width for b in col) + max(2 * k + 3, 11) + slack
+            x += max(b.width for b in col) + max(2 * k + 3, channel) + slack
     else:
         # one column of blocks, every producer above its consumers, the bus on their west:
         # a column per raw input belt (they start at the top) and one per block that feeds others (from its row down)

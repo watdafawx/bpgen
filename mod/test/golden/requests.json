@@ -1183,5 +1183,57 @@
    "fast-inserter"
   ],
   "rate_per_min": 6
+ },
+ "composed-plastic-petroleum": {
+  "machine": "chemical-plant",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "recipe": "plastic-bar",
+  "rate_per_min": 60,
+  "params": {
+   "make": {
+    "petroleum-gas": {
+     "recipe": "basic-oil-processing",
+     "machine": "oil-refinery"
+    }
+   }
+  }
+ },
+ "composed-adv-circuit-cable": {
+  "machine": "assembling-machine-2",
+  "machine_quality": "normal",
+  "modules": [],
+  "recipe_productivity": 0,
+  "belts": [
+   "transport-belt"
+  ],
+  "inserters": [
+   "inserter",
+   "long-handed-inserter",
+   "fast-inserter"
+  ],
+  "recipe": "advanced-circuit",
+  "rate_per_min": 30,
+  "params": {
+   "make": {
+    "copper-cable": {
+     "recipe": "copper-cable",
+     "machine": "assembling-machine-2"
+    },
+    "electronic-circuit": {
+     "recipe": "electronic-circuit",
+     "machine": "assembling-machine-2"
+    }
+   }
+  }
  }
 }

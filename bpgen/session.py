@@ -209,10 +209,11 @@ class Session:
             prints.append({"index": i, **bp})
         book = entlib.book_string(prints, f"bpgen: {len(done)} lines", "\n".join(d[0] for d in done))
         st["sections"] = {label: {"name": label, "last": last} for label, _, last in done}
+        st["layouts"] = None  # (the first line's layouts: not this book's)
         st["last"] = done[0][2]
         head = done[0][1]
         for label, out, _ in done:
             notes += [f"{label}: {x}" for x in out.get("notes") or []]
         return dict(head, blueprint=book, label=f"{len(done)} lines: " + ", ".join(
-            d[0] for d in done), sections=[d[0] for d in done], notes=notes, test=None, absolute=None,
+            d[0] for d in done), sections=[d[0] for d in done], notes=notes, test=None, absolute=None, layouts=None,
             seconds=round(time.perf_counter() - t, 3))

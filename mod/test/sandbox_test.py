@@ -29,7 +29,7 @@ OUT.unlink(missing_ok=True)
 save = RUN / "sandbox-test.zip"
 save.unlink(missing_ok=True)
 common = [str(PATHS["factorio_exe"]), "--config", str(RUN / "config.ini"), "--mod-directory", str(MODS)]
-for args in (["--create", str(save)], ["--benchmark", str(save), "--benchmark-ticks", "2500", "--disable-audio"]):
+for args in (["--create", str(save)], ["--benchmark", str(save), "--benchmark-ticks", "3600", "--disable-audio"]):
     p = subprocess.run(common + args, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if p.returncode or "Error" in p.stdout:
         print("\n".join(l for l in p.stdout.splitlines() if "rror" in l)[-3000:] or p.stdout[-3000:])
