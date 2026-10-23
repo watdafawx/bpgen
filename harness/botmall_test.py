@@ -110,7 +110,7 @@ src = s.mod_dir
 mod = mods / "botmall-test"
 mod.mkdir()
 (mod / "info.json").write_text(json.dumps({"name": "botmall-test", "version": "0.0.1", "title": "botmall test",
-                                           "author": "mtopfox", "factorio_version": "2.0", "dependencies": ["base"]}))
+                                           "author": "mtopfox", "factorio_version": "2.1", "dependencies": ["base"]}))
 (mod / "control.lua").write_text(CONTROL, encoding="utf-8")
 ticks = int(MINUTES * 3600) + 10
 (mod / "spec.lua").write_text("return " + harness.to_lua({"blueprint": r["blueprint"], "ticks": ticks}), encoding="utf-8")

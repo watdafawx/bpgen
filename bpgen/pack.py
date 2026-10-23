@@ -34,7 +34,8 @@ def _stamp():
     versions = sorted(p.name for p in USER_MODS.iterdir() if p.suffix == ".zip")  # updated mods have new zip names
     # (and what bpgen keeps: a type it starts reading is dumped at the next game start)
     # ("headless": copies the game's data stage handed over before 0.24.3 missed some mods' final fixes)
-    return hashlib.sha1(json.dumps([enabled, startup, versions, sorted(KEEP), "headless"], sort_keys=True,
+    # (the game's own version too: base, space-age and the rest ship with the game, not as zips)
+    return hashlib.sha1(json.dumps([enabled, startup, versions, sorted(KEEP), "headless", config.game_version()], sort_keys=True,
                                    default=str).encode()).hexdigest()
 
 

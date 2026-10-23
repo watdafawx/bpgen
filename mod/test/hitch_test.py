@@ -72,7 +72,7 @@ shutil.copytree(HERE.parent / "zzz-bpgen", MODS / "zzz-bpgen")
 shutil.copytree(HERE / "hitch-test", MODS / "hitch-test")
 (MODS / "hitch-test" / "info.json").write_text(json.dumps({
     "name": "hitch-test", "version": "0.0.1", "title": "bpgen hitch test", "author": "mtopfox",
-    "factorio_version": "2.0", "dependencies": ["base", "zzz-bpgen"]}))
+    "factorio_version": "2.1", "dependencies": ["base", "zzz-bpgen"]}))
 lua = ["return {"]
 for k, v in answers.items():
     lua.append(f"  {k} = {json.dumps(v['blueprint'])},")

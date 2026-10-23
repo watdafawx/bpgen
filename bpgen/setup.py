@@ -9,7 +9,7 @@ import subprocess
 
 from bpgen import config
 from bpgen.config import PATHS
-from bpgen.harness import FACTORIO, ROOT, RUN
+from bpgen.harness import FACTORIO, HARNESS, ROOT, RUN
 
 
 def main():
@@ -24,16 +24,22 @@ def main():
         print("wrote", ini)
     (ROOT / "data").mkdir(exist_ok=True)
     dump = ROOT / "data" / "vanilla-dump.json"
-    if not dump.exists():
+    stamp = ROOT / "data" / "vanilla-dump.version"  # (the game version it was dumped from: a game update re-dumps)
+    version = config.game_version()
+    if not dump.exists() or not stamp.exists() or stamp.read_text().strip() != version:
         print("dumping vanilla prototypes (a minute)...")
         out = RUN / "script-output" / "data-raw-dump.json"
         out.unlink(missing_ok=True)
+        test_mod = ROOT / "mods" / "vanilla" / "bpgen-test"  # (the harness's last copy: a stale one can fail to load)
+        if test_mod.exists():
+            shutil.copytree(HARNESS, test_mod, dirs_exist_ok=True)
         subprocess.run([str(FACTORIO), "--config", str(ini), "--mod-directory", str(ROOT / "mods" / "vanilla"),
                         "--dump-data"], capture_output=True, timeout=900, env=config.plain_env())
         if not out.exists():
             raise SystemExit("the dump failed: see run/factorio-current.log")
         shutil.move(out, dump)
-        print("wrote", dump)
+        stamp.write_text(version)
+        print("wrote", dump, "for", version)
     print("ready: python -m bpgen serve")
 
 

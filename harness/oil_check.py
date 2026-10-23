@@ -106,20 +106,21 @@ script.on_event(defines.events.on_tick, function(e)
     for k, v in pairs(by) do out[#out + 1] = "status " .. k .. " " .. v end
     for _, m in pairs(s.find_entities_filtered({ name = { "oil-refinery", "offshore-pump" } })) do
       local fb = {}
-      for i = 1, #m.fluidbox do
-        local f = m.fluidbox[i]
-        fb[#fb + 1] = i .. "=" .. (f and (f.name .. ":" .. math.floor(f.amount)) or "-") .. "/" .. #m.fluidbox.get_connections(i)
+      local nb = m.fluidbox_neighbours
+      for i = 1, m.fluids_count do
+        local f = m.get_fluid(i)
+        fb[#fb + 1] = i .. "=" .. (f and (f.name .. ":" .. math.floor(f.amount)) or "-") .. "/" .. #(nb[i] or {})
       end
       out[#out + 1] = "status fb " .. m.name .. " @" .. m.position.x .. "," .. m.position.y .. " " .. (names[m.status] or "?") .. " " .. table.concat(fb, " ")
     end
     if spec.probe then
       for _, m in pairs(s.find_entities_filtered({ area = { { spec.probe[1] - 2, spec.probe[2] - 3 }, { spec.probe[1] + 3, spec.probe[2] + 6 } }, type = { "pipe", "pipe-to-ground" } })) do
-        local f = m.fluidbox[1]
-        out[#out + 1] = "status probe " .. m.name .. " @" .. m.position.x .. "," .. m.position.y .. " " .. (f and (f.name .. ":" .. math.floor(f.amount)) or "empty") .. " conns " .. #m.fluidbox.get_connections(1)
+        local f = m.get_fluid(1)
+        out[#out + 1] = "status probe " .. m.name .. " @" .. m.position.x .. "," .. m.position.y .. " " .. (f and (f.name .. ":" .. math.floor(f.amount)) or "empty") .. " conns " .. #(m.fluidbox_neighbours[1] or {})
       end
     end
     for _, m in pairs(s.find_entities_filtered({ name = "pumpjack" })) do
-      local conns = m.fluidbox.get_connections(1)
+      local conns = m.fluidbox_neighbours[1] or {}
       out[#out + 1] = "status pj @" .. m.position.x .. "," .. m.position.y .. " " .. (names[m.status] or "?") .. " connections " .. #conns
         .. " pipe at out: " .. tostring(s.find_entities_filtered({ position = { m.position.x + 1, m.position.y - 2 }, type = { "pipe", "pipe-to-ground" } })[1] ~= nil)
     end
@@ -191,7 +192,7 @@ def main():
     mod = mods / "oil-test"
     mod.mkdir(parents=True)
     (mod / "info.json").write_text(json.dumps({"name": "oil-test", "version": "0.0.1", "title": "t", "author": "mtopfox",
-                                               "factorio_version": "2.0", "dependencies": ["base"]}))
+                                               "factorio_version": "2.1", "dependencies": ["base"]}))
     (mod / "control.lua").write_text(CONTROL, encoding="utf-8")
     (mod / "spec.lua").write_text("return " + harness.to_lua(spec), encoding="utf-8")
     (mods / "mod-list.json").write_text(json.dumps({"mods": [{"name": "base", "enabled": True},

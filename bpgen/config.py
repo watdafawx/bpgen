@@ -78,3 +78,11 @@ def load():
 
 
 PATHS = load()
+
+
+def game_version():
+    """the installed game's version (its base mod's info.json): the game's prototypes change with it"""
+    try:
+        return json.loads((PATHS["game_data"] / "base" / "info.json").read_text(encoding="utf-8")).get("version", "")
+    except (OSError, ValueError):
+        return ""

@@ -41,8 +41,16 @@ MAX_REACH = 4  # 7+ belt items: belts out to the farthest calibrated straight in
 
 
 def categories(r):
-    """a recipe's crafting categories: its category and its additional_categories (any one is enough)"""
+    """a recipe's crafting categories (any one is enough): 2.1's `categories`, else 2.0's category and
+    additional_categories"""
+    if r.get("categories"):
+        return list(r["categories"])
     return [r.get("category") or "crafting"] + list(r.get("additional_categories") or [])
+
+
+def is_recycling(r):
+    """a recycling recipe (any of its categories names recycling)"""
+    return any("recycling" in c for c in categories(r))
 
 
 def category_in(r, cats):

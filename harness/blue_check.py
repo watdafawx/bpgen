@@ -83,7 +83,7 @@ def main():
     mod = mods / "blue-test"
     mod.mkdir(parents=True)
     (mod / "info.json").write_text(json.dumps({"name": "blue-test", "version": "0.0.1", "title": "t", "author": "mtopfox",
-                                               "factorio_version": "2.0", "dependencies": ["base"]}))
+                                               "factorio_version": "2.1", "dependencies": ["base"]}))
     (mod / "control.lua").write_text(control.replace("bpgen/oil.txt", "bpgen/blue.txt"), encoding="utf-8")
     (mod / "spec.lua").write_text("return " + harness.to_lua(spec), encoding="utf-8")
     (mods / "mod-list.json").write_text(json.dumps({"mods": [{"name": "base", "enabled": True},

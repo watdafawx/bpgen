@@ -206,7 +206,11 @@ local function needs_of(s)
   if recipe and s.expected then
     local made = 0
     for _, pr in pairs(recipe.products) do
-      if pr.name == s.output then made = (pr.amount or ((pr.amount_min + pr.amount_max) / 2)) * (pr.probability or 1) end
+      if pr.name == s.output then -- (2.1: independent_probability and a shared_probability range)
+        local sp = pr.shared_probability
+        made = (pr.amount or ((pr.amount_min + pr.amount_max) / 2)) * (pr.independent_probability or pr.probability or 1)
+          * (sp and (sp.max - sp.min) or 1)
+      end
     end
     if made > 0 then
       -- (an ingredient made inside the blueprint isn't brought in: what its own recipe takes is, instead)

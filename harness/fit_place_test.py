@@ -82,7 +82,7 @@ def main():
     mod = mods / "fitplace-test"
     mod.mkdir(parents=True)
     (mod / "info.json").write_text(json.dumps({"name": "fitplace-test", "version": "0.0.1", "title": "t",
-                                               "author": "mtopfox", "factorio_version": "2.0", "dependencies": ["base"]}))
+                                               "author": "mtopfox", "factorio_version": "2.1", "dependencies": ["base"]}))
     (mod / "control.lua").write_text(CONTROL, encoding="utf-8")
     (mod / "spec.lua").write_text("return " + harness.to_lua({"cases": cases}), encoding="utf-8")
     (mods / "mod-list.json").write_text(json.dumps({"mods": [{"name": "base", "enabled": True},

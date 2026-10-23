@@ -174,7 +174,7 @@ script.on_event(defines.events.on_tick, function(e)
     if BUS then  -- (the pipe beside the bus: still one pipe through the pipe-to-ground pairs under the branches)
       local ids, n = {}, 0
       for _, e in pairs(s.find_entities_filtered({ area = { { X1, 8 }, { X2 + 1, 9 } }, type = { "pipe", "pipe-to-ground" } })) do
-        local id = e.fluidbox.get_fluid_segment_id(1) or -1
+        local id = e.has_fluid_segment(1) and e.get_fluid_segment_id(1) or -1
         if not ids[id] then ids[id], n = true, n + 1 end
       end
       out("pipe lane fluid segments: " .. n)

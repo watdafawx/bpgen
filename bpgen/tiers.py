@@ -360,7 +360,7 @@ def add_tier(svc, params, progress=None, cancel=None):
     if fitted:  # (what the held base passes on comes in at this one's head: plastic, sulfur... as plates)
         p["bus_items"] = sorted({ln["item"] for ln in fitted["lanes"]})
     recipes = data.raw["recipe"]
-    if not any((recipes.get(e.get("recipe") or "") or {}).get("category") == "smelting" or svc.decorate(e)["type"] == "furnace"
+    if not any("smelting" in planner.categories(recipes.get(e.get("recipe") or "") or {}) or svc.decorate(e)["type"] == "furnace"
                for e in old):
         p["plates"] = True  # (the held base smelts nothing: its plates come in at the bus head, and this part's too)
     out = svc.plan_base(p, progress, cancel)

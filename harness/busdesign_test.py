@@ -164,7 +164,7 @@ def main():
     mod = mods / "busdesign-test"
     mod.mkdir()
     (mod / "info.json").write_text(json.dumps({"name": "busdesign-test", "version": "0.0.1", "title": "bus design test",
-                                               "author": "mtopfox", "factorio_version": "2.0", "dependencies": ["base"]}))
+                                               "author": "mtopfox", "factorio_version": "2.1", "dependencies": ["base"]}))
     (mod / "control.lua").write_text(CONTROL, encoding="utf-8")
     (mod / "spec.lua").write_text("return " + harness.to_lua(spec), encoding="utf-8")
     mod_list = json.loads((src / "mod-list.json").read_text(encoding="utf-8-sig"))

@@ -39,7 +39,9 @@ local function made_by(kind, name)
   end
   local filter = kind == "fluid" and "has-product-fluid" or "has-product-item"
   for n, rp in pairs(prototypes.get_recipe_filtered({ { filter = filter, elem_filters = { { filter = "name", name = name } } } })) do
-    if not rp.hidden and rp.category ~= "recycling" then return n end
+    local recycling = false
+    for _, c in pairs(rp.categories) do if c == "recycling" then recycling = true end end
+    if not rp.hidden and not recycling then return n end
   end
 end
 

@@ -36,8 +36,8 @@ local function report(p, what)
   out(what .. " hub " .. table.concat(c, " "))
   local fl = {}
   for _, t in pairs(p.surface.find_entities_filtered({ type = "thruster" })) do
-    for i = 1, #t.fluidbox do
-      local f = t.fluidbox[i]
+    for i = 1, t.fluids_count do
+      local f = t.get_fluid(i)
       fl[#fl + 1] = (f and f.name or "empty") .. "=" .. (f and math.floor(f.amount) or 0)
     end
   end
@@ -151,7 +151,7 @@ def main():
     mod = mods / "ship-test"
     mod.mkdir(parents=True)
     (mod / "info.json").write_text(json.dumps({"name": "ship-test", "version": "0.0.1", "title": "t", "author": "mtopfox",
-                                               "factorio_version": "2.0", "dependencies": ["base", "space-age"]}))
+                                               "factorio_version": "2.1", "dependencies": ["base", "space-age"]}))
     (mod / "control.lua").write_text(CONTROL, encoding="utf-8")
     (mod / "spec.lua").write_text("return " + harness.to_lua(spec), encoding="utf-8")
     shutil.copytree(ROOT / "mod" / "zzz-bpgen", mods / "zzz-bpgen")  # (wires the hub's inserters as they're built)

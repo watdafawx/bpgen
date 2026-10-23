@@ -19,17 +19,22 @@
     },
     
     {
+      "name": "recycler",
+      "enabled": true
+    },
+    
+    {
       "name": "space-age",
       "enabled": true
     },
     
     {
-      "name": "zzz-bpgen",
+      "name": "bpgen-test",
       "enabled": true
     },
     
     {
-      "name": "bpgen-test",
+      "name": "zzz-bpgen",
       "enabled": true
     }
   ]

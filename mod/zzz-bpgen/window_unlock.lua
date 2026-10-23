@@ -35,8 +35,11 @@ local function facts(name)
   if not f then
     local p = prototypes.recipe[name]
     local first = p.products[1]
-    f = { product = first and (first.type .. "/" .. first.name), category = p.category, subgroup = p.subgroup.name,
-          energy = p.energy, hidden = p.hidden }
+    -- (2.1: a list of categories; `category` is the first, the one the filters below use)
+    f = { product = first and (first.type .. "/" .. first.name), cats = p.categories, category = p.categories[1],
+          subgroup = p.subgroup.name, energy = p.energy, hidden = p.hidden }
+    f.recycling = false
+    for _, c in pairs(f.cats) do if c == "recycling" then f.recycling = true end end
     f.sig = table.concat({ f.category, f.subgroup, f.energy }, "|")
     facts_of[name] = f
   end
@@ -62,7 +65,7 @@ local function force_pass(force)
   for name, r in pairs(force.recipes) do
     local on = r.enabled
     enabled[name] = on
-    if on and not r.hidden and r.category ~= "recycling" then
+    if on and not r.hidden and not facts(name).recycling then
       local _, outs = sets(name)
       for k in pairs(outs) do
         local t, item = k:match("^(%a+)/(.+)$")
@@ -102,13 +105,12 @@ local function powerless(p)
   return ok and v ~= nil
 end
 
--- a recipe's crafting categories: its category and its additional_categories (a machine with any one makes it)
+-- a recipe's crafting categories (a machine with any one makes it)
 local function recipe_cats(recipe)
   local rp = recipe and prototypes.recipe[recipe]
   if not rp then return {} end
-  local out = { rp.category }
-  local ok, more = pcall(function() return rp.additional_categories end)
-  for _, c in pairs(ok and more or {}) do out[#out + 1] = c end
+  local out = {}
+  for _, c in pairs(rp.categories) do out[#out + 1] = c end
   return out
 end
 W.recipe_cats = recipe_cats
@@ -203,13 +205,15 @@ local function recipe_filters(force)
   local taken = {}  -- category -> {"item/x" = true}
   for name, on in pairs(enabled) do
     local f = not on and facts(name)
-    local mine = f and not f.hidden and listed[f.category]
-    if mine then
-      local _, outs = sets(name)
-      for k in pairs(outs) do
-        if mine[k] then
-          taken[f.category] = taken[f.category] or {}
-          taken[f.category][k] = true
+    for _, c in ipairs(f and not f.hidden and f.cats or {}) do -- (the "category" filter matches any of a recipe's)
+      local mine = listed[c]
+      if mine then
+        local _, outs = sets(name)
+        for k in pairs(outs) do
+          if mine[k] then
+            taken[c] = taken[c] or {}
+            taken[c][k] = true
+          end
         end
       end
     end
@@ -242,7 +246,14 @@ local function recipe_filters(force)
   -- processing makes petroleum gas too), each kept out by one more clause in the groups it slips into
   for name, on in pairs(enabled) do
     local f = not on and facts(name)
-    local list = f and not f.hidden and by_sig[f.sig]
+    local list
+    for _, c in ipairs(f and not f.hidden and f.cats or {}) do
+      local l = by_sig[table.concat({ c, f.subgroup, f.energy }, "|")]
+      if l then
+        list = list or {}
+        for _, g in ipairs(l) do list[#list + 1] = g end
+      end
+    end
     if list then
       local li, lp = sets(name)
       local through = false

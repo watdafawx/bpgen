@@ -8,6 +8,7 @@ import math
 from collections import Counter
 
 from bpgen import ents as entlib
+from bpgen.rates import probability
 
 
 def decode(bp_string):
@@ -56,7 +57,7 @@ def analyze(data, bp_string):
                    for cx, cy in chests):
                 mall_made.update(res["name"] for res in r.get("results") or [])
             for res in r.get("results") or []:
-                prod[res["name"]] += crafts * (res.get("amount") or res.get("amount_max", 1)) * res.get("probability", 1)
+                prod[res["name"]] += crafts * (res.get("amount") or res.get("amount_max", 1)) * probability(res)
             for ing in r.get("ingredients") or []:
                 cons[ing["name"]] += crafts * ing.get("amount", 1)
     xs = [e["position"]["x"] for e in ents]

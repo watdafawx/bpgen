@@ -14,7 +14,7 @@ import threading
 import time
 from pathlib import Path
 
-from bpgen import calibrate, chain, direct, geom, harness, labels, mall, pack, planner
+from bpgen import calibrate, chain, direct, geom, harness, labels, mall, pack, planner, rates
 from bpgen import ents as entlib
 from bpgen.data import Data
 from bpgen.effects import MACHINE_MODULES, Modules, quality_level
@@ -880,13 +880,12 @@ class Service:
             if sub not in subgroups:
                 sub = "other"
                 subgroups.setdefault("other", {"group": "other", "order": "z"})
-            cat = r.get("category", "crafting")
             recipes[n] = {
                 "sub": sub, "order": r.get("order") or prod.get("order") or "", "mod": self.mod_of("recipe/" + n),
-                "recycling": "recycling" in cat or n.endswith("-recycling"), "time": r.get("energy_required", 0.5),
+                "recycling": planner.is_recycling(r) or n.endswith("-recycling"), "time": r.get("energy_required", 0.5),
                 "in": [[i.get("type", "item"), i["name"], i.get("amount", 1)] for i in r.get("ingredients") or []],
                 "out": [[x.get("type", "item"), x["name"], x.get("amount", (x.get("amount_min", 0) + x.get("amount_max", 0)) / 2),
-                         x.get("probability", 1)] for x in res],
+                         rates.probability(x)] for x in res],
             }
         by_prefix = {}
         vanilla = self._vanilla_recipes()
@@ -935,7 +934,7 @@ class Service:
         main = {x.get("name") for x in r.get("results") or []}
         out = []
         for rn, rr in recipes.items():
-            if rn == params.get("recipe") or rr.get("hidden") or "recycling" in rr.get("category", "") \
+            if rn == params.get("recipe") or rr.get("hidden") or planner.is_recycling(rr) \
                     or not planner.in_cats(rr, cats):
                 continue
             res = rr.get("results") or []
@@ -1001,8 +1000,7 @@ class Service:
         opts = []
         for rn, r in recipes.items():
             res = r.get("results") or []
-            cat = r.get("category", "crafting")
-            if r.get("hidden") or "recycling" in cat or not planner.in_cats(r, machines_for):
+            if r.get("hidden") or planner.is_recycling(r) or not planner.in_cats(r, machines_for):
                 continue
             if not any(o["name"] == fluid for o in res):
                 continue
@@ -1374,7 +1372,7 @@ class Service:
         """every item or fluid some (non-recycling, visible) recipe makes, sorted"""
         out = set()
         for r in self.data.raw["recipe"].values():
-            if r.get("hidden") or "recycling" in r.get("category", ""):
+            if r.get("hidden") or planner.is_recycling(r):
                 continue
             for res in r.get("results") or []:
                 out.add(res["name"])
@@ -1497,7 +1495,7 @@ class Service:
         makers = {}  # item -> the recipe to plan it with: the one named after it, else the first making only it
         for rn, r in sorted(recipes.items()):
             res = r.get("results") or []
-            if not r.get("hidden") and len(res) == 1 and "recycling" not in r.get("category", ""):
+            if not r.get("hidden") and len(res) == 1 and not planner.is_recycling(r):
                 if res[0]["name"] not in makers or rn == res[0]["name"]:
                     makers[res[0]["name"]] = rn
         rows = []

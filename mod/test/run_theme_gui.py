@@ -48,7 +48,7 @@ if not PLAIN:
 shutil.copytree(HERE / "theme-guitest", MODS / "theme-guitest")
 (MODS / "theme-guitest" / "info.json").write_text(json.dumps({
     "name": "theme-guitest", "version": "0.0.1", "title": "bpgen theme test", "author": "mtopfox",
-    "factorio_version": "2.0", "dependencies": ["base", "zzz-bpgen", "? fse-std"]}))
+    "factorio_version": "2.1", "dependencies": ["base", "zzz-bpgen", "? fse-std"]}))
 names = ["base", "elevated-rails", "quality", "space-age", "zzz-bpgen", "theme-guitest"] + ([] if PLAIN else ["fse-std"])
 (MODS / "mod-list.json").write_text(json.dumps({"mods": [{"name": n, "enabled": True} for n in names]}))
 OUT.mkdir(exist_ok=True)

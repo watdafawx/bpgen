@@ -265,7 +265,7 @@ local function edges_in(st, cell)
         local into, out = false, false
         for _, x in pairs(n.inputs) do into = into or outside(x) end
         for _, x in pairs(n.outputs) do out = out or outside(x) end
-        if r.type == "underground-belt" and outside(r.neighbours) then
+        if r.type == "underground-belt" and outside(r.underground_belt_neighbour) then
           if r.belt_to_ground_type == "output" then into = true else out = true end
         end
         if into then st.feeds[#st.feeds + 1] = { real = r, lab = l, seen = ids(r) } end
@@ -278,9 +278,9 @@ local function edges_in(st, cell)
       used = used + U_EDGE
       local r = real.find_entities_filtered({ position = l.position, name = l.name, limit = 1 })[1]
       if r and inside(a, l.position) then
-        for i = 1, #r.fluidbox do
-          for _, c in pairs(r.fluidbox.get_connections(i)) do
-            if outside(c.owner) then st.pipes[#st.pipes + 1] = { real = r, lab = l, i = i } break end
+        for i, list in pairs(r.fluidbox_neighbours) do
+          for _, o in pairs(list) do
+            if outside(o) then st.pipes[#st.pipes + 1] = { real = r, lab = l, i = i } break end
           end
         end
       end
@@ -306,7 +306,7 @@ function M.power(st)
       if e then
         e.power_production = 1e12 / 60
         e.electric_buffer_size = 1e12
-        e.destructible, e.minable = false, false
+        e.destructible, e.minable_flag = false, false
       end
     end
   end
@@ -351,8 +351,8 @@ local function feed(st)
   end
   for _, p in pairs(st.pipes) do
     if p.real.valid and p.lab.valid then
-      local fl = p.real.fluidbox[p.i]
-      if fl then p.lab.fluidbox[p.i] = fl end
+      local fl = p.real.get_fluid(p.i)
+      if fl then p.lab.set_fluid(p.i, fl) end
     end
   end
 end

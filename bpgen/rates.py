@@ -67,10 +67,20 @@ class InserterChoice:
 
 # --- recipe numbers -----------------------------------------------------------------------------------------------
 
+def probability(entry):
+    """the share of crafts that give a product: 2.1's independent_probability times its shared_probability range
+    (2.0: probability)"""
+    p = entry.get("independent_probability", entry.get("probability", 1))
+    shared = entry.get("shared_probability")
+    if shared:
+        p *= shared.get("max", 1) - shared.get("min", 0)
+    return p
+
+
 def _amount(entry):
     if "amount" in entry:
-        return entry["amount"] * entry.get("probability", 1)
-    return (entry.get("amount_min", 0) + entry.get("amount_max", 0)) / 2 * entry.get("probability", 1)
+        return entry["amount"] * probability(entry)
+    return (entry.get("amount_min", 0) + entry.get("amount_max", 0)) / 2 * probability(entry)
 
 
 def _yield(entry, productivity):
@@ -129,7 +139,7 @@ def fuel_for(data, energy_source, fuel=None):
                    key=lambda n: -energy(items[n]["fuel_value"]))
     for name in ([fuel] if fuel else []) + mined + sorted(items):
         it = items.get(name)
-        if it and it.get("fuel_value") and it.get("fuel_category", "chemical") in cats:
+        if it and it.get("fuel_value") and cats & set(it.get("fuel_categories") or [it.get("fuel_category", "chemical")]):
             return name, energy(it["fuel_value"])
     raise PlanError("no fuel item found for this burner")
 

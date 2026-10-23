@@ -26,7 +26,7 @@ import math
 
 from bpgen import geom
 from bpgen.ents import adder
-from bpgen.planner import EAST, NORTH, SOUTH, WEST, PIPE, POLE, UNDERGROUND, PlanError, can_craft
+from bpgen.planner import EAST, NORTH, SOUTH, WEST, PIPE, POLE, UNDERGROUND, PlanError, can_craft, categories
 
 HUB_CAPS = {"chunk": 4, "ore": 400, "carbon": 200, "ice": 200, "plate": 200, "ammo": 200}
 PITCH = 7  # thrusters: 4 wide, their pipes either side and a tile between
@@ -36,7 +36,7 @@ def _recipe_for(data, product, category=None, ingredient=None):
     """the recipe making `product` (in `category`, from `ingredient` when given): the one named like it first"""
     best = None
     for rn, r in data.raw["recipe"].items():
-        if r.get("hidden") or (category and r.get("category", "crafting") != category):
+        if r.get("hidden") or (category and category not in categories(r)):
             continue
         if not any(x.get("name") == product for x in r.get("results") or []):
             continue

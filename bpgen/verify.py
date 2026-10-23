@@ -60,7 +60,7 @@ DEFAULT_CASES = [
     # fluid out; items in, a fluid out (foundry); fluids only; two fluids and an item in a 5x5
     ("casting-iron", "foundry", "transport-belt"),
     ("sulfuric-acid", "chemical-plant", "transport-belt"),
-    ("molten-iron", "foundry", "transport-belt"),
+    ("iron-ore-melting", "foundry", "transport-belt"),
     ("heavy-oil-cracking", "chemical-plant", "transport-belt"),
     ("lithium", "cryogenic-plant", "transport-belt", {"rate": 300}),  # (5/s: a full belt of it is 32 plants)
     # a fluid that opens only on the machine's west or east edge: a pipe down a gap beside each machine (0.28.1)

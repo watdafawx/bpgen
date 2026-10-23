@@ -1078,7 +1078,7 @@
   ]
  },
  "shape-molten-iron-foundry": {
-  "recipe": "molten-iron",
+  "recipe": "iron-ore-melting",
   "machine": "foundry",
   "machine_quality": "normal",
   "modules": [],

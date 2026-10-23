@@ -34,7 +34,7 @@ def run_game(spec=None):
     shutil.copytree(HERE / "comp-test", MODS / "comp-test")
     (MODS / "comp-test" / "info.json").write_text(json.dumps({
         "name": "comp-test", "version": "0.0.1", "title": "bpgen mod test", "author": "mtopfox",
-        "factorio_version": "2.0", "dependencies": ["base", "zzz-bpgen"]}))
+        "factorio_version": "2.1", "dependencies": ["base", "zzz-bpgen"]}))
     (MODS / "comp-test" / "layout.lua").write_text(f'return "{"bus" if BUS else "lines"}"', encoding="utf-8")
     if spec:
         (MODS / "comp-test" / "spec.lua").write_text("return " + harness.to_lua(spec), encoding="utf-8")

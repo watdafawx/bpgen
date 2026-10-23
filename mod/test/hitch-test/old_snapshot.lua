@@ -28,10 +28,13 @@ local PIPES = { pipe = true, ["pipe-to-ground"] = true, ["storage-tank"] = true,
 
 --- the fluid in a pipe-like entity, or the one its network is locked to while it is empty
 local function pipe_fluid(ent)
-  local f = ent.fluidbox[1]
+  local f = ent.get_fluid(1)
   if f then return f.name end
-  local ok, locked = pcall(ent.fluidbox.get_locked_fluid, 1)
-  return ok and locked or nil
+  local ok, sf = pcall(ent.get_fluid_segment_fluid, 1) -- (2.1: no LuaFluidBox)
+  if ok and sf then return sf.name end
+  local ok2, flt = pcall(ent.get_fluid_segment_filter, 1)
+  if ok2 and flt then return type(flt) == "string" and flt or flt.name end
+  return nil
 end
 
 --- tiles -> {y: [[x1, x2], ...]} runs (much smaller than one entry per tile)

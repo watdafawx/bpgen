@@ -1,6 +1,6 @@
 # bpgen
 
-A blueprint planner for Factorio 2.0. Pick a recipe and a rate; bpgen lays out a full-belt production line (or a
+A blueprint planner for Factorio 2.1. Pick a recipe and a rate; bpgen lays out a full-belt production line (or a
 mall, or a whole starter base) for your mods, your research and your machines, and proves it works by running it in
 the game.
 

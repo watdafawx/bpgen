@@ -21,8 +21,8 @@ REACH3 = "bpgen-test-three-long-inserter"
 
 
 def recipe(name):
-    # ("electronics": assembling machines 2 and 3, 3x3, and the electromagnetic plant, 4x4)
-    return {"type": "recipe", "name": name, "category": "electronics", "energy_required": 2, "enabled": True,
+    # (assembling machines 2 and 3, 3x3, and the electromagnetic plant, 4x4)
+    return {"type": "recipe", "name": name, "categories": ["crafting-with-fluid", "electromagnetics"], "energy_required": 2, "enabled": True,
             "ingredients": [{"type": "item", "name": i, "amount": a} for i, a in RECIPES[name]],
             "results": [{"type": "item", "name": name, "amount": 1}]}
 
@@ -79,7 +79,7 @@ def write_mod(folder):
     d = Path(folder) / MOD
     d.mkdir(parents=True, exist_ok=True)
     (d / "info.json").write_text(json.dumps({"name": MOD, "version": "0.1.0", "title": "bpgen test recipes",
-                                             "author": "bpgen", "factorio_version": "2.0",
+                                             "author": "bpgen", "factorio_version": "2.1",
                                              "dependencies": ["base"]}, indent=1), encoding="utf-8")
     protos = [item(n) for n in RECIPES] + [recipe(n) for n in RECIPES]
     (d / "data.lua").write_text("data:extend({\n" + ",\n".join("  " + _lua(p) for p in protos) + "\n})\n",

@@ -5,6 +5,8 @@ fed from the player's bus, rebuilt in a refit area or placed next to the base, a
 notes and the test run's spec."""
 import math
 
+from bpgen.rates import probability
+
 
 def test_spec(out, params):
     s = out["summary"]
@@ -35,7 +37,7 @@ def line_needs(data, sm):
     r = data.raw["recipe"].get(sm.get("recipe") or "")
     if not r or not sm.get("expected"):
         return None
-    made = sum(p.get("amount", (p.get("amount_min", 0) + p.get("amount_max", 0)) / 2) * p.get("probability", 1)
+    made = sum(p.get("amount", (p.get("amount_min", 0) + p.get("amount_max", 0)) / 2) * probability(p)
                for p in r.get("results") or [] if p.get("name") == sm.get("output"))
     if not made:
         return None

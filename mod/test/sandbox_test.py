@@ -22,7 +22,7 @@ shutil.copytree(HERE.parent / "zzz-bpgen", MODS / "zzz-bpgen")
 shutil.copytree(HERE / "sandbox-test", MODS / "sandbox-test")
 (MODS / "sandbox-test" / "info.json").write_text(json.dumps({
     "name": "sandbox-test", "version": "0.0.1", "title": "bpgen sandbox test", "author": "mtopfox",
-    "factorio_version": "2.0", "dependencies": ["base", "zzz-bpgen"]}))
+    "factorio_version": "2.1", "dependencies": ["base", "zzz-bpgen"]}))
 names = ["base", "elevated-rails", "quality", "space-age", "zzz-bpgen", "sandbox-test"]
 (MODS / "mod-list.json").write_text(json.dumps({"mods": [{"name": n, "enabled": True} for n in names]}))
 OUT.unlink(missing_ok=True)

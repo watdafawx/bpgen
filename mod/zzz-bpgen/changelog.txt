@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.30.0
+Date: 2026-10-24
+  Changes:
+    - Factorio 2.1: recipes with several crafting categories, product chances (shared and independent), fluids read
+      the new way, underground belt neighbours; the planner's prototype dump is made again when the game version
+      changes.
+---------------------------------------------------------------------------------------------------
 Version: 0.29.0
 Date: 2026-10-18
   Changes:

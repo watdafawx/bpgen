@@ -8,6 +8,13 @@ local spec = require("spec")
 local cell = spec.cell or {}
 local CELL_W, CELL_H, COLS = cell.w or 200, cell.h or 64, cell.cols or 10
 
+local function fname(f) return f and (type(f) == "string" and f or f.name) end -- (2.1: a FluidID)
+local function box_proto(ent, i) -- (2.1: merged boxes give a list)
+  local p = ent.get_fluid_box_prototype(i)
+  if p and p.object_name == nil then p = p[1] end
+  return p
+end
+
 local function cell_origin(index)
   return { x = ((index - 1) % COLS) * CELL_W, y = math.floor((index - 1) / COLS) * CELL_H }
 end
@@ -213,10 +220,10 @@ local function build_case(surface, case, index)
   -- some of its own output (coal liquefaction's heavy oil) and needs a kickstart, as a player gives it by hand
   for fluid, amount in pairs(case.prime or {}) do
     for _, ent in pairs(surface.find_entities_filtered({ type = { "assembling-machine", "furnace" }, force = force })) do
-      for i = 1, #ent.fluidbox do
-        local f = ent.fluidbox.get_filter(i)
-        if f and f.name == fluid and ent.fluidbox.get_prototype(i).production_type == "input" then
-          ent.fluidbox[i] = { name = fluid, amount = amount }
+      for i = 1, ent.fluids_count do
+        local p = box_proto(ent, i)
+        if fname(ent.get_fluid_filter(i)) == fluid and p and p.production_type == "input" then
+          ent.set_fluid(i, { name = fluid, amount = amount })
         end
       end
     end
@@ -413,7 +420,7 @@ script.on_event(defines.events.on_tick, function(e)
             local r = ent.get_recipe() or ent.previous_recipe
             local name = r and (r.name and (type(r.name) == "string" and r.name or r.name.name))
             if not name then
-              for _, inv in pairs({ defines.inventory.furnace_result, defines.inventory.furnace_source }) do
+              for _, inv in pairs({ defines.inventory.crafter_output, defines.inventory.crafter_input }) do
                 local c = ent.get_inventory(inv) and ent.get_inventory(inv).get_contents()[1]
                 if c then name = "holds " .. c.name break end
               end
@@ -442,7 +449,7 @@ script.on_event(defines.events.on_tick, function(e)
         for _, ent in ipairs(st.watch or {}) do
           if ent.valid and ent.type == "assembling-machine" and ent.get_recipe()
               and ent.status == defines.entity_status.item_ingredient_shortage then
-            local inv = ent.get_inventory(defines.inventory.assembling_machine_input)
+            local inv = ent.get_inventory(defines.inventory.crafter_input)
             local have = {}
             for _, c in pairs(inv and inv.get_contents() or {}) do have[c.name] = c.count end
             starved[#starved + 1] = { recipe = ent.get_recipe().name, x = ent.position.x - st.origin.x,
@@ -483,11 +490,11 @@ script.on_event(defines.events.on_tick, function(e)
       if spec.fluid_report then
         for _, ent in pairs(storage.surface.find_entities_filtered({ area = cell_area(_), type = { "assembling-machine", "furnace" } })) do
           local boxes = {}
-          for i = 1, #ent.fluidbox do
-            local f = ent.fluidbox[i]
+          for i = 1, ent.fluids_count do
+            local f = ent.get_fluid(i)
+            local seg = ent.has_fluid_segment(i) and ent.get_fluid_segment_id(i) or nil
             boxes[#boxes + 1] = { index = i, fluid = f and f.name, amount = f and math.floor(f.amount),
-                                  filter = ent.fluidbox.get_filter(i) and ent.fluidbox.get_filter(i).name,
-                                  segment = ent.fluidbox.get_fluid_segment_id(i) }
+                                  filter = fname(ent.get_fluid_filter(i)), segment = seg }
           end
           fluids[#fluids + 1] = { recipe = ent.get_recipe() and ent.get_recipe().name, x = ent.position.x - st.origin.x,
                                   y = ent.position.y - st.origin.y, boxes = boxes }

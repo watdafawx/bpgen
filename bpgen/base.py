@@ -134,7 +134,7 @@ def plate_items(data, raw):
     out = set()
     for r in data.raw["recipe"].values():
         ing, res = r.get("ingredients") or [], r.get("results") or []
-        if (r.get("category", "crafting") == "smelting" and not r.get("hidden") and len(ing) == 1
+        if ("smelting" in planner.categories(r) and not r.get("hidden") and len(ing) == 1
                 and ing[0].get("name") in raw and len(res) == 1 and res[0].get("type", "item") == "item"):
             out.add(res[0]["name"])
     return out
@@ -233,8 +233,8 @@ def pick_recipe(data, item, machine_for, raw, avoid=()):
     never one needing `avoid` (what it is being made for: no loops)"""
     best = None
     for rn, r in _makers(data).get(item, ()):
-        cat = r.get("category", "crafting")
-        if cat not in machine_for or any(s in cat for s in SKIP_CATEGORIES):
+        cats = planner.categories(r)
+        if not planner.in_cats(r, machine_for) or any(s in c for c in cats for s in SKIP_CATEGORIES):
             continue
         ings = [i["name"] for i in r.get("ingredients", [])]
         if any(i in avoid or i == item for i in ings):
@@ -515,7 +515,7 @@ def plan_base(service, params, progress=None, cancel=None):
         # intermediates get headroom: with supply exactly at demand the belts and buffers between them take hours
         # to fill, and the last branch of a splitter chain starves meanwhile
         head = 1 if item in targets else INTERMEDIATE_HEADROOM
-        if st.recipe and item not in targets                 and (data.raw["recipe"].get(st.recipe) or {}).get("category", "crafting") == "smelting":
+        if st.recipe and item not in targets                 and "smelting" in planner.categories(data.raw["recipe"].get(st.recipe) or {}):
             head = SMELTING_HEADROOM
         p = dict(common, recipe=st.recipe, machine=st.machine, belt=belt, rate_per_min=st.rate * 60 * head)
         res = None

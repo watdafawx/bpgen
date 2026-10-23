@@ -131,7 +131,7 @@ script.on_event(defines.events.on_tick, function(e)
     end
     local held, cols = {}, {}  -- (items in machines' inputs; gears by belt column)
     for _, m in pairs(s.find_entities_filtered({ type = "assembling-machine" })) do
-      for _, it in pairs(m.get_inventory(defines.inventory.assembling_machine_input).get_contents()) do
+      for _, it in pairs(m.get_inventory(defines.inventory.crafter_input).get_contents()) do
         held[it.name] = (held[it.name] or 0) + it.count
       end
     end
@@ -171,7 +171,7 @@ script.on_event(defines.events.on_tick, function(e)
     for _, m in pairs(s.find_entities_filtered({ type = "assembling-machine" })) do
       if m.status == defines.entity_status.item_ingredient_shortage or m.status == defines.entity_status.full_output then
         local have = {}
-        for _, it in pairs(m.get_inventory(defines.inventory.assembling_machine_input).get_contents()) do have[#have + 1] = it.name .. "=" .. it.count end
+        for _, it in pairs(m.get_inventory(defines.inventory.crafter_input).get_contents()) do have[#have + 1] = it.name .. "=" .. it.count end
         out[#out + 1] = "status detail " .. m.get_recipe().name .. " @" .. m.position.x .. "," .. m.position.y .. " " .. (names[m.status] or "?") .. " has " .. table.concat(have, " ")
       end
     end
@@ -233,7 +233,7 @@ def main():
     mod = mods / "gridmall-test"
     mod.mkdir(parents=True)
     (mod / "info.json").write_text(json.dumps({"name": "gridmall-test", "version": "0.0.1", "title": "t",
-                                               "author": "mtopfox", "factorio_version": "2.0", "dependencies": ["base"]}))
+                                               "author": "mtopfox", "factorio_version": "2.1", "dependencies": ["base"]}))
     (mod / "control.lua").write_text(CONTROL, encoding="utf-8")
     (mod / "spec.lua").write_text("return " + harness.to_lua(spec), encoding="utf-8")
     (mods / "mod-list.json").write_text(json.dumps({"mods": [{"name": n, "enabled": True}

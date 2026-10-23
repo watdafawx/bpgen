@@ -42,7 +42,7 @@ def run_game(case, spec=None):
     shutil.copytree(HERE / "base-test", mods / "base-test")
     (mods / "base-test" / "info.json").write_text(json.dumps({
         "name": "base-test", "version": "0.0.1", "title": "bpgen base test", "author": "mtopfox",
-        "factorio_version": "2.0", "dependencies": ["base", "zzz-bpgen"]}))
+        "factorio_version": "2.1", "dependencies": ["base", "zzz-bpgen"]}))
     (mods / "base-test" / "case.lua").write_text(f'return "{case}"', encoding="utf-8")
     if spec:
         (mods / "base-test" / "spec.lua").write_text("return " + harness.to_lua(spec), encoding="utf-8")

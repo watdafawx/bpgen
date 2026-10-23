@@ -14,11 +14,16 @@ local function on_nth(n, fn) script.on_nth_tick(n, safe.guard("bpgen", fn)) end
 
 -- items some enabled recipe makes: one pass over the force's recipes (searching per item was far too slow with
 -- big packs - tens of thousands of recipes times every placeable entity - and froze the game)
+local function is_recycling(r) -- (2.1: recipes have a list of categories)
+  for _, c in pairs(r.categories) do if c == "recycling" then return true end end
+  return false
+end
+
 local function craftable(force)
   local out = {}
   for _, r in pairs(force.recipes) do
     -- recycling (always enabled in Space Age) turns better items back into lesser ones; it isn't a way to make them
-    if r.enabled and not r.hidden and r.category ~= "recycling" then
+    if r.enabled and not r.hidden and not is_recycling(r) then
       for _, p in pairs(r.products) do
         if p.type == "item" then out[p.name] = true end
       end
@@ -643,7 +648,7 @@ local function get_static()
   if static then return static end
   static = { products = {}, placeable = {}, techs = {}, modules = {}, stockable = {} }
   for name, r in pairs(prototypes.recipe) do
-    if not r.hidden and r.category ~= "recycling" then
+    if not r.hidden and not is_recycling(r) then
       local items = {}
       for _, p in pairs(r.products) do
         if p.type == "item" then items[#items + 1] = p.name end
